@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, UserPlus } from "lucide-react";
+import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag } from "lucide-react";
+import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -15,12 +16,6 @@ export function Layout() {
   const { theme, walletConnected, walletAddress, connectWallet, disconnectWallet, isConnectingWallet } = useAppSettings();
   const { isLoggedIn, user, logout } = useAuth();
 
-  useEffect(() => {
-    const onboarded = localStorage.getItem("onboarded");
-    if (!onboarded) {
-      navigate("/onboarding", { replace: true });
-    }
-  }, [navigate]);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -72,6 +67,7 @@ export function Layout() {
   const navItems = [
     { path: "/tickets", label: "경기 예매", icon: Ticket },
     { path: "/my-tickets", label: "내 입장권", icon: Ticket },
+    { path: "/ticket-resale", label: "티켓 양도", icon: Tag },
     { path: "/combine", label: "카드 조합", icon: Layers },
     { path: "/market", label: "팬 자산 장터", icon: ShoppingBag },
     { path: "/community", label: "커뮤니티", icon: MessagesSquare },
@@ -120,7 +116,7 @@ export function Layout() {
             <div className="leading-tight">
               <p className="retro-title text-[0.9rem] font-bold tracking-[0.08em]"
                 style={{ display: "inline-block", background: titleGradient, backgroundSize: "100% 100%", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                BASE NINE
+                BASE CHAIN
               </p>
               <p className="text-[0.66rem] tracking-[0.16em] uppercase" style={{ color: theme === "dark" ? "#8fa1b3" : "#778396" }}>Baseball Ticketing</p>
             </div>
@@ -154,108 +150,84 @@ export function Layout() {
 
           {/* Right side */}
           <div className="flex items-center gap-3 shrink-0">
-            {/* Wallet */}
-            <button
-              onClick={async () => {
-                if (walletConnected) {
-                  navigate("/mypage");
-                  return;
-                }
-                const connected = await connectWallet();
-                if (!connected) navigate("/mypage");
-              }}
-              className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-xl text-[0.88rem] font-semibold transition-all duration-200 hover:scale-105"
-              style={{
-                background: walletConnected
-                  ? theme === "dark" ? "rgba(108, 144, 116, 0.16)" : "rgba(108,144,116,0.10)"
-                  : theme === "dark" ? "rgba(90,116,146,0.18)" : "rgba(90,116,146,0.08)",
-                border: walletConnected
-                  ? "1px solid rgba(108,144,116,0.22)"
-                  : "1px solid rgba(90,116,146,0.16)",
-                color: walletConnected ? "#6c9074" : "#49647f",
-                boxShadow: theme === "dark" ? "0 6px 14px rgba(0, 0, 0, 0.18)" : "0 6px 14px rgba(41, 61, 85, 0.05)"
-              }}>
-              <Wallet className="w-4 h-4" />
-              <span>{isConnectingWallet ? "연결 중..." : walletLabel}</span>
-            </button>
-
-            {/* Profile dropdown */}
-            <div className="relative" ref={profileMenuRef}>
-              <button
-                onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                className="flex items-center gap-2 group"
-              >
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold text-white relative overflow-hidden"
-                  style={{ background: "linear-gradient(135deg, #4f6786, #7aa08d)", boxShadow: "0 8px 16px rgba(62, 88, 117, 0.14)" }}>
-                  <span className="relative z-10">{avatarChar}</span>
-                  <div className="absolute inset-0 bg-gradient-to-t from-transparent to-white/20" />
-                </div>
-                <ChevronDown
-                  className="w-3.5 h-3.5 hidden md:block transition-transform duration-200"
-                  style={{
-                    color: theme === "dark" ? "#90a1b4" : "#7084a0",
-                    transform: profileMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+            {isLoggedIn ? (
+              <>
+                {/* 로그인 상태: 지갑 버튼 */}
+                <button
+                  onClick={async () => {
+                    if (walletConnected) { navigate("/mypage"); return; }
+                    const connected = await connectWallet();
+                    if (!connected) navigate("/mypage");
                   }}
-                />
-              </button>
-
-              {/* Dropdown menu */}
-              {profileMenuOpen && (
-                <div
-                  className="absolute right-0 top-12 w-52 rounded-[16px] border shadow-xl z-50 py-2 overflow-hidden"
-                  style={{ background: dropdownBg, borderColor: dropdownBorder, boxShadow: "0 12px 32px rgba(17,40,73,0.12)" }}
+                  className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-xl text-[0.88rem] font-semibold transition-all duration-200 hover:scale-105"
+                  style={{
+                    background: walletConnected
+                      ? theme === "dark" ? "rgba(108, 144, 116, 0.16)" : "rgba(108,144,116,0.10)"
+                      : theme === "dark" ? "rgba(90,116,146,0.18)" : "rgba(90,116,146,0.08)",
+                    border: walletConnected ? "1px solid rgba(108,144,116,0.22)" : "1px solid rgba(90,116,146,0.16)",
+                    color: walletConnected ? "#6c9074" : "#49647f",
+                    boxShadow: theme === "dark" ? "0 6px 14px rgba(0,0,0,0.18)" : "0 6px 14px rgba(41,61,85,0.05)",
+                  }}
                 >
-                  {isLoggedIn ? (
-                    <>
-                      {/* 유저 정보 */}
+                  <Wallet className="w-4 h-4" />
+                  <span>{isConnectingWallet ? "연결 중..." : walletLabel}</span>
+                </button>
+
+                {/* 로그인 상태: 프로필 드롭다운 */}
+                <div className="relative" ref={profileMenuRef}>
+                  <button onClick={() => setProfileMenuOpen(!profileMenuOpen)} className="flex items-center gap-2 group">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold text-white relative overflow-hidden"
+                      style={{ background: "linear-gradient(135deg, #4f6786, #7aa08d)", boxShadow: "0 8px 16px rgba(62,88,117,0.14)" }}>
+                      <span className="relative z-10">{avatarChar}</span>
+                      <div className="absolute inset-0 bg-gradient-to-t from-transparent to-white/20" />
+                    </div>
+                    <ChevronDown
+                      className="w-3.5 h-3.5 hidden md:block transition-transform duration-200"
+                      style={{ color: theme === "dark" ? "#90a1b4" : "#7084a0", transform: profileMenuOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                    />
+                  </button>
+
+                  {profileMenuOpen && (
+                    <div className="absolute right-0 top-12 w-52 rounded-[16px] border shadow-xl z-50 py-2 overflow-hidden"
+                      style={{ background: dropdownBg, borderColor: dropdownBorder, boxShadow: "0 12px 32px rgba(17,40,73,0.12)" }}>
                       <div className="px-4 py-3 border-b" style={{ borderColor: dropdownBorder }}>
-                        <p className="text-[0.82rem] font-bold" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>
-                          {user?.nickname}
-                        </p>
-                        <p className="text-[0.74rem] mt-0.5 truncate" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>
-                          {user?.email}
-                        </p>
+                        <p className="text-[0.82rem] font-bold" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>{user?.nickname}</p>
+                        <p className="text-[0.74rem] mt-0.5 truncate" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>{user?.email}</p>
                       </div>
                       <button
                         onClick={() => { navigate("/mypage"); setProfileMenuOpen(false); }}
                         className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[0.85rem] font-medium transition-colors hover:opacity-80"
                         style={{ color: theme === "dark" ? "#b8c7d6" : "#44556c" }}
                       >
-                        <User className="w-4 h-4" />
-                        마이페이지
+                        <User className="w-4 h-4" />마이페이지
                       </button>
                       <button
                         onClick={() => { logout(); disconnectWallet(); setProfileMenuOpen(false); navigate("/"); }}
                         className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[0.85rem] font-medium transition-colors hover:opacity-80"
                         style={{ color: "#8f5d3b" }}
                       >
-                        <LogOut className="w-4 h-4" />
-                        로그아웃
+                        <LogOut className="w-4 h-4" />로그아웃
                       </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => { navigate("/login"); setProfileMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[0.85rem] font-medium transition-colors hover:opacity-80"
-                        style={{ color: theme === "dark" ? "#b8c7d6" : "#44556c" }}
-                      >
-                        <User className="w-4 h-4" />
-                        로그인
-                      </button>
-                      <button
-                        onClick={() => { navigate("/register"); setProfileMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[0.85rem] font-medium transition-colors hover:opacity-80"
-                        style={{ color: theme === "dark" ? "#b8c7d6" : "#44556c" }}
-                      >
-                        <UserPlus className="w-4 h-4" />
-                        회원가입
-                      </button>
-                    </>
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
+              </>
+            ) : (
+              /* 비로그인 상태: 로그인 버튼만 표시 */
+              <button
+                onClick={() => navigate("/login")}
+                className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-xl text-[0.88rem] font-semibold transition-all duration-200 hover:scale-105"
+                style={{
+                  background: theme === "dark" ? "rgba(90,116,146,0.18)" : "rgba(90,116,146,0.08)",
+                  border: "1px solid rgba(90,116,146,0.16)",
+                  color: theme === "dark" ? "#b8c7d6" : "#49647f",
+                  boxShadow: theme === "dark" ? "0 6px 14px rgba(0,0,0,0.18)" : "0 6px 14px rgba(41,61,85,0.05)",
+                }}
+              >
+                <LuLogIn className="w-4 h-4" />
+                <span>로그인</span>
+              </button>
+            )}
 
             {/* Mobile menu toggle */}
             <button onClick={() => setMobileOpen(!mobileOpen)}
@@ -307,32 +279,14 @@ export function Layout() {
                 </button>
               </>
             ) : (
-              <>
-                <button
-                  onClick={() => { setMobileOpen(false); navigate("/login"); }}
-                  className="flex w-full items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium"
-                  style={{ background: panelBackground, color: textColor, border: "1px solid rgba(90,116,146,0.16)" }}
-                >
-                  <User className="w-4 h-4" />
-                  로그인
-                </button>
-                <button
-                  onClick={() => { setMobileOpen(false); navigate("/register"); }}
-                  className="flex w-full items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium"
-                  style={{ background: panelBackground, color: textColor, border: "1px solid rgba(90,116,146,0.16)" }}
-                >
-                  <UserPlus className="w-4 h-4" />
-                  회원가입
-                </button>
-                <button
-                  onClick={() => { setMobileOpen(false); navigate("/mypage"); }}
-                  className="flex w-full items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium"
-                  style={{ background: panelBackground, color: textColor, border: "1px solid rgba(90,116,146,0.16)" }}
-                >
-                  <Wallet className="w-4 h-4" />
-                  마이페이지 / 지갑 연결
-                </button>
-              </>
+              <button
+                onClick={() => { setMobileOpen(false); navigate("/login"); }}
+                className="flex w-full items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium"
+                style={{ background: panelBackground, color: textColor, border: "1px solid rgba(90,116,146,0.16)" }}
+              >
+                <LuLogIn className="w-4 h-4" />
+                로그인
+              </button>
             )}
           </div>
         )}
@@ -356,7 +310,7 @@ export function Layout() {
               <div>
                 <p className="retro-title text-[0.88rem] font-bold tracking-[0.08em]"
                   style={{ display: "inline-block", background: "linear-gradient(90deg, #46617f, #739280)", backgroundSize: "100% 100%", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                  BASE NINE
+                  BASE CHAIN
                 </p>
                 <p className="text-[0.68rem] tracking-[0.14em] uppercase" style={{ color: theme === "dark" ? "#8fa1b3" : "#7084a0" }}>Baseball Ticketing Platform</p>
               </div>
@@ -368,7 +322,7 @@ export function Layout() {
               <a href="#" className="hover:text-[#1456a0] transition-colors">공지사항</a>
             </div>
             <p className="text-[0.78rem]" style={{ color: theme === "dark" ? "#8fa1b3" : "#7084a0" }}>
-              © 2026 <span style={{ color: "#1456a0" }}>BASE NINE</span>. All rights reserved.
+              © 2026 <span style={{ color: "#1456a0" }}>BASE CHAIN</span>. All rights reserved.
             </p>
           </div>
         </div>

@@ -1,133 +1,45 @@
-import { Link } from "react-router";
-import { useState, useRef } from "react";
+import { Link, useNavigate } from "react-router";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { motion, useInView } from "motion/react";
+import { QRCodeSVG } from "qrcode.react";
+import { useAppSettings } from "../context/AppSettingsContext";
+import { useTicketQR } from "../hooks/useTicketQR";
+import { useBookingAccess, ACCESS_MESSAGES, type AccessStatus } from "../hooks/useBookingAccess";
 import {
   Ticket, ShoppingBag, Sparkles,
-  ArrowRight, MapPin, Calendar, Tag, ChevronRight,
-  QrCode, Clock, BadgeCheck,
+  ArrowRight, MapPin, Calendar, Tag, ChevronRight, ChevronLeft,
+  QrCode, Clock, BadgeCheck, ShieldCheck, Wallet, Lock, X,
 } from "lucide-react";
 
 // ─── DATA ────────────────────────────────────────────────────────────────────
 
-const heroEvent = {
-  name: "2026 서울 개막 시리즈",
-  subtitle: "구단별 입장권, 선수 카드 NFT, 공식 재판매를 한곳에서 관리하는 야구 팬 플랫폼",
-  date: "2026.04.20 (월) 18:30",
-  venue: "잠실야구장, 서울",
-  openDate: "2026.04.10 오전 11:00 선예매 오픈",
-  price: "from ₩29,000",
-};
+const PLATFORM_SUBTITLE = "구단별 입장권, 선수 카드 NFT, 공식 재판매를 한곳에서 관리하는 야구 팬 플랫폼";
 
-const eventCards = [
-  {
-    id: 1,
-    name: "서울 개막 시리즈 · 두산 vs LG",
-    date: "2026.04.20 (월)",
-    venue: "잠실야구장",
-    price: "29,000원~",
-    status: "예매중",
-    statusColor: "#2dba73",
-    image: "https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=600&q=80",
-    tag: "FEATURED",
-  },
-  {
-    id: 2,
-    name: "부산 주말 3연전 · 롯데 vs KIA",
-    date: "2026.04.24 (금)",
-    venue: "사직야구장",
-    price: "24,000원~",
-    status: "오픈예정",
-    statusColor: "#ff9d3b",
-    image: "https://images.unsplash.com/photo-1508344928928-7165b67de128?w=600&q=80",
-    tag: "HOT",
-  },
-  {
-    id: 3,
-    name: "문학 나이트 게임 · SSG vs 한화",
-    date: "2026.04.18 (토)",
-    venue: "인천 SSG랜더스필드",
-    price: "22,000원~",
-    status: "매진임박",
-    statusColor: "#1456a0",
-    image: "https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?w=600&q=80",
-    tag: "D-3",
-  },
-  {
-    id: 4,
-    name: "수원 주말 시리즈 · KT vs 삼성",
-    date: "2026.04.27 (월)",
-    venue: "수원 KT위즈파크",
-    price: "21,000원~",
-    status: "예매중",
-    statusColor: "#2dba73",
-    image: "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=600&q=80",
-    tag: "NEW",
-  },
+// 경기 상태 → 표시용 변환 헬퍼
+const STADIUM_IMAGES = [
+  "https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=600&q=80",
+  "https://images.unsplash.com/photo-1508344928928-7165b67de128?w=600&q=80",
+  "https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?w=600&q=80",
+  "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=600&q=80",
 ];
-
-
-const ticketList = [
-  {
-    id: 1,
-    name: "서울 개막 시리즈 · 두산 vs LG",
-    artist: "개막전 스페셜 배지 드롭 포함",
-    date: "2026.04.20 (월) 18:30",
-    venue: "잠실야구장, 서울",
-    price: "29,000원~",
-    remaining: 142,
-    status: "예매중",
-    statusColor: "#2dba73",
-    image: "https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=200&q=80",
-  },
-  {
-    id: 2,
-    name: "부산 주말 3연전 · 롯데 vs KIA",
-    artist: "사직 응원석 선예매 오픈",
-    date: "2026.04.24 (금) 18:30",
-    venue: "사직야구장, 부산",
-    price: "24,000원~",
-    remaining: 0,
-    status: "오픈예정",
-    statusColor: "#ff9d3b",
-    image: "https://images.unsplash.com/photo-1508344928928-7165b67de128?w=200&q=80",
-  },
-  {
-    id: 3,
-    name: "문학 나이트 게임 · SSG vs 한화",
-    artist: "나이트 응원전 전용 한정 카드 드롭",
-    date: "2026.04.18 (토) 18:00",
-    venue: "인천 SSG랜더스필드, 인천",
-    price: "22,000원~",
-    remaining: 21,
-    status: "매진임박",
-    statusColor: "#1456a0",
-    image: "https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?w=200&q=80",
-  },
-  {
-    id: 4,
-    name: "수원 주말 시리즈 · KT vs 삼성",
-    artist: "가족석, 테이블석 동시 오픈",
-    date: "2026.04.27 (월) 18:30",
-    venue: "수원 KT위즈파크, 수원",
-    price: "21,000원~",
-    remaining: 380,
-    status: "예매중",
-    statusColor: "#2dba73",
-    image: "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=200&q=80",
-  },
-  {
-    id: 5,
-    name: "대구 홈 매치 · 삼성 vs NC",
-    artist: "야간 경기 포토존 NFT 포함",
-    date: "2026.05.02 (토) 17:00",
-    venue: "대구 삼성라이온즈파크, 대구",
-    price: "20,000원~",
-    remaining: 200,
-    status: "예매중",
-    statusColor: "#2dba73",
-    image: "https://images.unsplash.com/photo-1517649763962-0c623066013b?w=200&q=80",
-  },
-];
+function gameStatusLabel(status: string) {
+  if (status === "OPEN")    return "예매중";
+  if (status === "ALMOST")  return "매진임박";
+  if (status === "SOLDOUT") return "매진";
+  return "오픈예정";
+}
+function gameStatusColor(status: string) {
+  if (status === "OPEN")    return "#2dba73";
+  if (status === "ALMOST")  return "#ff9d3b";
+  if (status === "SOLDOUT") return "#ff4040";
+  return "#7ec8ff";
+}
+function gameTag(status: string) {
+  if (status === "OPEN")    return "OPEN";
+  if (status === "ALMOST")  return "HOT";
+  if (status === "SOLDOUT") return "SOLD";
+  return "SOON";
+}
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -154,6 +66,29 @@ function NeonBadge({ label, color }: { label: string; color: string }) {
 // ─── NFT TICKET CARD ─────────────────────────────────────────────────────────
 
 function NftTicketCard() {
+  const { walletAddress } = useAppSettings();
+  const [ticket, setTicket] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!walletAddress) { setLoading(false); return; }
+    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/nearest/${walletAddress}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.success) setTicket(d.data); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [walletAddress]);
+
+  const { qrData, formattedCountdown } = useTicketQR(
+    ticket?.ticketId ?? null,
+    walletAddress,
+    ticket ? "ACTIVE" : "NONE",
+  );
+
+  // 날짜/시간 포맷
+  const matchDate = ticket?.matchTime ? ticket.matchTime.slice(0, 10).replace(/-/g, ".") : "—";
+  const matchTime = ticket?.matchTime ? ticket.matchTime.slice(11, 16) + " KST" : "—";
+
   return (
     <motion.div
       initial={{ opacity: 0, rotateY: -15, x: 60 }}
@@ -162,7 +97,7 @@ function NftTicketCard() {
       style={{ perspective: "1000px" }}
       className="relative w-full max-w-sm mx-auto"
     >
-      {/* Glow behind card */}
+      {/* Glow */}
       <div className="absolute inset-0 rounded-3xl blur-3xl -z-10"
         style={{ background: "linear-gradient(135deg, rgba(20,86,160,0.28), rgba(45,186,115,0.22))" }} />
 
@@ -178,14 +113,13 @@ function NftTicketCard() {
         <div className="h-1.5 w-full"
           style={{ background: "linear-gradient(90deg, #1456a0, #2dba73, #7ec8ff, #1456a0)", backgroundSize: "200% 100%", animation: "shimmer 3s linear infinite" }} />
 
-        {/* Card content */}
         <div className="p-6">
           {/* Header row */}
           <div className="flex items-center justify-between mb-5">
             <div>
               <p className="text-[10px] tracking-[0.3em] text-[#a393d1] uppercase mb-1">NFT · TICKET</p>
               <p className="text-xs font-bold" style={{ color: "#7ec8ff", textShadow: "0 0 8px rgba(126,200,255,0.7)" }}>
-                #PASS-2026-042
+                {ticket?.ticketCode ?? "#PASS-2026"}
               </p>
             </div>
             <div className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -194,53 +128,94 @@ function NftTicketCard() {
             </div>
           </div>
 
-          {/* Event name */}
-          <div className="mb-5">
-            <h3 className="text-xl font-bold text-white mb-1 leading-tight">SEOUL SERIES</h3>
-            <p className="text-sm" style={{ color: "#7ec8ff", textShadow: "0 0 6px rgba(126,200,255,0.6)" }}>SEOUL SERIES</p>
-          </div>
-
-          {/* Holographic divider */}
-          <div className="relative flex items-center mb-5">
-            <div className="w-5 h-5 rounded-full -ml-8" style={{ background: "rgba(7,21,39,1)", border: "1px solid rgba(126,200,255,0.26)" }} />
-            <div className="flex-1 mx-1 border-t-2 border-dashed" style={{ borderColor: "rgba(126,200,255,0.25)" }} />
-            <div className="w-5 h-5 rounded-full -mr-8" style={{ background: "rgba(7,21,39,1)", border: "1px solid rgba(126,200,255,0.26)" }} />
-          </div>
-
-          {/* Details grid */}
-          <div className="grid grid-cols-2 gap-3 mb-5">
-            {[
-              { label: "DATE", value: "2026.04.20" },
-              { label: "TIME", value: "18:30 KST" },
-              { label: "VENUE", value: "잠실야구장" },
-              { label: "SEAT", value: "1루 R 12열" },
-            ].map(item => (
-              <div key={item.label}>
-                <p className="text-[9px] tracking-widest text-[#a393d1] uppercase mb-0.5">{item.label}</p>
-                <p className="text-sm text-white font-medium">{item.value}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* QR section */}
-          <div className="flex items-center gap-4 p-3 rounded-2xl"
-            style={{ background: "rgba(20,86,160,0.10)", border: "1px solid rgba(126,200,255,0.22)" }}>
-            <div className="w-14 h-14 rounded-xl flex items-center justify-center"
-              style={{ background: "rgba(255,255,255,0.05)" }}>
-              <QrCode className="w-10 h-10" style={{ color: "#7ec8ff", filter: "drop-shadow(0 0 6px rgba(126,200,255,0.8))" }} />
+          {/* 지갑 미연결 / 티켓 없음 */}
+          {!walletAddress ? (
+            <div className="py-6 text-center">
+              <p className="text-sm text-[#a393d1]">지갑을 연결하면</p>
+              <p className="text-sm text-white mt-1">예매 티켓이 여기에 표시됩니다</p>
             </div>
-            <div>
-              <p className="text-xs text-[#a393d1] mb-0.5">현장 입장</p>
-              <p className="text-xs text-white">경기 시작 2시간 전 활성화</p>
-              <div className="flex items-center gap-1 mt-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#2dba73] animate-pulse" />
-                <p className="text-[10px] text-[#2dba73]">VALID</p>
-              </div>
+          ) : loading ? (
+            <div className="py-6 text-center">
+              <p className="text-sm text-[#a393d1]">티켓 불러오는 중...</p>
             </div>
-          </div>
+          ) : !ticket ? (
+            <div className="py-6 text-center">
+              <p className="text-sm text-[#a393d1]">예매된 티켓이 없습니다</p>
+              <Link to="/tickets" className="text-xs mt-2 inline-block" style={{ color: "#7ec8ff" }}>
+                경기 예매하러 가기 →
+              </Link>
+            </div>
+          ) : (
+            <>
+              {/* 경기명 */}
+              <div className="mb-5">
+                <h3 className="text-lg font-bold text-white leading-tight">{ticket.matchName}</h3>
+                <p className="text-xs mt-1" style={{ color: "#7ec8ff" }}>{ticket.stadium}</p>
+              </div>
+
+              {/* 구분선 */}
+              <div className="relative flex items-center mb-5">
+                <div className="w-5 h-5 rounded-full -ml-8" style={{ background: "rgba(7,21,39,1)", border: "1px solid rgba(126,200,255,0.26)" }} />
+                <div className="flex-1 mx-1 border-t-2 border-dashed" style={{ borderColor: "rgba(126,200,255,0.25)" }} />
+                <div className="w-5 h-5 rounded-full -mr-8" style={{ background: "rgba(7,21,39,1)", border: "1px solid rgba(126,200,255,0.26)" }} />
+              </div>
+
+              {/* 상세 정보 */}
+              <div className="grid grid-cols-2 gap-3 mb-5">
+                {[
+                  { label: "DATE",  value: matchDate },
+                  { label: "TIME",  value: matchTime },
+                  { label: "SEAT",  value: ticket.seatInfo },
+                  { label: "GATE",  value: ticket.gate },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <p className="text-[9px] tracking-widest text-[#a393d1] uppercase mb-0.5">{item.label}</p>
+                    <p className="text-xs text-white font-medium leading-snug">{item.value || "—"}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* QR 영역 */}
+              <div className="p-3 rounded-2xl"
+                style={{ background: "rgba(20,86,160,0.10)", border: "1px solid rgba(126,200,255,0.22)" }}>
+                {qrData?.available && qrData.qrToken ? (
+                  <div className="flex items-center gap-4">
+                    <div className="rounded-xl overflow-hidden bg-white p-1.5 shrink-0">
+                      <QRCodeSVG value={qrData.qrToken} size={56} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#a393d1] mb-0.5">현장 입장 QR</p>
+                      <p className="text-xs text-white font-bold" style={{ color: "#2dba73" }}>
+                        {formattedCountdown} 후 갱신
+                      </p>
+                      <div className="flex items-center gap-1 mt-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#2dba73] animate-pulse" />
+                        <p className="text-[10px] text-[#2dba73]">ACTIVE</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ background: "rgba(255,255,255,0.05)" }}>
+                      <QrCode className="w-8 h-8" style={{ color: "#7ec8ff", opacity: 0.5 }} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#a393d1] mb-0.5">현장 입장 QR</p>
+                      <p className="text-xs text-white">경기 시작 2시간 전 활성화</p>
+                      <div className="flex items-center gap-1 mt-1">
+                        <Clock className="w-3 h-3 text-[#a393d1]" />
+                        <p className="text-[10px] text-[#a393d1]">STANDBY</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Bottom holographic accent */}
+        {/* Bottom accent */}
         <div className="h-1 w-full opacity-60"
           style={{ background: "linear-gradient(90deg, transparent, #1456a0, #2dba73, transparent)" }} />
       </div>
@@ -250,11 +225,127 @@ function NftTicketCard() {
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 
+type GameData = {
+  id: string;
+  home_team: string;
+  away_team: string;
+  game_date: string;
+  game_time: string;
+  stadium_name: string;
+  location: string;
+  day_of_week: string;
+  status: string;
+  base_price: number;
+};
+
 export function Home() {
-  const [hoveredEvent, setHoveredEvent] = useState<number | null>(null);
+  const navigate = useNavigate();
+  const [hoveredEvent, setHoveredEvent] = useState<string | null>(null);
+  const [availableGames, setAvailableGames] = useState<GameData[]>([]);
+  const [allGames, setAllGames] = useState<GameData[]>([]);
+  const [calYear, setCalYear] = useState(2026);
+  const [calMonth, setCalMonth] = useState(3); // 0-indexed: 3 = 4월
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [calReady, setCalReady] = useState(false);
+  const [blockedStatus, setBlockedStatus] = useState<Exclude<AccessStatus, "checking" | "ok"> | null>(null);
+  const accessStatus = useBookingAccess();
+
+  function handleBooking(gameId: string) {
+    if (accessStatus === "checking") return;
+    if (accessStatus === "ok") {
+      navigate(`/tickets/${gameId}/booking`);
+    } else {
+      setBlockedStatus(accessStatus);
+    }
+  }
+
+  // 시스템 시간 기준 오늘 이후 가장 빠른 경기
+  const heroGame = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return allGames.find(g => g.game_date >= today) ?? allGames[0] ?? null;
+  }, [allGames]);
+
+  const gamesByDate = useMemo(() => {
+    const map: Record<string, GameData[]> = {};
+    allGames.forEach(g => {
+      if (!map[g.game_date]) map[g.game_date] = [];
+      map[g.game_date].push(g);
+    });
+    return map;
+  }, [allGames]);
+
+  const calFirstDay  = new Date(calYear, calMonth, 1).getDay();     // 0=일
+  const calDaysCount = new Date(calYear, calMonth + 1, 0).getDate();
+  const todayStr     = new Date().toISOString().slice(0, 10);
+
+  function prevMonth() {
+    if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
+    else setCalMonth(m => m - 1);
+    setSelectedDate(null);
+  }
+  function nextMonth() {
+    if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); }
+    else setCalMonth(m => m + 1);
+    setSelectedDate(null);
+  }
+
+  useEffect(() => {
+    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games`)
+      .then((r) => r.json())
+      .then((res: { success: boolean; data: GameData[] }) => {
+        const data = res.data ?? [];
+        const sorted = [...data].sort((a, b) => a.game_date.localeCompare(b.game_date));
+        const available = sorted
+          .filter((g) => g.status === "OPEN" || g.status === "ALMOST")
+          .slice(0, 4);
+        setAvailableGames(available);
+        setAllGames(sorted);
+        // 초기 선택: 가장 빠른 날짜
+        if (sorted.length > 0) {
+          const earliest = sorted[0];
+          const d = new Date(earliest.game_date);
+          setCalYear(d.getFullYear());
+          setCalMonth(d.getMonth());
+          setSelectedDate(earliest.game_date);
+        }
+        setCalReady(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  const modalInfo = blockedStatus ? ACCESS_MESSAGES[blockedStatus] : null;
+  const ModalIcon = blockedStatus === "need_login" ? Lock : blockedStatus === "need_wallet" ? Wallet : ShieldCheck;
 
   return (
     <div className="w-full">
+      {/* ── 접근 제한 모달 ── */}
+      {blockedStatus && modalInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}>
+          <div className="relative bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4 text-center">
+            <button onClick={() => setBlockedStatus(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+              <X className="w-5 h-5" />
+            </button>
+            <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "rgba(20,86,160,0.1)" }}>
+              <ModalIcon className="w-7 h-7" style={{ color: "#1456a0" }} />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">{modalInfo.title}</h3>
+            <p className="text-sm text-gray-500 mb-6 leading-relaxed">{modalInfo.desc}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setBlockedStatus(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                닫기
+              </button>
+              <Link to={modalInfo.href} onClick={() => setBlockedStatus(null)} className="flex-1">
+                <button className="w-full py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110"
+                  style={{ background: "linear-gradient(135deg, #1456a0, #1e7fd0)" }}>
+                  {modalInfo.action}
+                </button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══════════════════════════════════════════════════════════════════════
           SECTION 1 · HERO BANNER
       ═══════════════════════════════════════════════════════════════════════ */}
@@ -304,11 +395,11 @@ export function Home() {
                     background: "linear-gradient(90deg, #7ec8ff, #ffffff, #9fe1bf)",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
-                  }}>BASE NINE</span>
+                  }}>BASE CHAIN</span>
                 </h1>
 
                 <p className="page-body max-w-xl">
-                  {heroEvent.subtitle}
+                  {PLATFORM_SUBTITLE}
                 </p>
               </motion.div>
 
@@ -322,22 +413,32 @@ export function Home() {
                 <div className="p-5 rounded-2xl"
                   style={{ background: "rgba(20,86,160,0.10)", border: "1px solid rgba(126,200,255,0.18)", backdropFilter: "blur(10px)" }}>
                   <p className="page-eyebrow text-[#c6d5ea] mb-3">다음 주요 경기</p>
-                  <h2 className="section-title text-[1.65rem] text-white mb-3">{heroEvent.name}</h2>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
-                      <Calendar className="w-4 h-4 text-[#7ec8ff] shrink-0" />
-                      {heroEvent.date}
-                    </div>
-                    <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
-                      <MapPin className="w-4 h-4 text-[#2dba73] shrink-0" />
-                      {heroEvent.venue}
-                    </div>
-                    <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
-                      <Tag className="w-4 h-4 text-[#ffce67] shrink-0" />
-                      {heroEvent.price} &nbsp;·&nbsp;
-                      <span className="text-[#ffce67]">{heroEvent.openDate}</span>
-                    </div>
-                  </div>
+                  {heroGame ? (
+                    <>
+                      <h2 className="section-title text-[1.65rem] text-white mb-3">
+                        {heroGame.home_team} vs {heroGame.away_team}
+                      </h2>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
+                          <Calendar className="w-4 h-4 text-[#7ec8ff] shrink-0" />
+                          {heroGame.game_date} ({heroGame.day_of_week}) {heroGame.game_time?.slice(0, 5)}
+                        </div>
+                        <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
+                          <MapPin className="w-4 h-4 text-[#2dba73] shrink-0" />
+                          {heroGame.stadium_name}, {heroGame.location}
+                        </div>
+                        <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
+                          <Tag className="w-4 h-4 text-[#ffce67] shrink-0" />
+                          from ₩{heroGame.base_price.toLocaleString()} &nbsp;·&nbsp;
+                          <span style={{ color: gameStatusColor(heroGame.status) }}>
+                            {gameStatusLabel(heroGame.status)}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[#a393d1] text-sm">경기 정보를 불러오는 중...</p>
+                  )}
                 </div>
               </motion.div>
 
@@ -408,197 +509,286 @@ export function Home() {
                   <div className="w-6 h-0.5" style={{ background: "linear-gradient(90deg, #ff10f0, transparent)" }} />
                   <span className="page-eyebrow text-[#1456a0]">Games</span>
                 </div>
-                <h2 className="section-title text-white">예매 가능한 경기</h2>
-                <p className="page-muted mt-2">좌석 선택부터 공식 재판매 제한까지 한 화면에서 관리할 수 있어요.</p>
+                <h2 className="section-title text-black">예매 가능한 경기</h2>
               </div>
               <Link to="/tickets">
-                <button className="hidden md:flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-                  style={{ background: "rgba(20,86,160,0.14)", border: "1px solid rgba(126,200,255,0.32)", color: "#7ec8ff" }}>
-                  전체 보기 <ArrowRight className="w-4 h-4" />
+                <button className="hidden md:inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
+                  style={{ background: "linear-gradient(135deg, rgba(255,16,240,0.2), rgba(0,217,255,0.2))", border: "1px solid rgba(255,16,240,0.3)", backdropFilter: "blur(8px)" }}>
+                  <Ticket className="w-4 h-4 text-[#7ec8ff]" />
+                  전체 경기 보기
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </Link>
             </div>
           </FadeIn>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {eventCards.map((ev, i) => (
+            {availableGames.map((ev, i) => {
+              const color = gameStatusColor(ev.status);
+              const label = gameStatusLabel(ev.status);
+              const tag   = gameTag(ev.status);
+              const img   = STADIUM_IMAGES[i % STADIUM_IMAGES.length];
+              return (
               <FadeIn key={ev.id} delay={i * 0.1}>
                 <div
                   className="group relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-300"
                   style={{
-                    border: hoveredEvent === ev.id ? `1px solid ${ev.statusColor}66` : "1px solid rgba(255,16,240,0.15)",
+                    border: hoveredEvent === ev.id ? `1px solid ${color}66` : "1px solid rgba(255,16,240,0.15)",
                     background: "rgba(15,8,35,0.8)",
-                    boxShadow: hoveredEvent === ev.id ? `0 0 30px ${ev.statusColor}22` : "none",
+                    boxShadow: hoveredEvent === ev.id ? `0 0 30px ${color}22` : "none",
                   }}
                   onMouseEnter={() => setHoveredEvent(ev.id)}
                   onMouseLeave={() => setHoveredEvent(null)}
                 >
                   {/* Thumbnail */}
                   <div className="relative h-52 overflow-hidden">
-                    <img src={ev.image} alt={ev.name}
+                    <img src={img} alt={ev.home_team}
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                     <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(5,0,16,0.9) 0%, rgba(5,0,16,0.2) 60%, transparent 100%)" }} />
-
-                    {/* Tag badge */}
                     <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold"
-                      style={{ background: "rgba(5,0,16,0.7)", border: `1px solid ${ev.statusColor}`, color: ev.statusColor, backdropFilter: "blur(8px)" }}>
-                      {ev.tag}
+                      style={{ background: "rgba(5,0,16,0.7)", border: `1px solid ${color}`, color, backdropFilter: "blur(8px)" }}>
+                      {tag}
                     </div>
-
-                    {/* Status badge */}
                     <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold"
-                      style={{ background: `${ev.statusColor}22`, border: `1px solid ${ev.statusColor}`, color: ev.statusColor, backdropFilter: "blur(8px)" }}>
-                      {ev.status}
+                      style={{ background: `${color}22`, border: `1px solid ${color}`, color, backdropFilter: "blur(8px)" }}>
+                      {label}
                     </div>
                   </div>
 
                   {/* Info */}
                   <div className="p-4">
-                    <h3 className="text-white text-sm font-bold mb-2 truncate">{ev.name}</h3>
+                    <h3 className="text-white text-sm font-bold mb-2 truncate">{ev.home_team} vs {ev.away_team}</h3>
                     <div className="space-y-1.5 mb-4">
                       <div className="flex items-center gap-2 text-xs text-[#a393d1]">
-                        <Calendar className="w-3.5 h-3.5 text-[#00d9ff]" />{ev.date}
+                        <Calendar className="w-3.5 h-3.5 text-[#00d9ff]" />
+                        {ev.game_date} ({ev.day_of_week}) {ev.game_time?.slice(0, 5)}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-[#a393d1]">
-                        <MapPin className="w-3.5 h-3.5 text-[#ff10f0]" />{ev.venue}
+                        <MapPin className="w-3.5 h-3.5 text-[#ff10f0]" />{ev.stadium_name}
                       </div>
                       <div className="flex items-center gap-2 text-xs">
                         <Tag className="w-3.5 h-3.5 text-[#00ff88]" />
-                        <span className="text-[#00ff88] font-bold">{ev.price}</span>
+                        <span className="text-[#00ff88] font-bold">{ev.base_price.toLocaleString()}원~</span>
                       </div>
                     </div>
-                    <Link to="/tickets">
-                      <button className="w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all duration-200"
-                        style={{
-                          background: hoveredEvent === ev.id
-                            ? `linear-gradient(135deg, #ff10f0, #bd00e8)`
-                            : "rgba(255,16,240,0.1)",
-                          border: "1px solid rgba(255,16,240,0.3)",
-                          boxShadow: hoveredEvent === ev.id ? "0 0 16px rgba(255,16,240,0.4)" : "none",
-                        }}>
-                        {ev.status === "오픈예정" ? "알림 신청" : "예매하기"}
-                      </button>
-                    </Link>
+                    <button
+                      onClick={() => handleBooking(ev.id)}
+                      className="w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all duration-200"
+                      style={{
+                        background: hoveredEvent === ev.id ? `linear-gradient(135deg, #ff10f0, #bd00e8)` : "rgba(255,16,240,0.1)",
+                        border: "1px solid rgba(255,16,240,0.3)",
+                        boxShadow: hoveredEvent === ev.id ? "0 0 16px rgba(255,16,240,0.4)" : "none",
+                      }}>
+                      예매하기
+                    </button>
                   </div>
                 </div>
               </FadeIn>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
 
 
       {/* ═══════════════════════════════════════════════════════════════════════
-          SECTION 5 · TICKET BOOKING LIST
+          SECTION 5 · CALENDAR
       ═══════════════════════════════════════════════════════════════════════ */}
       <section className="relative py-24">
-        {/* Section bg accent */}
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: "linear-gradient(180deg, transparent, rgba(255,16,240,0.03) 50%, transparent)" }} />
 
         <div className="max-w-[1600px] mx-auto px-6">
           <FadeIn className="mb-10">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-6 h-0.5" style={{ background: "linear-gradient(90deg, #ffaa00, transparent)" }} />
-                  <span className="page-eyebrow text-[#ffce67]">Season Games</span>
-                </div>
-                <h2 className="section-title text-white mb-1">전체 경기 일정</h2>
-                <p className="page-muted mt-2">진행 중인 홈경기와 원정전, 좌석 오픈 일정을 빠르게 확인할 수 있어요.</p>
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-0.5" style={{ background: "linear-gradient(90deg, #ffaa00, transparent)" }} />
+                <span className="page-eyebrow text-[#ffce67]">Season Games</span>
               </div>
-              <Link to="/tickets">
-                <button className="hidden md:flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-105"
-                  style={{ background: "rgba(255,170,0,0.08)", border: "1px solid rgba(255,170,0,0.3)", color: "#ffaa00" }}>
-                  전체 보기 <ArrowRight className="w-4 h-4" />
-                </button>
-              </Link>
+              <h2 className="section-title text-black">전체 경기 일정</h2>
             </div>
           </FadeIn>
 
-          {/* List */}
-          <div className="space-y-3">
-            {ticketList.map((ev, i) => (
-              <FadeIn key={ev.id} delay={i * 0.07}>
-                <div className="group relative rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer"
-                  style={{ background: "rgba(15,8,35,0.7)", border: "1px solid rgba(255,16,240,0.12)", backdropFilter: "blur(12px)" }}
-                  onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${ev.statusColor}33`; e.currentTarget.style.boxShadow = `0 0 20px ${ev.statusColor}12`; }}
-                  onMouseLeave={e => { e.currentTarget.style.border = "1px solid rgba(255,16,240,0.12)"; e.currentTarget.style.boxShadow = "none"; }}>
+          {/* ── 달력 + 경기 상세 (좌우 분할) ── */}
+          <FadeIn>
+            <div className="grid lg:grid-cols-2 gap-6 items-start">
 
-                  {/* Left accent line */}
-                  <div className="absolute left-0 top-0 bottom-0 w-0.5"
-                    style={{ background: `linear-gradient(180deg, transparent, ${ev.statusColor}, transparent)` }} />
+              {/* ── 왼쪽: 달력 ── */}
+              <div className="rounded-2xl overflow-hidden shadow-lg"
+                style={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)" }}>
 
-                  <div className="flex items-center gap-5 p-5">
-                    {/* Poster */}
-                    <div className="relative w-20 h-20 rounded-xl overflow-hidden shrink-0">
-                      <img src={ev.image} alt={ev.name} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0" style={{ background: "rgba(5,0,16,0.2)" }} />
-                    </div>
-
-                    {/* Event info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-white text-sm font-bold truncate">{ev.name}</h3>
-                        <NeonBadge label={ev.status} color={ev.statusColor} />
-                      </div>
-                      <p className="text-xs text-[#a393d1] mb-2">{ev.artist}</p>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        <div className="flex items-center gap-1.5 text-xs text-[#a393d1]">
-                          <Calendar className="w-3.5 h-3.5 text-[#00d9ff]" />{ev.date}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-[#a393d1]">
-                          <MapPin className="w-3.5 h-3.5 text-[#ff10f0]" />{ev.venue}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Price & button */}
-                    <div className="shrink-0 text-right flex flex-col items-end gap-2">
-                      <div>
-                        <p className="text-xs text-[#a393d1]">티켓 가격</p>
-                        <p className="text-sm font-bold" style={{ color: "#00ff88" }}>{ev.price}</p>
-                      </div>
-                      {ev.remaining > 0 ? (
-                        <div className="flex items-center gap-1 text-[10px]"
-                          style={{ color: ev.remaining < 50 ? "#ff10f0" : "#a393d1" }}>
-                          <Clock className="w-3 h-3" />
-                          {ev.remaining < 50 ? `${ev.remaining}석 남음` : `${ev.remaining}석 이상`}
-                        </div>
-                      ) : (
-                        <div className="text-[10px] text-[#a393d1]">예매 대기</div>
-                      )}
-                      <Link to="/tickets">
-                        <button className="px-5 py-2 rounded-xl text-xs font-bold text-white transition-all duration-200 hover:scale-105"
-                          style={{
-                            background: ev.status === "오픈예정"
-                              ? "rgba(255,170,0,0.15)"
-                              : "linear-gradient(135deg, #ff10f0, #bd00e8)",
-                            border: ev.status === "오픈예정" ? "1px solid rgba(255,170,0,0.4)" : "none",
-                            color: ev.status === "오픈예정" ? "#ffaa00" : "white",
-                            boxShadow: ev.status !== "오픈예정" ? "0 0 12px rgba(255,16,240,0.4)" : "none",
-                          }}>
-                          {ev.status === "오픈예정" ? "알림 신청" : "예매하기"}
-                        </button>
-                      </Link>
-                    </div>
-                  </div>
+                {/* 월 네비게이션 */}
+                <div className="flex items-center justify-between px-5 py-3.5"
+                  style={{ borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
+                  <button onClick={prevMonth}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:bg-gray-200"
+                    style={{ color: "#6b7280" }}>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="font-bold text-base tracking-wide" style={{ color: "#111827" }}>
+                    {calYear}년 {calMonth + 1}월
+                  </span>
+                  <button onClick={nextMonth}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:bg-gray-200"
+                    style={{ color: "#6b7280" }}>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
-              </FadeIn>
-            ))}
-          </div>
 
-          {/* View all */}
-          <FadeIn delay={0.3} className="text-center mt-8">
-            <Link to="/tickets">
-              <button className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
-                style={{ background: "linear-gradient(135deg, rgba(255,16,240,0.2), rgba(0,217,255,0.2))", border: "1px solid rgba(255,16,240,0.3)", backdropFilter: "blur(8px)" }}>
-                <Ticket className="w-4 h-4 text-[#7ec8ff]" />
-                전체 경기 보기
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </Link>
+                {/* 요일 헤더 */}
+                <div className="grid grid-cols-7"
+                  style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  {['일','월','화','수','목','금','토'].map((d, i) => (
+                    <div key={d} className="py-2 text-center text-[11px] font-bold tracking-widest"
+                      style={{ color: i === 0 ? '#ef4444' : i === 6 ? '#3b82f6' : '#9ca3af' }}>
+                      {d}
+                    </div>
+                  ))}
+                </div>
+
+                {/* 날짜 그리드 */}
+                <div className="grid grid-cols-7">
+                  {/* 앞 빈칸 */}
+                  {Array.from({ length: calFirstDay }).map((_, i) => (
+                    <div key={`e${i}`} className="aspect-square"
+                      style={{ borderRight: "1px solid #f3f4f6", borderBottom: "1px solid #f3f4f6" }} />
+                  ))}
+
+                  {/* 날짜 셀 */}
+                  {Array.from({ length: calDaysCount }).map((_, i) => {
+                    const day     = i + 1;
+                    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                    const games   = gamesByDate[dateStr] ?? [];
+                    const hasGame = games.length > 0;
+                    const isSel   = selectedDate === dateStr;
+                    const isToday = dateStr === todayStr;
+                    const col     = (calFirstDay + i) % 7;
+
+                    return (
+                      <div
+                        key={day}
+                        onClick={() => hasGame && setSelectedDate(isSel ? null : dateStr)}
+                        className="aspect-square flex flex-col p-1.5 transition-all duration-150 relative overflow-hidden"
+                        style={{
+                          borderRight: "1px solid #f3f4f6",
+                          borderBottom: "1px solid #f3f4f6",
+                          background: isSel
+                            ? "#eff6ff"
+                            : hasGame ? "#fafafa" : "#ffffff",
+                          cursor: hasGame ? "pointer" : "default",
+                          boxShadow: isSel ? "inset 0 0 0 2px #3b82f6" : "none",
+                        }}
+                      >
+                        {/* 날짜 숫자 */}
+                        <span className="w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold shrink-0"
+                          style={{
+                            background: isToday ? "#1d4ed8" : "transparent",
+                            color: isToday ? "#fff"
+                              : isSel ? "#1d4ed8"
+                              : col === 0 ? "#ef4444"
+                              : col === 6 ? "#3b82f6"
+                              : hasGame ? "#111827"
+                              : "#9ca3af",
+                          }}>
+                          {day}
+                        </span>
+
+                        {/* 경기 뱃지 */}
+                        {games.map(g => {
+                          const c = gameStatusColor(g.status);
+                          return (
+                            <div key={g.id} className="mt-0.5 px-1 py-px rounded text-[8px] font-semibold leading-tight truncate"
+                              style={{ background: `${c}18`, border: `1px solid ${c}55`, color: c }}>
+                              {g.home_team}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 범례 */}
+                <div className="flex items-center gap-4 px-4 py-3"
+                  style={{ borderTop: "1px solid #e5e7eb", background: "#f9fafb" }}>
+                  {[
+                    { status: "OPEN",    label: "예매중" },
+                    { status: "ALMOST",  label: "매진임박" },
+                    { status: "SOLDOUT", label: "매진" },
+                    { status: "UPCOMING",label: "오픈예정" },
+                  ].map(({ status, label }) => (
+                    <div key={status} className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full" style={{ background: gameStatusColor(status) }} />
+                      <span className="text-[11px]" style={{ color: "#6b7280" }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── 오른쪽: 경기 상세 ── */}
+              <div className="flex flex-col gap-3 min-h-[400px]">
+                {selectedDate && gamesByDate[selectedDate] ? (
+                  <>
+                    <p className="text-sm font-semibold" style={{ color: "#a393d1" }}>
+                      {selectedDate} 경기 정보
+                    </p>
+                    {gamesByDate[selectedDate].map(ev => {
+                      const color = gameStatusColor(ev.status);
+                      const label = gameStatusLabel(ev.status);
+                      return (
+                        <div key={ev.id} className="relative rounded-2xl overflow-hidden transition-all"
+                          style={{ background: "rgba(15,8,35,0.80)", border: `1px solid ${color}44`, backdropFilter: "blur(12px)" }}>
+                          <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl" style={{ background: color }} />
+                          <div className="flex flex-col gap-4 px-6 py-5 pl-7">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h3 className="text-white font-bold text-base">{ev.home_team} vs {ev.away_team}</h3>
+                                  <NeonBadge label={label} color={color} />
+                                </div>
+                                <div className="flex flex-col gap-1.5 text-xs" style={{ color: "#a393d1" }}>
+                                  <span className="flex items-center gap-1.5">
+                                    <Calendar className="w-3.5 h-3.5 text-[#00d9ff]" />
+                                    {ev.game_date} ({ev.day_of_week}) {ev.game_time?.slice(0, 5)}
+                                  </span>
+                                  <span className="flex items-center gap-1.5">
+                                    <MapPin className="w-3.5 h-3.5 text-[#ff10f0]" />
+                                    {ev.stadium_name} · {ev.location}
+                                  </span>
+                                  <span className="flex items-center gap-1.5 font-bold" style={{ color: "#00ff88" }}>
+                                    <Tag className="w-3.5 h-3.5" />
+                                    {ev.base_price.toLocaleString()}원~
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => { if (ev.status !== "UPCOMING" && ev.status !== "SOLDOUT") handleBooking(ev.id); }}
+                              className="w-full py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
+                              style={{
+                                background: ev.status === "UPCOMING" ? "rgba(255,170,0,0.15)" : ev.status === "SOLDOUT" ? "rgba(100,100,100,0.2)" : "linear-gradient(135deg, #ff10f0, #bd00e8)",
+                                border: ev.status === "UPCOMING" ? "1px solid rgba(255,170,0,0.4)" : ev.status === "SOLDOUT" ? "1px solid rgba(100,100,100,0.4)" : "none",
+                                color: ev.status === "UPCOMING" ? "#ffaa00" : ev.status === "SOLDOUT" ? "#888" : "white",
+                                boxShadow: ev.status !== "UPCOMING" && ev.status !== "SOLDOUT" ? "0 0 12px rgba(255,16,240,0.4)" : "none",
+                                cursor: ev.status === "UPCOMING" || ev.status === "SOLDOUT" ? "default" : "pointer",
+                              }}>
+                              {ev.status === "UPCOMING" ? "오픈예정" : ev.status === "SOLDOUT" ? "매진" : "예매하기"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : calReady ? (
+                  <div className="flex-1 flex items-center justify-center rounded-2xl"
+                    style={{ background: "rgba(15,8,35,0.4)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <p className="text-sm" style={{ color: "#6b5f8a" }}>날짜를 선택하면 경기 정보가 표시됩니다</p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </FadeIn>
+
         </div>
       </section>
 

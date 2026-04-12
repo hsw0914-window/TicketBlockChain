@@ -1072,7 +1072,7 @@ return (
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="갤러리 내 제목, 태그, 작성자 통합검색"
+                    placeholder="통합 검색"
                     className="h-12 w-full rounded-[4px] border bg-white pl-11 pr-4 text-[0.94rem] outline-none"
                     style={{ borderColor: "#c8d1dd", color: "#20304e", background: "#fcfdfe" }}
                   />

@@ -13,7 +13,7 @@ const DB_NAME = "ticketblockchain";
 // ─── 시드 데이터 ──────────────────────────────────────────
 
 const SEED_USERS = [
-  { user_id: "admin_01",  nickname: "BASE NINE 운영팀" },
+  { user_id: "admin_01",  nickname: "BASE CHAIN 운영팀" },
   { user_id: "user_bh",   nickname: "Baseball Hunter" },
   { user_id: "user_tm",   nickname: "Ticket Mint" },
   { user_id: "viewer",    nickname: "나" },
@@ -96,54 +96,92 @@ const SEED_COMMENTS = [
   },
 ];
 
+const SEED_STADIUMS = [
+  { id: "jamsil",  name: "잠실야구장",              location: "서울특별시 송파구",   capacity: 25000 },
+  { id: "sajik",   name: "사직야구장",              location: "부산광역시 동래구",   capacity: 24000 },
+  { id: "munhak",  name: "인천SSG랜더스필드",        location: "인천광역시 미추홀구", capacity: 23000 },
+  { id: "gochuck", name: "고척스카이돔",             location: "서울특별시 구로구",   capacity: 16744 },
+  { id: "gwangju", name: "광주-기아 챔피언스 필드",  location: "광주광역시 북구",     capacity: 20000 },
+  { id: "daejeon", name: "한화생명 이글스파크",      location: "대전광역시 중구",     capacity: 13000 },
+];
+
+const SEED_GAMES = [
+  { id: "G001", home_team: "두산", away_team: "LG",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G002", home_team: "삼성", away_team: "KT",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "munhak",  status: "ALMOST",   base_price: 13000 },
+  { id: "G003", home_team: "롯데", away_team: "NC",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "sajik",   status: "SOLDOUT",  base_price: 13000 },
+  { id: "G004", home_team: "삼성", away_team: "LG",  game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G005", home_team: "키움", away_team: "한화", game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "gochuck", status: "OPEN",     base_price: 13000 },
+  { id: "G006", home_team: "KIA",  away_team: "두산", game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "gwangju", status: "UPCOMING", base_price: 13000 },
+  { id: "G007", home_team: "LG",   away_team: "NC",  game_date: "2026-04-19", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
+  { id: "G008", home_team: "한화", away_team: "SSG", game_date: "2026-04-19", game_time: "14:00:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000 },
+  { id: "G009", home_team: "두산", away_team: "키움", game_date: "2026-04-22", game_time: "18:30:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
+  { id: "G010", home_team: "KIA",  away_team: "롯데", game_date: "2026-04-22", game_time: "18:30:00", stadium_id: "sajik",   status: "UPCOMING", base_price: 13000 },
+];
+
 // ─── 초기화 함수 ──────────────────────────────────────────
 
 async function initDB() {
   const conn = await mysql.createConnection(DB_CONFIG);
 
-  // ✅ DROP 제거 — DB가 없을 때만 생성
   await conn.query(
     `CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci`
   );
   await conn.query(`USE \`${DB_NAME}\``);
 
-  // ─── 기존 테이블 (IF NOT EXISTS) ──────────────────────
+  // ─── 매 재시작마다 초기화: FK 역순으로 DROP ───────────
+  await conn.query(`SET FOREIGN_KEY_CHECKS = 0`);
+  // combine/market 테이블 (FK 역순)
+  await conn.query(`DROP TABLE IF EXISTS box_open_logs`);
+  await conn.query(`DROP TABLE IF EXISTS combine_logs`);
+  await conn.query(`DROP TABLE IF EXISTS purchase_history`);
+  await conn.query(`DROP TABLE IF EXISTS price_history`);
+  await conn.query(`DROP TABLE IF EXISTS trades`);
+  await conn.query(`DROP TABLE IF EXISTS market_listings`);
+  await conn.query(`DROP TABLE IF EXISTS market_assets`);
+  await conn.query(`DROP TABLE IF EXISTS onchain_tx_logs`);
+  await conn.query(`DROP TABLE IF EXISTS nft_tokens`);
+  await conn.query(`DROP TABLE IF EXISTS user_boxes`);
+  await conn.query(`DROP TABLE IF EXISTS user_cards`);
+  await conn.query(`DROP TABLE IF EXISTS user_fragments`);
+  await conn.query(`DROP TABLE IF EXISTS box_reward_pool`);
+  await conn.query(`DROP TABLE IF EXISTS combine_recipes`);
+  await conn.query(`DROP TABLE IF EXISTS card_types`);
+  await conn.query(`DROP TABLE IF EXISTS fragment_types`);
+  // ticket resale 테이블
+  await conn.query(`DROP TABLE IF EXISTS ticket_trades`);
+  await conn.query(`DROP TABLE IF EXISTS ticket_listings`);
+  // 기존 테이블
+  await conn.query(`DROP TABLE IF EXISTS tickets`);
+  await conn.query(`DROP TABLE IF EXISTS did_verifications`);
+  await conn.query(`DROP TABLE IF EXISTS user_wallets`);
+  await conn.query(`DROP TABLE IF EXISTS post_likes`);
+  await conn.query(`DROP TABLE IF EXISTS comments`);
+  await conn.query(`DROP TABLE IF EXISTS posts`);
+  await conn.query(`DROP TABLE IF EXISTS games`);
+  await conn.query(`DROP TABLE IF EXISTS stadiums`);
+  await conn.query(`DROP TABLE IF EXISTS notices`);
+  await conn.query(`DROP TABLE IF EXISTS users`);
+  await conn.query(`SET FOREIGN_KEY_CHECKS = 1`);
+
+  // ─── 테이블 생성 ──────────────────────────────────────
 
   await conn.query(`
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE users (
       user_id       VARCHAR(50)  PRIMARY KEY,
       nickname      VARCHAR(50)  NOT NULL,
       email         VARCHAR(255) UNIQUE DEFAULT NULL,
       password_hash VARCHAR(255) DEFAULT NULL,
       login_type    ENUM('local','google') NOT NULL DEFAULT 'local',
       google_id     VARCHAR(255) UNIQUE DEFAULT NULL,
-      created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+      profile_image VARCHAR(255) DEFAULT NULL,
+      is_active     TINYINT(1)   NOT NULL DEFAULT 1,
+      created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
 
-  // ─── 기존 users 테이블에 새 컬럼 마이그레이션 ────────
-  // 이미 있는 컬럼은 무시하고, 없는 컬럼만 추가
-  const newColumns = [
-    `ALTER TABLE users ADD COLUMN email         VARCHAR(255) UNIQUE DEFAULT NULL`,
-    `ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) DEFAULT NULL`,
-    `ALTER TABLE users ADD COLUMN login_type    ENUM('local','google') NOT NULL DEFAULT 'local'`,
-    `ALTER TABLE users ADD COLUMN google_id     VARCHAR(255) UNIQUE DEFAULT NULL`,
-    `ALTER TABLE users ADD COLUMN created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`,
-    `ALTER TABLE users ADD COLUMN profile_image VARCHAR(255) DEFAULT NULL`,
-    `ALTER TABLE users ADD COLUMN updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
-    `ALTER TABLE users ADD COLUMN is_active     TINYINT(1) NOT NULL DEFAULT 1`,
-  ];
-  for (const sql of newColumns) {
-    try {
-      await conn.query(sql);
-    } catch (e) {
-      // 이미 존재하는 컬럼이면 에러 코드 1060 → 무시
-      if (e.errno !== 1060) throw e;
-    }
-  }
-
   await conn.query(`
-    CREATE TABLE IF NOT EXISTS posts (
+    CREATE TABLE posts (
       post_id    INT          PRIMARY KEY AUTO_INCREMENT,
       user_id    VARCHAR(50)  NOT NULL,
       title      VARCHAR(255) NOT NULL,
@@ -161,7 +199,7 @@ async function initDB() {
   `);
 
   await conn.query(`
-    CREATE TABLE IF NOT EXISTS comments (
+    CREATE TABLE comments (
       comment_id INT          PRIMARY KEY AUTO_INCREMENT,
       post_id    INT          NOT NULL,
       user_id    VARCHAR(50)  NOT NULL,
@@ -178,7 +216,7 @@ async function initDB() {
   `);
 
   await conn.query(`
-    CREATE TABLE IF NOT EXISTS post_likes (
+    CREATE TABLE post_likes (
       user_id    VARCHAR(50)  NOT NULL,
       post_id    INT          NOT NULL,
       created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -188,10 +226,8 @@ async function initDB() {
     )
   `);
 
-  // ─── 신규 테이블 ───────────────────────────────────────
-
   await conn.query(`
-    CREATE TABLE IF NOT EXISTS user_wallets (
+    CREATE TABLE user_wallets (
       wallet_id      INT          PRIMARY KEY AUTO_INCREMENT,
       user_id        VARCHAR(50)  NOT NULL,
       wallet_address VARCHAR(42)  NOT NULL,
@@ -206,7 +242,7 @@ async function initDB() {
   `);
 
   await conn.query(`
-    CREATE TABLE IF NOT EXISTS did_verifications (
+    CREATE TABLE did_verifications (
       did_id         INT          PRIMARY KEY AUTO_INCREMENT,
       user_id        VARCHAR(50)  NOT NULL,
       did_value      VARCHAR(255) NOT NULL,
@@ -220,41 +256,531 @@ async function initDB() {
     )
   `);
 
-  // ─── 시드: 테이블이 비어있을 때만 삽입 ──────────────────
+  await conn.query(`
+    CREATE TABLE stadiums (
+      id       VARCHAR(50)  PRIMARY KEY,
+      name     VARCHAR(100) NOT NULL,
+      location VARCHAR(200),
+      capacity INT
+    )
+  `);
 
-  const [[{ cnt }]] = await conn.query("SELECT COUNT(*) AS cnt FROM users");
-  if (cnt === 0) {
-    for (const user of SEED_USERS) {
-      await conn.query(
-        "INSERT INTO users (user_id, nickname) VALUES (?, ?)",
-        [user.user_id, user.nickname]
-      );
-    }
+  await conn.query(`
+    CREATE TABLE games (
+      id         VARCHAR(50)  PRIMARY KEY,
+      home_team  VARCHAR(50)  NOT NULL,
+      away_team  VARCHAR(50)  NOT NULL,
+      game_date  DATE         NOT NULL,
+      game_time  TIME,
+      stadium_id VARCHAR(50)  NOT NULL,
+      status     ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED') NOT NULL DEFAULT 'OPEN',
+      base_price DECIMAL(10,2) DEFAULT NULL,
+      FOREIGN KEY (stadium_id) REFERENCES stadiums(id)
+    )
+  `);
 
-    for (const post of SEED_POSTS) {
-      await conn.query(
-        "INSERT INTO posts (user_id, title, excerpt, content, category) VALUES (?, ?, ?, ?, ?)",
-        [post.user_id, post.title, post.excerpt, post.content, post.category]
-      );
-    }
+  await conn.query(`
+    CREATE TABLE notices (
+      id           INT           PRIMARY KEY AUTO_INCREMENT,
+      title        VARCHAR(255)  NOT NULL,
+      content      TEXT          NOT NULL,
+      type         ENUM('공지', '이벤트', '업데이트') NOT NULL DEFAULT '공지',
+      is_pinned    TINYINT(1)    DEFAULT 0,
+      image_url    VARCHAR(512)  DEFAULT NULL,
+      view_count   INT           DEFAULT 0,
+      created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
 
-    for (const comment of SEED_COMMENTS) {
-      const [[post]] = await conn.query(
-        "SELECT post_id FROM posts WHERE title = ?",
-        [comment.post_title]
-      );
-      if (!post) continue;
-      await conn.query(
-        "INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)",
-        [post.post_id, comment.user_id, comment.content]
-      );
-    }
+  await conn.query(`
+    CREATE TABLE tickets (
+      id             VARCHAR(36)   PRIMARY KEY,
+      wallet_address VARCHAR(100)  NOT NULL,
+      game_id        VARCHAR(50)   NOT NULL,
+      stadium        VARCHAR(50),
+      grade          VARCHAR(50),
+      block          VARCHAR(50),
+      row_num        INT,
+      seat_number    INT,
+      price          DECIMAL(15,2),
+      token_id       INT           DEFAULT NULL,
+      ticket_tx_hash VARCHAR(66)   DEFAULT NULL,
+      status         ENUM('confirmed','used','listed','sold') NOT NULL DEFAULT 'confirmed',
+      booked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (game_id) REFERENCES games(id)
+    )
+  `);
 
-    console.log("✅ 시드 데이터 삽입 완료");
+  // ─── 티켓 2차 거래 테이블 ─────────────────────────────
+
+  await conn.query(`
+    CREATE TABLE ticket_listings (
+      id             CHAR(36)     PRIMARY KEY,
+      seller_id      VARCHAR(50)  NOT NULL,
+      ticket_id      VARCHAR(36)  DEFAULT NULL,
+      nft_token_id   INT          DEFAULT NULL,
+      price_wei      VARCHAR(40)  DEFAULT NULL,
+      list_tx_hash   VARCHAR(66)  DEFAULT NULL,
+      game_date      DATE         NOT NULL,
+      home_team      VARCHAR(20)  NOT NULL,
+      away_team      VARCHAR(20)  NOT NULL,
+      seat_section   VARCHAR(50)  NOT NULL,
+      original_price INT          NOT NULL,
+      listed_price   INT          NOT NULL,
+      status         VARCHAR(20)  NOT NULL DEFAULT 'active',
+      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (seller_id) REFERENCES users(user_id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE ticket_trades (
+      id           CHAR(36)    PRIMARY KEY,
+      listing_id   CHAR(36)    NOT NULL,
+      buyer_id     VARCHAR(50) NOT NULL,
+      seller_id    VARCHAR(50) NOT NULL,
+      price        INT         NOT NULL,
+      buy_tx_hash  VARCHAR(66) DEFAULT NULL,
+      traded_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (listing_id) REFERENCES ticket_listings(id),
+      FOREIGN KEY (buyer_id)   REFERENCES users(user_id),
+      FOREIGN KEY (seller_id)  REFERENCES users(user_id)
+    )
+  `);
+
+  // ─── combine/market 테이블 생성 ──────────────────────
+
+  await conn.query(`
+    CREATE TABLE fragment_types (
+      id          VARCHAR(60)  PRIMARY KEY,
+      onchain_id  INT          NOT NULL UNIQUE,
+      family      VARCHAR(60)  NOT NULL,
+      team        VARCHAR(20)  NOT NULL,
+      name        VARCHAR(100) NOT NULL,
+      result_name VARCHAR(100) NOT NULL,
+      image_url   TEXT         NOT NULL,
+      note        TEXT         NOT NULL
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE card_types (
+      id        INT          PRIMARY KEY AUTO_INCREMENT,
+      team      VARCHAR(20)  NOT NULL,
+      name      VARCHAR(100) NOT NULL,
+      image_url TEXT         NOT NULL,
+      note      TEXT         NOT NULL
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE combine_recipes (
+      id                  INT AUTO_INCREMENT PRIMARY KEY,
+      fragment_type_id    VARCHAR(60) NOT NULL UNIQUE,
+      result_card_type_id INT         NOT NULL,
+      required_count      INT         NOT NULL DEFAULT 2,
+      FOREIGN KEY (fragment_type_id)    REFERENCES fragment_types(id),
+      FOREIGN KEY (result_card_type_id) REFERENCES card_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE box_reward_pool (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      type             VARCHAR(20)  NOT NULL,
+      fragment_type_id VARCHAR(60)  NULL,
+      card_type_id     INT          NULL,
+      weight           INT          NOT NULL DEFAULT 10,
+      name             VARCHAR(100) NOT NULL,
+      image_url        TEXT         NOT NULL,
+      description      TEXT         NOT NULL,
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id),
+      FOREIGN KEY (card_type_id)     REFERENCES card_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE user_fragments (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      user_id          VARCHAR(50)  NOT NULL,
+      fragment_type_id VARCHAR(60)  NOT NULL,
+      count            INT          NOT NULL DEFAULT 0,
+      UNIQUE KEY uq_user_fragment (user_id, fragment_type_id),
+      FOREIGN KEY (user_id)          REFERENCES users(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE user_cards (
+      id                INT AUTO_INCREMENT PRIMARY KEY,
+      user_id           VARCHAR(50)  NOT NULL,
+      card_type_id      INT          NOT NULL,
+      nft_id            VARCHAR(30)  NOT NULL UNIQUE,
+      display_team      VARCHAR(40)  NULL,
+      display_name      VARCHAR(140) NULL,
+      display_image_url TEXT         NULL,
+      display_note      TEXT         NULL,
+      source_mode       VARCHAR(20)  NULL,
+      obtained_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id)      REFERENCES users(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (card_type_id) REFERENCES card_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE user_boxes (
+      user_id      VARCHAR(50) PRIMARY KEY,
+      season_count INT         NOT NULL DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE nft_tokens (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      token_id         VARCHAR(40)  NOT NULL UNIQUE,
+      token_type       VARCHAR(20)  NOT NULL,
+      owner_user_id    VARCHAR(50)  NOT NULL,
+      owner_wallet     VARCHAR(42)  NOT NULL,
+      fragment_type_id VARCHAR(60)  NULL,
+      listed_listing_id CHAR(36)    NULL,
+      status           VARCHAR(20)  NOT NULL DEFAULT 'owned',
+      source_action    VARCHAR(30)  NOT NULL DEFAULT 'sync',
+      mint_tx_hash     VARCHAR(66)  NOT NULL,
+      last_tx_hash     VARCHAR(66)  NOT NULL,
+      minted_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (owner_user_id)    REFERENCES users(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE onchain_tx_logs (
+      id             CHAR(36)    PRIMARY KEY,
+      user_id        VARCHAR(50) NOT NULL,
+      wallet_address VARCHAR(42) NOT NULL,
+      action_type    VARCHAR(30) NOT NULL,
+      tx_hash        VARCHAR(66) NOT NULL UNIQUE,
+      token_id       VARCHAR(40) NULL,
+      payload_json   JSON        NULL,
+      created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE market_assets (
+      id               VARCHAR(60)  PRIMARY KEY,
+      fragment_type_id VARCHAR(60)  NULL,
+      idol             VARCHAR(20)  NOT NULL,
+      asset_name       VARCHAR(100) NOT NULL,
+      tier             VARCHAR(20)  NOT NULL DEFAULT 'STEADY',
+      color            VARCHAR(10)  NOT NULL DEFAULT '#1456a0',
+      accent           VARCHAR(10)  NOT NULL DEFAULT '#7ec8ff',
+      demand_score     INT          NOT NULL DEFAULT 50,
+      description      TEXT         NOT NULL,
+      UNIQUE KEY uq_market_asset_fragment (fragment_type_id),
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE market_listings (
+      id                   CHAR(36)    PRIMARY KEY,
+      seller_id            VARCHAR(50) NOT NULL,
+      seller_wallet_address VARCHAR(42) NULL,
+      fragment_type_id     VARCHAR(60) NOT NULL,
+      price                INT         NOT NULL,
+      quantity             INT         NOT NULL,
+      is_active            BOOLEAN     NOT NULL DEFAULT TRUE,
+      reserved_by          VARCHAR(50) NULL,
+      reserved_until       DATETIME    NULL,
+      posted_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (seller_id)        REFERENCES users(user_id),
+      FOREIGN KEY (reserved_by)      REFERENCES users(user_id),
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE trades (
+      id                   INT AUTO_INCREMENT PRIMARY KEY,
+      fragment_type_id     VARCHAR(60) NOT NULL,
+      listing_id           CHAR(36)    NULL,
+      buyer_id             VARCHAR(50) NULL,
+      seller_id            VARCHAR(50) NULL,
+      buyer_wallet_address VARCHAR(42) NULL,
+      seller_wallet_address VARCHAR(42) NULL,
+      token_id             VARCHAR(40) NULL,
+      price                INT         NOT NULL,
+      quantity             INT         NOT NULL DEFAULT 1,
+      platform_fee         INT         NOT NULL DEFAULT 0,
+      settlement_amount    INT         NOT NULL DEFAULT 0,
+      tx_hash              VARCHAR(66) NULL,
+      traded_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id),
+      FOREIGN KEY (listing_id)       REFERENCES market_listings(id),
+      FOREIGN KEY (buyer_id)         REFERENCES users(user_id),
+      FOREIGN KEY (seller_id)        REFERENCES users(user_id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE price_history (
+      fragment_type_id VARCHAR(60) NOT NULL,
+      price            INT         NOT NULL,
+      recorded_date    DATE        NOT NULL,
+      PRIMARY KEY (fragment_type_id, recorded_date),
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE purchase_history (
+      id                   CHAR(36)    PRIMARY KEY,
+      buyer_id             VARCHAR(50) NOT NULL,
+      fragment_type_id     VARCHAR(60) NOT NULL,
+      listing_id           CHAR(36)    NULL,
+      seller_id            VARCHAR(50) NULL,
+      buyer_wallet_address VARCHAR(42) NULL,
+      seller_wallet_address VARCHAR(42) NULL,
+      token_id             VARCHAR(40) NULL,
+      price                INT         NOT NULL,
+      quantity             INT         NOT NULL DEFAULT 1,
+      platform_fee         INT         NOT NULL DEFAULT 0,
+      settlement_amount    INT         NOT NULL DEFAULT 0,
+      tx_hash              VARCHAR(66) NULL,
+      purchased_at         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (buyer_id)         REFERENCES users(user_id),
+      FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id),
+      FOREIGN KEY (listing_id)       REFERENCES market_listings(id),
+      FOREIGN KEY (seller_id)        REFERENCES users(user_id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE combine_logs (
+      id                  CHAR(36)    PRIMARY KEY,
+      user_id             VARCHAR(50) NOT NULL,
+      fragment_type_id_1  VARCHAR(60) NOT NULL,
+      fragment_type_id_2  VARCHAR(60) NOT NULL,
+      result_card_type_id INT         NULL,
+      result_name         VARCHAR(100) NOT NULL,
+      result_nft_id       VARCHAR(30)  NULL,
+      combined_at         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id)             REFERENCES users(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (fragment_type_id_1)  REFERENCES fragment_types(id),
+      FOREIGN KEY (fragment_type_id_2)  REFERENCES fragment_types(id),
+      FOREIGN KEY (result_card_type_id) REFERENCES card_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE box_open_logs (
+      id                      CHAR(36)    PRIMARY KEY,
+      user_id                 VARCHAR(50) NOT NULL,
+      wallet_address          VARCHAR(42) NULL,
+      box_token_id            VARCHAR(40) NULL,
+      reward_type             VARCHAR(20) NOT NULL,
+      reward_fragment_type_id VARCHAR(60) NULL,
+      reward_card_type_id     INT         NULL,
+      reward_name             VARCHAR(100) NOT NULL,
+      reward_token_id         VARCHAR(40) NULL,
+      reward_nft_id           VARCHAR(30) NULL,
+      tx_hash                 VARCHAR(66) NULL,
+      opened_at               DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id)                 REFERENCES users(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (reward_fragment_type_id) REFERENCES fragment_types(id),
+      FOREIGN KEY (reward_card_type_id)     REFERENCES card_types(id)
+    )
+  `);
+
+  // ─── 시드 데이터 삽입 ─────────────────────────────────
+
+  for (const user of SEED_USERS) {
+    await conn.query(
+      "INSERT INTO users (user_id, nickname) VALUES (?, ?)",
+      [user.user_id, user.nickname]
+    );
   }
 
+  for (const post of SEED_POSTS) {
+    await conn.query(
+      "INSERT INTO posts (user_id, title, excerpt, content, category) VALUES (?, ?, ?, ?, ?)",
+      [post.user_id, post.title, post.excerpt, post.content, post.category]
+    );
+  }
+
+  for (const comment of SEED_COMMENTS) {
+    const [[post]] = await conn.query(
+      "SELECT post_id FROM posts WHERE title = ?",
+      [comment.post_title]
+    );
+    if (!post) continue;
+    await conn.query(
+      "INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)",
+      [post.post_id, comment.user_id, comment.content]
+    );
+  }
+
+  for (const s of SEED_STADIUMS) {
+    await conn.query(
+      "INSERT INTO stadiums (id, name, location, capacity) VALUES (?, ?, ?, ?)",
+      [s.id, s.name, s.location, s.capacity]
+    );
+  }
+
+  for (const g of SEED_GAMES) {
+    await conn.query(
+      "INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price]
+    );
+  }
+
+  // ─── combine/market 시드 데이터 ──────────────────────
+
+  await conn.query(`
+    INSERT INTO card_types (id, team, name, image_url, note) VALUES
+    (1, '두산', '두산 홈런볼 카드',           'https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=600&q=80', '개막 시리즈 홈런 장면이 담긴 한정 카드'),
+    (2, '두산', '두산 홈런볼 골드컷 카드',    'https://images.unsplash.com/photo-1584285405429-136bf988919c?w=600&q=80', '홈런 장면의 골드 프레임 컷이 담긴 완성 카드'),
+    (3, 'LG',  'LG 승리 배지 카드',          'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=600&q=80', '연승 구간마다 발행되는 시즌형 배지 카드'),
+    (4, 'LG',  'LG 끝내기 컷 카드',          'https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?w=600&q=80', '끝내기 순간을 담은 하이라이트 카드'),
+    (5, '롯데', '롯데 원정 포토카드',          'https://images.unsplash.com/photo-1508344928928-7165b67de128?w=600&q=80', '원정 직관 인증과 함께 수요가 붙는 포토카드'),
+    (6, '롯데', '롯데 응원석 파노라마 카드',   'https://images.unsplash.com/photo-1529516548873-9ce57c8f155e?w=600&q=80', '응원석 전체를 담은 파노라마 완성 카드'),
+    (7, 'KIA', 'KIA 응원타월 배지 카드',      'https://images.unsplash.com/photo-1567427017947-545c5f8d16ad?w=600&q=80', '굿즈형 배지로 시즌 내내 꾸준히 거래됩니다'),
+    (8, 'KIA', 'KIA 레전드 응원컷 카드',      'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=600&q=80', '응원석 명장면이 담긴 완성 카드')
+  `);
+
+  await conn.query(`
+    INSERT INTO fragment_types (id, onchain_id, family, team, name, result_name, image_url, note) VALUES
+    ('bears-slugger-1', 1, 'bears-slugger', '두산', '두산 홈런볼 카드 파편',      '두산 홈런볼 카드',         'https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=400&q=80', '장터에서 가장 거래가 많은 대표 선수 카드 조각'),
+    ('bears-slugger-2', 2, 'bears-slugger', '두산', '두산 홈런볼 골드컷 파편',    '두산 홈런볼 골드컷 카드',  'https://images.unsplash.com/photo-1584285405429-136bf988919c?w=400&q=80', '홈런 장면이 들어간 특별 컷 조각'),
+    ('twins-badge-1',   3, 'twins-badge',   'LG',  'LG 승리 배지 파편',          'LG 승리 배지 카드',        'https://images.unsplash.com/photo-1566577134770-3d85bb3a9cc4?w=400&q=80', '연승 구간에 맞춰 수요가 붙는 배지형 조각'),
+    ('twins-badge-2',   4, 'twins-badge',   'LG',  'LG 끝내기 컷 파편',          'LG 끝내기 컷 카드',        'https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?w=400&q=80', '끝내기 순간 컷이 들어간 시즌형 조각'),
+    ('giants-photo-1',  5, 'giants-photo',  '롯데', '롯데 원정 포토카드 파편',    '롯데 원정 포토카드',        'https://images.unsplash.com/photo-1529516548873-9ce57c8f155e?w=400&q=80', '원정 직관 인증에 자주 쓰이는 포토카드 조각'),
+    ('giants-photo-2',  6, 'giants-photo',  '롯데', '롯데 응원석 파노라마 파편',  '롯데 응원석 파노라마 카드', 'https://images.unsplash.com/photo-1508344928928-7165b67de128?w=400&q=80', '응원석 장면이 들어간 확장 컷 조각'),
+    ('tigers-towel-1',  7, 'tigers-towel',  'KIA', 'KIA 응원타월 배지 파편',     'KIA 응원타월 배지 카드',   'https://images.unsplash.com/photo-1567427017947-545c5f8d16ad?w=400&q=80', '굿즈형 배지 카드에 쓰이는 대표 파편'),
+    ('tigers-towel-2',  8, 'tigers-towel',  'KIA', 'KIA 레전드 응원컷 파편',     'KIA 레전드 응원컷 카드',   'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=400&q=80', '응원석 장면이 들어간 시즌형 특별 파편')
+  `);
+
+  await conn.query(`
+    INSERT INTO combine_recipes (fragment_type_id, result_card_type_id, required_count) VALUES
+    ('bears-slugger-1', 1, 2),
+    ('bears-slugger-2', 2, 2),
+    ('twins-badge-1',   3, 2),
+    ('twins-badge-2',   4, 2),
+    ('giants-photo-1',  5, 2),
+    ('giants-photo-2',  6, 2),
+    ('tigers-towel-1',  7, 2),
+    ('tigers-towel-2',  8, 2)
+  `);
+
+  await conn.query(`
+    INSERT INTO box_reward_pool (type, fragment_type_id, card_type_id, weight, name, image_url, description) VALUES
+    ('fragment', 'bears-slugger-1', NULL, 18, '두산 홈런볼 카드 파편',     'https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=400&q=80', '두산 홈런볼 카드 파편 1개를 획득했습니다.'),
+    ('fragment', 'bears-slugger-2', NULL, 12, '두산 홈런볼 골드컷 파편',   'https://images.unsplash.com/photo-1584285405429-136bf988919c?w=400&q=80', '두산 홈런볼 골드컷 파편 1개를 획득했습니다.'),
+    ('fragment', 'twins-badge-1',   NULL, 18, 'LG 승리 배지 파편',         'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=400&q=80', 'LG 승리 배지 파편 1개를 획득했습니다.'),
+    ('fragment', 'twins-badge-2',   NULL, 14, 'LG 끝내기 컷 파편',         'https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?w=400&q=80', 'LG 끝내기 컷 파편 1개를 획득했습니다.'),
+    ('fragment', 'giants-photo-1',  NULL, 14, '롯데 원정 포토카드 파편',   'https://images.unsplash.com/photo-1508344928928-7165b67de128?w=400&q=80', '롯데 원정 포토카드 파편 1개를 획득했습니다.'),
+    ('fragment', 'giants-photo-2',  NULL, 10, '롯데 응원석 파노라마 파편', 'https://images.unsplash.com/photo-1529516548873-9ce57c8f155e?w=400&q=80', '롯데 응원석 파노라마 파편 1개를 획득했습니다.'),
+    ('fragment', 'tigers-towel-1',  NULL,  9, 'KIA 응원타월 배지 파편',   'https://images.unsplash.com/photo-1567427017947-545c5f8d16ad?w=400&q=80', 'KIA 응원타월 배지 파편 1개를 획득했습니다.'),
+    ('fragment', 'tigers-towel-2',  NULL,  5, 'KIA 레전드 응원컷 파편',   'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=400&q=80', 'KIA 레전드 응원컷 파편 1개를 획득했습니다.'),
+    ('goods',    NULL, 1, 10, '두산 홈런볼 카드',          'https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=600&q=80', '두산 홈런볼 원본 굿즈 NFT를 획득했습니다!'),
+    ('goods',    NULL, 2,  5, '두산 홈런볼 골드컷 카드',   'https://images.unsplash.com/photo-1584285405429-136bf988919c?w=600&q=80', '두산 홈런볼 골드컷 원본 굿즈 NFT를 획득했습니다!'),
+    ('goods',    NULL, 3, 10, 'LG 승리 배지 카드',         'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=600&q=80', 'LG 승리 배지 원본 굿즈 NFT를 획득했습니다!'),
+    ('goods',    NULL, 4,  8, 'LG 끝내기 컷 카드',         'https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?w=600&q=80', 'LG 끝내기 컷 원본 굿즈 NFT를 획득했습니다!'),
+    ('goods',    NULL, 5,  8, '롯데 원정 포토카드',         'https://images.unsplash.com/photo-1508344928928-7165b67de128?w=600&q=80', '롯데 원정 포토카드 원본 굿즈 NFT를 획득했습니다!'),
+    ('goods',    NULL, 6,  5, '롯데 응원석 파노라마 카드',  'https://images.unsplash.com/photo-1529516548873-9ce57c8f155e?w=600&q=80', '롯데 응원석 파노라마 원본 굿즈 NFT를 획득했습니다!'),
+    ('goods',    NULL, 7,  8, 'KIA 응원타월 배지 카드',     'https://images.unsplash.com/photo-1567427017947-545c5f8d16ad?w=600&q=80', 'KIA 응원타월 배지 원본 굿즈 NFT를 획득했습니다!'),
+    ('goods',    NULL, 8,  3, 'KIA 레전드 응원컷 카드',     'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=600&q=80', 'KIA 레전드 응원컷 원본 굿즈 NFT를 획득했습니다!')
+  `);
+
+  await conn.query(`
+    INSERT INTO market_assets (id, fragment_type_id, idol, asset_name, tier, color, accent, demand_score, description) VALUES
+    ('bears-slugger',   'bears-slugger-1', '두산', '두산 홈런볼 카드 파편',     'HOT',    '#1456a0', '#7ec8ff', 94, '개막 시리즈 이후 수요가 빠르게 붙은 대표 파편입니다.'),
+    ('bears-slugger-2', 'bears-slugger-2', '두산', '두산 홈런볼 골드컷 파편',   'RISING', '#1456a0', '#7ec8ff', 72, '홈런 장면이 들어간 특별 컷 조각으로 희귀 수요가 붙습니다.'),
+    ('twins-win',       'twins-badge-1',   'LG',   'LG 승리 배지 파편',         'LIVE',   '#8d7cf6', '#2dba73', 61, '연승 구간에 거래량이 붙는 배지 파편입니다.'),
+    ('twins-badge-2',   'twins-badge-2',   'LG',   'LG 끝내기 컷 파편',         'STEADY', '#8d7cf6', '#2dba73', 45, '끝내기 순간 컷이 들어간 시즌형 파편입니다.'),
+    ('giants-photocard','giants-photo-1',  '롯데', '롯데 원정 포토카드 파편',   'RISING', '#2dba73', '#ff9d3b', 76, '원정 직관 인증과 함께 수요가 붙는 포토카드 파편입니다.'),
+    ('giants-photo-2',  'giants-photo-2',  '롯데', '롯데 응원석 파노라마 파편', 'LIVE',   '#2dba73', '#ff9d3b', 68, '응원석 장면이 들어간 확장 컷 파편입니다.'),
+    ('tigers-towel',    'tigers-towel-1',  'KIA',  'KIA 응원타월 배지 파편',    'STEADY', '#ff9d3b', '#1456a0', 58, '굿즈형 배지 카드에 쓰이는 대표 파편입니다.'),
+    ('tigers-towel-2',  'tigers-towel-2',  'KIA',  'KIA 레전드 응원컷 파편',    'STEADY', '#ff9d3b', '#1456a0', 47, '응원 장면이 들어간 시즌형 특별 파편입니다.')
+  `);
+
+  await conn.query(`
+    INSERT INTO ticket_listings (id, seller_id, game_date, home_team, away_team, seat_section, original_price, listed_price, status) VALUES
+    ('tl-seed-0000-0000-000000000001', 'user_bh',  '2026-04-15', '삼성', 'LG',  '1루 내야 지정석', 13000, 14000, 'active'),
+    ('tl-seed-0000-0000-000000000002', 'user_tm',  '2026-04-19', 'LG',  'NC',  '외야 응원석',      13000, 13000, 'active'),
+    ('tl-seed-0000-0000-000000000003', 'admin_01', '2026-04-22', '두산', '키움', '3루 내야 지정석', 13000, 13500, 'active'),
+    ('tl-seed-0000-0000-000000000004', 'user_bh',  '2026-04-22', '두산', '키움', '외야 응원석',     13000, 12000, 'active'),
+    ('tl-seed-0000-0000-000000000005', 'user_tm',  '2026-04-15', '키움', '한화', '내야 일반석',     13000, 13000, 'active')
+  `);
+
+  await conn.query(`
+    INSERT INTO price_history (fragment_type_id, price, recorded_date) VALUES
+    ('bears-slugger-1', 12100, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('bears-slugger-1', 13300, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('bears-slugger-1', 15100, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('bears-slugger-1', 16600, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('bears-slugger-1', 15800, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('bears-slugger-1', 17800, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('bears-slugger-1', 19400, CURDATE()),
+    ('twins-badge-1',   11800, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('twins-badge-1',   11200, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('twins-badge-1',   10400, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('twins-badge-1',   10100, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('twins-badge-1',    9900, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('twins-badge-1',    9500, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('twins-badge-1',    9200, CURDATE()),
+    ('giants-photo-1',   6100, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('giants-photo-1',   6400, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('giants-photo-1',   6900, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('giants-photo-1',   7200, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('giants-photo-1',   7600, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('giants-photo-1',   7800, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('giants-photo-1',   8100, CURDATE()),
+    ('tigers-towel-1',   5200, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('tigers-towel-1',   5400, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('tigers-towel-1',   5500, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('tigers-towel-1',   5600, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('tigers-towel-1',   5700, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('tigers-towel-1',   5900, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('tigers-towel-1',   6100, CURDATE()),
+    ('bears-slugger-2', 15000, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('bears-slugger-2', 15800, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('bears-slugger-2', 16500, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('bears-slugger-2', 17200, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('bears-slugger-2', 16800, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('bears-slugger-2', 18100, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('bears-slugger-2', 19000, CURDATE()),
+    ('twins-badge-2',    8200, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('twins-badge-2',    8000, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('twins-badge-2',    7800, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('twins-badge-2',    7600, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('twins-badge-2',    7400, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('twins-badge-2',    7200, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('twins-badge-2',    7000, CURDATE()),
+    ('giants-photo-2',   9000, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('giants-photo-2',   9300, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('giants-photo-2',   9600, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('giants-photo-2',   9800, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('giants-photo-2',  10100, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('giants-photo-2',  10400, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('giants-photo-2',  10700, CURDATE()),
+    ('tigers-towel-2',   4800, DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+    ('tigers-towel-2',   4900, DATE_SUB(CURDATE(), INTERVAL 5 DAY)),
+    ('tigers-towel-2',   5000, DATE_SUB(CURDATE(), INTERVAL 4 DAY)),
+    ('tigers-towel-2',   5100, DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+    ('tigers-towel-2',   5200, DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+    ('tigers-towel-2',   5400, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
+    ('tigers-towel-2',   5600, CURDATE())
+  `);
+
   await conn.end();
-  console.log("✅ DB 초기화 완료");
+  console.log("✅ DB 초기화 및 시드 데이터 삽입 완료");
 }
 
 module.exports = { initDB, DB_NAME, DB_CONFIG };

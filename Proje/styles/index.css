@@ -1,0 +1,306 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+    'Pretendard Variable', 'Pretendard', 'Noto Sans KR', sans-serif;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+  text-rendering: optimizeLegibility;
+  background: #eef2f4;
+  color: #223548;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+body[data-theme="dark"] {
+  background: #111a23;
+  color: #dde7f0;
+}
+
+body[data-theme="dark"] .page-shell {
+  filter: brightness(0.8) saturate(0.88);
+}
+
+body[data-theme="dark"] .page-title,
+body[data-theme="dark"] .section-title,
+body[data-theme="dark"] .page-section-title,
+body[data-theme="dark"] .market-section-title {
+  color: #dce6f0 !important;
+}
+
+body[data-theme="dark"] .page-subtitle,
+body[data-theme="dark"] .section-copy,
+body[data-theme="dark"] .page-body,
+body[data-theme="dark"] .market-body,
+body[data-theme="dark"] .page-muted,
+body[data-theme="dark"] .market-muted,
+body[data-theme="dark"] .page-stat-label,
+body[data-theme="dark"] .market-stat-label,
+body[data-theme="dark"] .market-list-title {
+  color: #93a3b6 !important;
+}
+
+body[data-theme="dark"] .page-eyebrow,
+body[data-theme="dark"] .market-eyebrow {
+  color: #7ea7d8 !important;
+}
+
+body[data-theme="dark"] .page-shell input,
+body[data-theme="dark"] .page-shell select,
+body[data-theme="dark"] .page-shell textarea {
+  background: #19232d !important;
+  color: #dde6ef !important;
+  border-color: #2d3a48 !important;
+  box-shadow: none !important;
+}
+
+body[data-theme="dark"] .page-shell input::placeholder,
+body[data-theme="dark"] .page-shell textarea::placeholder {
+  color: #7e8ea2 !important;
+}
+
+body[data-theme="dark"] .page-shell img {
+  filter: brightness(0.88) saturate(0.92);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  letter-spacing: -0.03em;
+}
+
+.retro-title {
+  font-family: 'Orbitron', sans-serif;
+}
+
+.page-shell {
+  width: min(1280px, calc(100% - 2rem));
+  margin-inline: auto;
+  padding-block: 2rem 3.5rem;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.page-header--center {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.page-eyebrow,
+.market-eyebrow {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.page-title {
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.05em;
+  color: #22344a;
+}
+
+.section-title,
+.page-section-title,
+.market-section-title {
+  font-size: clamp(1.9rem, 2.6vw, 2.6rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+}
+
+.page-subtitle,
+.section-copy,
+.page-body,
+.market-body {
+  font-size: 0.98rem;
+  line-height: 1.78;
+  color: #5d6e82;
+}
+
+.page-muted,
+.market-muted {
+  font-size: 0.88rem;
+  line-height: 1.65;
+  color: #728197;
+}
+
+.page-stat-label,
+.market-stat-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #7a889c;
+}
+
+.page-value,
+.market-value {
+  font-size: clamp(1.45rem, 2vw, 1.85rem);
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.04em;
+}
+
+.panel-surface {
+  background: rgba(14, 8, 31, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.panel-surface-strong {
+  background: linear-gradient(145deg, rgba(18, 9, 38, 0.92) 0%, rgba(10, 5, 26, 0.96) 100%);
+  border: 1px solid rgba(255, 16, 240, 0.18);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.soft-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.market-list-card {
+  padding: 1rem 1.1rem;
+}
+
+.market-list-title {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: #1d3047;
+}
+
+/* Glassmorphism utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Chrome/metallic effect */
+.chrome-text {
+  background: linear-gradient(90deg, 
+    #fff 0%, 
+    #e0e0e0 25%, 
+    #fff 50%, 
+    #e0e0e0 75%, 
+    #fff 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: chrome-shine 3s linear infinite;
+}
+
+@keyframes chrome-shine {
+  to {
+    background-position: 200% center;
+  }
+}
+
+/* Neon glow effects */
+.neon-pink {
+  text-shadow: 0 0 10px rgba(255, 16, 240, 0.8),
+               0 0 20px rgba(255, 16, 240, 0.6),
+               0 0 30px rgba(255, 16, 240, 0.4);
+}
+
+.neon-cyan {
+  text-shadow: 0 0 10px rgba(0, 217, 255, 0.8),
+               0 0 20px rgba(0, 217, 255, 0.6),
+               0 0 30px rgba(0, 217, 255, 0.4);
+}
+
+.neon-green {
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.8),
+               0 0 20px rgba(0, 255, 136, 0.6),
+               0 0 30px rgba(0, 255, 136, 0.4);
+}
+
+.neon-border-pink {
+  box-shadow: 0 0 10px rgba(255, 16, 240, 0.5),
+              0 0 20px rgba(255, 16, 240, 0.3),
+              inset 0 0 10px rgba(255, 16, 240, 0.2);
+}
+
+.neon-border-cyan {
+  box-shadow: 0 0 10px rgba(0, 217, 255, 0.5),
+              0 0 20px rgba(0, 217, 255, 0.3),
+              inset 0 0 10px rgba(0, 217, 255, 0.2);
+}
+
+/* Grid background */
+.retro-grid {
+  background-image: 
+    linear-gradient(rgba(255, 16, 240, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 16, 240, 0.1) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* Scanlines effect */
+.scanlines {
+  position: relative;
+}
+
+.scanlines::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.15) 0px,
+    transparent 1px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.15) 3px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Holographic shimmer animation */
+@keyframes shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+/* Smooth scrollbar */
+html {
+  scroll-behavior: smooth;
+}

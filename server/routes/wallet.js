@@ -61,7 +61,7 @@ router.get('/challenge', requireAuth, async (req, res) => {
     );
     if (!wallet) return res.status(400).json({ error: '먼저 지갑을 연결해주세요.' });
 
-    const nonce = `BASE-NINE-AUTH:${crypto.randomBytes(16).toString('hex')}`;
+    const nonce = `BASE-CHAIN-AUTH:${crypto.randomBytes(16).toString('hex')}`;
     await _pool.query(
       'UPDATE user_wallets SET nonce = ? WHERE user_id = ?',
       [nonce, req.user.user_id]

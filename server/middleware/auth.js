@@ -29,4 +29,21 @@ async function requireAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, setPool };
+// 토큰이 있으면 req.user 세팅, 없어도 통과
+async function optionalAuth(req, res, next) {
+  const header = req.headers['authorization'];
+  if (!header || !header.startsWith('Bearer ')) return next();
+  try {
+    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'fallback-secret');
+    const [[user]] = await _pool.query(
+      'SELECT user_id, nickname, email, login_type FROM users WHERE user_id = ?',
+      [payload.sub]
+    );
+    if (user) req.user = user;
+  } catch {
+    // 토큰 이상해도 그냥 통과
+  }
+  next();
+}
+
+module.exports = { requireAuth, optionalAuth, setPool };

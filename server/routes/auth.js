@@ -134,9 +134,70 @@ router.post('/google', async (req, res) => {
   }
 });
 
+// POST /api/auth/find-id — 닉네임으로 이메일(아이디) 찾기
+router.post('/find-id', async (req, res) => {
+  try {
+    const { nickname } = req.body;
+    if (!nickname) return res.status(400).json({ error: '닉네임을 입력해주세요.' });
+
+    const [[user]] = await _pool.query(
+      "SELECT email FROM users WHERE nickname = ? AND login_type = 'local'",
+      [nickname]
+    );
+    if (!user) return res.status(404).json({ error: '해당 닉네임으로 등록된 계정이 없습니다.' });
+
+    // 이메일 마스킹: ex***@gmail.com
+    const [local, domain] = user.email.split('@');
+    const masked = local.slice(0, 2) + '*'.repeat(Math.max(local.length - 2, 3)) + '@' + domain;
+    res.json({ maskedEmail: masked });
+  } catch (err) {
+    console.error('[find-id]', err);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/auth/find-password — 이메일로 임시 비밀번호 발급
+router.post('/find-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: '이메일을 입력해주세요.' });
+
+    const [[user]] = await _pool.query(
+      "SELECT user_id FROM users WHERE email = ? AND login_type = 'local'",
+      [email]
+    );
+    if (!user) return res.status(404).json({ error: '해당 이메일로 등록된 계정이 없습니다.' });
+
+    // 임시 비밀번호 생성 (영문+숫자 8자리)
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const tempPassword = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+
+    const password_hash = await bcrypt.hash(tempPassword, 10);
+    await _pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [password_hash, user.user_id]);
+    res.json({ tempPassword });
+  } catch (err) {
+    console.error('[find-password]', err);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/auth/me — 내 정보 조회 (JWT 필요)
 router.get('/me', requireAuth, (req, res) => {
   res.json(req.user);
+});
+
+// GET /api/auth/wallet — 내 등록 지갑 주소 조회 (JWT 필요)
+router.get('/wallet', requireAuth, async (req, res) => {
+  try {
+    const [[row]] = await _pool.query(
+      'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
+      [req.user.user_id]
+    );
+    res.json({ walletAddress: row?.wallet_address ?? null });
+  } catch (err) {
+    console.error('[auth/wallet]', err);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
 });
 
 module.exports = { router, setPool };

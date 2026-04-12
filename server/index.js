@@ -5,9 +5,16 @@ const mysql = require("mysql2/promise");
 const { initDB, DB_NAME, DB_CONFIG } = require("./db/init");
 
 const authMiddleware = require('./middleware/auth');
-const authRoute     = require('./routes/auth');
-const walletRoute   = require('./routes/wallet');
-const didRoute      = require('./routes/did');
+const authRoute      = require('./routes/auth');
+const walletRoute    = require('./routes/wallet');
+const didRoute       = require('./routes/did');
+const ticketRoute    = require('./routes/ticket');
+const myTicketRoute  = require('./routes/myTicket');
+const noticeRoute    = require('./routes/notice');
+const combineRoute   = require('./routes/combine');
+const marketRoute       = require('./routes/market');
+const ticketResaleRoute = require('./routes/ticketResale');
+const txHistoryRoute    = require('./routes/txHistory');
 
 const app = express();
 app.use(cors({
@@ -35,11 +42,28 @@ async function start() {
   authRoute.setPool(pool);
   walletRoute.setPool(pool);
   didRoute.setPool(pool);
+  ticketRoute.setPool(pool);
+  myTicketRoute.setPool(pool);
+  noticeRoute.setPool(pool);
+  combineRoute.setPool(pool);
+  marketRoute.setPool(pool);
+  ticketResaleRoute.setPool(pool);
+  txHistoryRoute.setPool(pool);
 
   // ─── 신규 라우트 ────────────────────────────────────────
-  app.use('/api/auth',   authRoute.router);
-  app.use('/api/wallet', walletRoute.router);
-  app.use('/api/did',    didRoute.router);
+  app.use('/api/auth',       authRoute.router);
+  app.use('/api/wallet',     walletRoute.router);
+  app.use('/api/did',        didRoute.router);
+  app.use('/api/tickets',    ticketRoute.router);
+  app.use('/api/my-tickets', myTicketRoute.router);
+  app.use('/api/notices',    noticeRoute.router);
+  app.use('/api',            combineRoute.router);
+  app.use('/api/market',        marketRoute.router);
+  app.use('/api/ticket-resale', ticketResaleRoute.router);
+  app.use('/api/tx-history',   txHistoryRoute.router);
+
+  // 업로드 이미지 정적 서빙
+  app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
 
   // ─── 기존 게시판 라우트 ─────────────────────────────────
 
