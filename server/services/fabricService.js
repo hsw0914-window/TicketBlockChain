@@ -15,7 +15,7 @@ const channelName   = 'channel1';
 const chaincodeName = 'ticket';
 
 const ccpPath    = path.resolve(__dirname, '../../fabric/application/connection-org1.json');
-const walletPath = path.join(__dirname,    '../../fabric/application/wallet');
+const walletPath = path.join(__dirname,    '../../fabric/wallet');
 
 function hashDid(walletAddress) {
   return crypto.createHash('sha256').update(walletAddress.toLowerCase()).digest('hex');
