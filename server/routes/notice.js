@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 let pool;
 function setPool(p) { pool = p; }
@@ -34,7 +35,7 @@ router.get('/', async (req, res) => {
 });
 
 // [DELETE] 전체 삭제 (/:id 보다 위에 위치해야 함)
-router.delete('/', async (req, res) => {
+router.delete('/', requireAuth, requireAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM notices');
     await pool.query('ALTER TABLE notices AUTO_INCREMENT = 1');
@@ -45,7 +46,7 @@ router.delete('/', async (req, res) => {
 });
 
 // [POST] 공지 등록
-router.post('/', upload.single('image'), async (req, res) => {
+router.post('/', requireAuth, requireAdmin, upload.single('image'), async (req, res) => {
   try {
     const { title, content, type, is_pinned } = req.body;
     const image_url = req.file ? `/uploads/${req.file.filename}` : null;
@@ -60,7 +61,7 @@ router.post('/', upload.single('image'), async (req, res) => {
 });
 
 // [PUT] 공지 수정
-router.put('/:id', upload.single('image'), async (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, upload.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
     const { title, content, type, is_pinned } = req.body;
@@ -77,7 +78,7 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 });
 
 // [DELETE] 낱개 삭제
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM notices WHERE id = ?', [req.params.id]);
     res.json({ message: '삭제 완료' });

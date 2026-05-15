@@ -12,13 +12,19 @@ function normalizeTicket(t) {
   const gameDate = t.game_date ? String(t.game_date).slice(0, 10) : "";
   const gameTime = t.game_time ? String(t.game_time).slice(0, 8) : "00:00:00";
   const dbStatus = t.status; // 'confirmed' | 'used'
+  const seatParts = [
+    t.grade,
+    t.block ? `${t.block}블록` : null,
+    t.row_num ? `${t.row_num}열` : null,
+    t.seat_number ? `${t.seat_number}번` : null,
+  ].filter(Boolean);
 
   return {
     ticketId:   t.id,
     matchName:  t.game_name ?? t.game_id,
     stadium:    [t.stadium_name, t.location].filter(Boolean).join(", "),
     matchTime:  gameDate ? `${gameDate}T${gameTime}` : null,
-    seatInfo:   `${t.grade ?? ""} ${t.block ?? ""}블록 ${t.row_num ?? ""}열 ${t.seat_number ?? ""}번`.trim(),
+    seatInfo:   seatParts.join(" ").trim(),
     gate:       t.grade ?? "",
     status:     dbStatus === "confirmed" ? "ACTIVE" : "USED",
     ticketCode: `GAME-${String(t.id).slice(0, 8).toUpperCase()}`,
@@ -42,7 +48,7 @@ router.get("/nearest/:walletAddress", async (req, res) => {
        LEFT JOIN stadiums s ON g.stadium_id = s.id
        WHERE t.wallet_address = ?
          AND t.status = 'confirmed'
-         AND TIMESTAMP(g.game_date, g.game_time) >= NOW()
+         AND TIMESTAMP(g.game_date, g.game_time) >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
        ORDER BY g.game_date ASC, g.game_time ASC
        LIMIT 1`,
       [walletAddress],

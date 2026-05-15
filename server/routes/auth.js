@@ -13,6 +13,23 @@ function setPool(pool) {
 
 const jwtSecret = () => process.env.JWT_SECRET || 'fallback-secret';
 
+function getAdminEmails() {
+  return (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function syncRoleFromEmail(userId, email) {
+  if (!email) {
+    const [[user]] = await _pool.query('SELECT role FROM users WHERE user_id = ?', [userId]);
+    return user?.role ?? 'user';
+  }
+  const role = getAdminEmails().includes(email.toLowerCase()) ? 'admin' : 'user';
+  await _pool.query('UPDATE users SET role = ? WHERE user_id = ?', [role, userId]);
+  return role;
+}
+
 // POST /api/auth/register — 회원가입
 router.post('/register', async (req, res) => {
   try {
@@ -34,12 +51,13 @@ router.post('/register', async (req, res) => {
     const password_hash = await bcrypt.hash(password, 10);
 
     await _pool.query(
-      'INSERT INTO users (user_id, nickname, email, password_hash, login_type) VALUES (?, ?, ?, ?, ?)',
-      [user_id, nickname, email, password_hash, 'local']
+      'INSERT INTO users (user_id, nickname, email, password_hash, login_type, role) VALUES (?, ?, ?, ?, ?, ?)',
+      [user_id, nickname, email, password_hash, 'local', 'user']
     );
 
+    const role = await syncRoleFromEmail(user_id, email);
     const token = jwt.sign({ sub: user_id }, jwtSecret(), { expiresIn: '7d' });
-    res.status(201).json({ token, user: { user_id, nickname, email } });
+    res.status(201).json({ token, user: { user_id, nickname, email, role } });
   } catch (err) {
     console.error('[register]', err);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -67,8 +85,17 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' });
     }
 
+    const role = await syncRoleFromEmail(user.user_id, user.email);
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
-    res.json({ token, user: { user_id: user.user_id, nickname: user.nickname, email: user.email } });
+    res.json({
+      token,
+      user: {
+        user_id: user.user_id,
+        nickname: user.nickname,
+        email: user.email,
+        role,
+      },
+    });
   } catch (err) {
     console.error('[login]', err);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -78,17 +105,17 @@ router.post('/login', async (req, res) => {
 // POST /api/auth/google — 구글 로그인 / 자동 회원가입
 router.post('/google', async (req, res) => {
   try {
-    const { access_token } = req.body;
-    if (!access_token) return res.status(400).json({ error: 'access_token이 필요합니다.' });
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ error: 'credential이 필요합니다.' });
 
-    // Google userinfo API로 사용자 정보 검증
-    const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${access_token}` },
-    });
+    const googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
     if (!googleRes.ok) return res.status(401).json({ error: '구글 토큰 검증 실패' });
 
-    const { sub: google_id, email, name, picture } = await googleRes.json();
+    const { sub: google_id, email, name, picture, aud } = await googleRes.json();
     if (!google_id || !email) return res.status(401).json({ error: '구글 사용자 정보를 가져올 수 없습니다.' });
+    if (aud && process.env.GOOGLE_CLIENT_ID && aud !== process.env.GOOGLE_CLIENT_ID) {
+      return res.status(401).json({ error: '현재 앱용 구글 클라이언트가 아닙니다.' });
+    }
 
     // 1) google_id로 기존 사용자 조회
     let [[user]] = await _pool.query('SELECT * FROM users WHERE google_id = ?', [google_id]);
@@ -109,8 +136,8 @@ router.post('/google', async (req, res) => {
         const nickname = name ?? email.split('@')[0];
 
         await _pool.query(
-          'INSERT INTO users (user_id, nickname, email, google_id, login_type, profile_image) VALUES (?, ?, ?, ?, ?, ?)',
-          [user_id, nickname, email, google_id, 'google', picture ?? null]
+          'INSERT INTO users (user_id, nickname, email, google_id, login_type, profile_image, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [user_id, nickname, email, google_id, 'google', picture ?? null, 'user']
         );
         [[user]] = await _pool.query('SELECT * FROM users WHERE user_id = ?', [user_id]);
       }
@@ -118,6 +145,7 @@ router.post('/google', async (req, res) => {
 
     if (!user.is_active) return res.status(403).json({ error: '비활성화된 계정입니다.' });
 
+    const role = await syncRoleFromEmail(user.user_id, user.email);
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
     res.json({
       token,
@@ -126,6 +154,7 @@ router.post('/google', async (req, res) => {
         nickname: user.nickname,
         email: user.email,
         profile_image: user.profile_image ?? null,
+        role,
       },
     });
   } catch (err) {
@@ -182,8 +211,14 @@ router.post('/find-password', async (req, res) => {
 });
 
 // GET /api/auth/me — 내 정보 조회 (JWT 필요)
-router.get('/me', requireAuth, (req, res) => {
-  res.json(req.user);
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const role = await syncRoleFromEmail(req.user.user_id, req.user.email);
+    res.json({ ...req.user, role });
+  } catch (err) {
+    console.error('[auth/me]', err);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
 });
 
 // GET /api/auth/wallet — 내 등록 지갑 주소 조회 (JWT 필요)

@@ -2,21 +2,23 @@ require('dotenv').config();
 const mysql = require("mysql2/promise");
 
 const DB_CONFIG = {
-  host: "localhost",
-  user: "root",
+  host: process.env.DB_HOST || "localhost",
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD || "",
   multipleStatements: true,
 };
 
 const DB_NAME = "ticketblockchain";
+const RESET_DB_ON_START = String(process.env.RESET_DB_ON_START || "false").toLowerCase() === "true";
 
 // ─── 시드 데이터 ──────────────────────────────────────────
 
 const SEED_USERS = [
-  { user_id: "admin_01",  nickname: "BASE CHAIN 운영팀" },
-  { user_id: "user_bh",   nickname: "Baseball Hunter" },
-  { user_id: "user_tm",   nickname: "Ticket Mint" },
-  { user_id: "viewer",    nickname: "나" },
+  { user_id: "admin_01",  nickname: "BASE CHAIN 운영팀", role: "admin" },
+  { user_id: "user_bh",   nickname: "Baseball Hunter", role: "user" },
+  { user_id: "user_tm",   nickname: "Ticket Mint", role: "user" },
+  { user_id: "viewer",    nickname: "나", role: "user" },
 ];
 
 const SEED_POSTS = [
@@ -103,20 +105,90 @@ const SEED_STADIUMS = [
   { id: "gochuck", name: "고척스카이돔",             location: "서울특별시 구로구",   capacity: 16744 },
   { id: "gwangju", name: "광주-기아 챔피언스 필드",  location: "광주광역시 북구",     capacity: 20000 },
   { id: "daejeon", name: "한화생명 이글스파크",      location: "대전광역시 중구",     capacity: 13000 },
+  { id: "daegu",   name: "대구삼성라이온즈파크",      location: "대구광역시 수성구",   capacity: 24000 },
+  { id: "changwon",name: "창원NC파크",               location: "경상남도 창원시",     capacity: 22000 },
+  { id: "suwon",   name: "수원KT위즈파크",            location: "경기도 수원시",       capacity: 20000 },
+  { id: "pohang",  name: "포항야구장",                location: "경상북도 포항시",     capacity: 12000 },
 ];
 
 const SEED_GAMES = [
-  { id: "G001", home_team: "두산", away_team: "LG",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
-  { id: "G002", home_team: "삼성", away_team: "KT",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "munhak",  status: "ALMOST",   base_price: 13000 },
-  { id: "G003", home_team: "롯데", away_team: "NC",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "sajik",   status: "SOLDOUT",  base_price: 13000 },
-  { id: "G004", home_team: "삼성", away_team: "LG",  game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
-  { id: "G005", home_team: "키움", away_team: "한화", game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "gochuck", status: "OPEN",     base_price: 13000 },
-  { id: "G006", home_team: "KIA",  away_team: "두산", game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "gwangju", status: "UPCOMING", base_price: 13000 },
-  { id: "G007", home_team: "LG",   away_team: "NC",  game_date: "2026-04-19", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
-  { id: "G008", home_team: "한화", away_team: "SSG", game_date: "2026-04-19", game_time: "14:00:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000 },
-  { id: "G009", home_team: "두산", away_team: "키움", game_date: "2026-04-22", game_time: "18:30:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
-  { id: "G010", home_team: "KIA",  away_team: "롯데", game_date: "2026-04-22", game_time: "18:30:00", stadium_id: "sajik",   status: "UPCOMING", base_price: 13000 },
+  // 2026.05.15 기준 KBO 공식 일정 기반 데모 경기
+  { id: "G001", home_team: "두산", away_team: "롯데", game_date: "2026-05-15", game_time: "16:00:00", stadium_id: "jamsil",   status: "OPEN",     base_price: 13000 },
+  { id: "G002", home_team: "SSG",  away_team: "LG",   game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "munhak",   status: "ALMOST",   base_price: 13000 },
+  { id: "G003", home_team: "삼성", away_team: "KIA",  game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "daegu",    status: "OPEN",     base_price: 13000 },
+  { id: "G004", home_team: "NC",   away_team: "키움", game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "changwon", status: "OPEN",     base_price: 13000 },
+  { id: "G005", home_team: "KT",   away_team: "한화", game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "suwon",    status: "OPEN",     base_price: 13000 },
+  { id: "G006", home_team: "두산", away_team: "롯데", game_date: "2026-05-16", game_time: "17:00:00", stadium_id: "jamsil",   status: "OPEN",     base_price: 13000 },
+  { id: "G007", home_team: "SSG",  away_team: "LG",   game_date: "2026-05-16", game_time: "17:00:00", stadium_id: "munhak",   status: "UPCOMING", base_price: 13000 },
+  { id: "G008", home_team: "KT",   away_team: "한화", game_date: "2026-05-16", game_time: "14:00:00", stadium_id: "suwon",    status: "UPCOMING", base_price: 13000 },
+  { id: "G009", home_team: "두산", away_team: "NC",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "jamsil",   status: "UPCOMING", base_price: 13000 },
+  { id: "G010", home_team: "KIA",  away_team: "LG",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "gwangju",  status: "UPCOMING", base_price: 13000 },
 ];
+
+const SEED_TICKET_LISTINGS = [
+  { id: "tl-seed-0000-0000-000000000001", seller_id: "user_bh",  game_date: "2026-05-15", home_team: "두산", away_team: "롯데", seat_section: "1루 내야 지정석", original_price: 13000, listed_price: 14000, status: "active" },
+  { id: "tl-seed-0000-0000-000000000002", seller_id: "user_tm",  game_date: "2026-05-15", home_team: "SSG",  away_team: "LG",   seat_section: "외야 응원석",      original_price: 13000, listed_price: 13000, status: "active" },
+  { id: "tl-seed-0000-0000-000000000003", seller_id: "admin_01", game_date: "2026-05-15", home_team: "삼성", away_team: "KIA",  seat_section: "3루 내야 지정석", original_price: 13000, listed_price: 13500, status: "active" },
+  { id: "tl-seed-0000-0000-000000000004", seller_id: "user_bh",  game_date: "2026-05-16", home_team: "두산", away_team: "롯데", seat_section: "외야 응원석",     original_price: 13000, listed_price: 12000, status: "active" },
+  { id: "tl-seed-0000-0000-000000000005", seller_id: "user_tm",  game_date: "2026-05-16", home_team: "KT",   away_team: "한화", seat_section: "내야 일반석",     original_price: 13000, listed_price: 13000, status: "active" },
+];
+
+async function refreshDemoSchedule(conn) {
+  for (const stadium of SEED_STADIUMS) {
+    await conn.query(
+      `INSERT INTO stadiums (id, name, location, capacity)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), location = VALUES(location), capacity = VALUES(capacity)`,
+      [stadium.id, stadium.name, stadium.location, stadium.capacity],
+    );
+  }
+
+  for (const game of SEED_GAMES) {
+    await conn.query(
+      `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         home_team = VALUES(home_team),
+         away_team = VALUES(away_team),
+         game_date = VALUES(game_date),
+         game_time = VALUES(game_time),
+         stadium_id = VALUES(stadium_id),
+         status = VALUES(status),
+         base_price = VALUES(base_price)`,
+      [game.id, game.home_team, game.away_team, game.game_date, game.game_time, game.stadium_id, game.status, game.base_price],
+    );
+  }
+
+  await conn.query(`
+    UPDATE ticket_listings tl
+    JOIN games g ON g.home_team = tl.home_team AND g.away_team = tl.away_team
+       SET tl.game_date = g.game_date
+     WHERE tl.status = 'active'
+  `);
+
+  const [[listingTable]] = await conn.query(`SHOW TABLES LIKE 'ticket_listings'`);
+  if (listingTable) {
+    for (const listing of SEED_TICKET_LISTINGS) {
+      await conn.query(
+        `UPDATE ticket_listings
+            SET seller_id = ?, game_date = ?, home_team = ?, away_team = ?,
+                seat_section = ?, original_price = ?, listed_price = ?, status = ?
+          WHERE id = ?`,
+        [
+          listing.seller_id,
+          listing.game_date,
+          listing.home_team,
+          listing.away_team,
+          listing.seat_section,
+          listing.original_price,
+          listing.listed_price,
+          listing.status,
+          listing.id,
+        ],
+      );
+    }
+  }
+}
 
 // ─── 초기화 함수 ──────────────────────────────────────────
 
@@ -127,6 +199,14 @@ async function initDB() {
     `CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci`
   );
   await conn.query(`USE \`${DB_NAME}\``);
+
+  const [[usersTable]] = await conn.query(`SHOW TABLES LIKE 'users'`);
+  if (usersTable && !RESET_DB_ON_START) {
+    await refreshDemoSchedule(conn);
+    console.log("ℹ️ 기존 DB 유지 모드: 재시작 시 데이터를 보존합니다.");
+    await conn.end();
+    return;
+  }
 
   // ─── 매 재시작마다 초기화: FK 역순으로 DROP ───────────
   await conn.query(`SET FOREIGN_KEY_CHECKS = 0`);
@@ -172,6 +252,7 @@ async function initDB() {
       email         VARCHAR(255) UNIQUE DEFAULT NULL,
       password_hash VARCHAR(255) DEFAULT NULL,
       login_type    ENUM('local','google') NOT NULL DEFAULT 'local',
+      role          ENUM('user','admin') NOT NULL DEFAULT 'user',
       google_id     VARCHAR(255) UNIQUE DEFAULT NULL,
       profile_image VARCHAR(255) DEFAULT NULL,
       is_active     TINYINT(1)   NOT NULL DEFAULT 1,
@@ -318,10 +399,13 @@ async function initDB() {
     CREATE TABLE ticket_listings (
       id             CHAR(36)     PRIMARY KEY,
       seller_id      VARCHAR(50)  NOT NULL,
+      seller_wallet_address VARCHAR(42) DEFAULT NULL,
       ticket_id      VARCHAR(36)  DEFAULT NULL,
       nft_token_id   INT          DEFAULT NULL,
       price_wei      VARCHAR(40)  DEFAULT NULL,
       list_tx_hash   VARCHAR(66)  DEFAULT NULL,
+      listing_message TEXT        DEFAULT NULL,
+      listing_signature TEXT      DEFAULT NULL,
       game_date      DATE         NOT NULL,
       home_team      VARCHAR(20)  NOT NULL,
       away_team      VARCHAR(20)  NOT NULL,
@@ -341,6 +425,8 @@ async function initDB() {
       buyer_id     VARCHAR(50) NOT NULL,
       seller_id    VARCHAR(50) NOT NULL,
       price        INT         NOT NULL,
+      platform_fee INT         NOT NULL DEFAULT 0,
+      settlement_amount INT    NOT NULL DEFAULT 0,
       buy_tx_hash  VARCHAR(66) DEFAULT NULL,
       traded_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (listing_id) REFERENCES ticket_listings(id),
@@ -602,8 +688,8 @@ async function initDB() {
 
   for (const user of SEED_USERS) {
     await conn.query(
-      "INSERT INTO users (user_id, nickname) VALUES (?, ?)",
-      [user.user_id, user.nickname]
+      "INSERT INTO users (user_id, nickname, role) VALUES (?, ?, ?)",
+      [user.user_id, user.nickname, user.role]
     );
   }
 
@@ -710,14 +796,21 @@ async function initDB() {
     ('tigers-towel-2',  'tigers-towel-2',  'KIA',  'KIA 레전드 응원컷 파편',    'STEADY', '#ff9d3b', '#1456a0', 47, '응원 장면이 들어간 시즌형 특별 파편입니다.')
   `);
 
-  await conn.query(`
-    INSERT INTO ticket_listings (id, seller_id, game_date, home_team, away_team, seat_section, original_price, listed_price, status) VALUES
-    ('tl-seed-0000-0000-000000000001', 'user_bh',  '2026-04-15', '삼성', 'LG',  '1루 내야 지정석', 13000, 14000, 'active'),
-    ('tl-seed-0000-0000-000000000002', 'user_tm',  '2026-04-19', 'LG',  'NC',  '외야 응원석',      13000, 13000, 'active'),
-    ('tl-seed-0000-0000-000000000003', 'admin_01', '2026-04-22', '두산', '키움', '3루 내야 지정석', 13000, 13500, 'active'),
-    ('tl-seed-0000-0000-000000000004', 'user_bh',  '2026-04-22', '두산', '키움', '외야 응원석',     13000, 12000, 'active'),
-    ('tl-seed-0000-0000-000000000005', 'user_tm',  '2026-04-15', '키움', '한화', '내야 일반석',     13000, 13000, 'active')
-  `);
+  await conn.query(
+    `INSERT INTO ticket_listings (id, seller_id, game_date, home_team, away_team, seat_section, original_price, listed_price, status) VALUES
+    ${SEED_TICKET_LISTINGS.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",\n    ")}`,
+    SEED_TICKET_LISTINGS.flatMap((listing) => [
+      listing.id,
+      listing.seller_id,
+      listing.game_date,
+      listing.home_team,
+      listing.away_team,
+      listing.seat_section,
+      listing.original_price,
+      listing.listed_price,
+      listing.status,
+    ]),
+  );
 
   await conn.query(`
     INSERT INTO price_history (fragment_type_id, price, recorded_date) VALUES

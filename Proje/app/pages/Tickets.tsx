@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { useBookingAccess, ACCESS_MESSAGES, type AccessStatus } from "../hooks/useBookingAccess";
+import { apiUrl } from "../lib/api";
 
 export function Tickets() {
   const [events, setEvents] = useState<any[]>([]);
@@ -14,7 +15,7 @@ export function Tickets() {
   const accessStatus = useBookingAccess();
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games`)
+    fetch(apiUrl("/api/tickets/games"))
       .then((res) => res.json())
       .then((data) => { if (data.success) setEvents(data.data); })
       .catch((err) => console.error("경기 목록 조회 실패:", err));

@@ -13,7 +13,6 @@ import {
   Loader2,
   MapPin,
   Receipt,
-  RefreshCw,
   ShieldCheck,
   Ticket,
   Wallet,
@@ -25,6 +24,7 @@ import {
   createStoredTickets,
   getTicketEvent,
   loadStoredTickets,
+  saveStoredTickets,
   seatTicketTypes,
   type SeatBlock,
   type SeatGrade,
@@ -33,16 +33,12 @@ import {
   type TicketEvent,
 } from "../data/ticketing";
 import { useAppSettings } from "../context/AppSettingsContext";
-import { sendTicketNFT, checkSeatTakenOnChain } from "../lib/contract";
+import { sendTicketNFT } from "../lib/contract";
 import { useBookingAccess, ACCESS_MESSAGES } from "../hooks/useBookingAccess";
+import { apiUrl } from "../lib/api";
 
 function formatPrice(value: number) {
   return `₩${value.toLocaleString("ko-KR")}`;
-}
-
-function createVerificationCode() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
 function parseSeatKey(seatKey: string) {
@@ -51,10 +47,9 @@ function parseSeatKey(seatKey: string) {
 }
 
 const steps = [
-  { id: 0, label: "예매 전 확인", icon: ShieldCheck },
-  { id: 1, label: "구역 선택", icon: LayoutGrid },
-  { id: 2, label: "좌석 선택", icon: Armchair },
-  { id: 3, label: "가격 확인", icon: Receipt },
+  { id: 0, label: "구역 선택", icon: LayoutGrid },
+  { id: 1, label: "좌석 선택", icon: Armchair },
+  { id: 2, label: "가격 확인", icon: Receipt },
 ] as const;
 
 const mapBlockBadgePositions: Record<string, CSSProperties> = {
@@ -157,7 +152,7 @@ export function TicketBooking() {
 
   useEffect(() => {
     if (getTicketEvent(eventId)) return; // 로컬에 있으면 API 불필요
-    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games/${eventId}`)
+    fetch(apiUrl(`/api/tickets/games/${eventId}`))
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.data) {
@@ -169,13 +164,7 @@ export function TicketBooking() {
   }, [eventId]);
 
   const [currentStep, setCurrentStep] = useState(0);
-  const [verificationCode, setVerificationCode] = useState(() => createVerificationCode());
-  const [verificationInput, setVerificationInput] = useState("");
-  const [agreements, setAgreements] = useState({
-    officialOnly: false,
-    maxQuantity: false,
-    refundPolicy: false,
-  });
+  const [refundPolicyAgreed, setRefundPolicyAgreed] = useState(false);
   const [selectedGradeId, setSelectedGradeId] = useState<string | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [selectedSeatKeys, setSelectedSeatKeys] = useState<string[]>([]);
@@ -185,7 +174,13 @@ export function TicketBooking() {
   const [serverTakenSeats, setServerTakenSeats] = useState<Set<string>>(new Set());
   const [txHash, setTxHash] = useState<string | null>(null);
   const [mintingStatus, setMintingStatus] = useState<"idle" | "connecting" | "signing" | "mining" | "saving">("idle");
-  const [mintingProgress, setMintingProgress] = useState<{ current: number; total: number } | null>(null);
+  const [mintingProgress, setMintingProgress] = useState<{
+    current: number;
+    total: number;
+    percent: number;
+    label: string;
+    detail: string;
+  } | null>(null);
   const [confirmingBackground, setConfirmingBackground] = useState<"pending" | "done" | "failed" | null>(null);
 
   useEffect(() => {
@@ -195,7 +190,7 @@ export function TicketBooking() {
   // 백엔드에서 예약된 좌석 조회
   useEffect(() => {
     if (!eventId) return;
-    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/seats/${eventId}`)
+    fetch(apiUrl(`/api/tickets/seats/${eventId}`))
       .then((res) => res.json())
       .then((data) => {
         if (data.success) setServerTakenSeats(new Set(data.data));
@@ -269,11 +264,7 @@ export function TicketBooking() {
   const ticketTotal = selectedTickets.reduce((sum, ticket) => sum + ticket.price, 0);
   const serviceFee = Math.round(ticketTotal * 0.03); // 3% 서비스 이용료
   const finalTotal = ticketTotal + serviceFee;
-  const verificationPassed =
-    verificationInput.trim().toUpperCase() === verificationCode &&
-    agreements.officialOnly &&
-    agreements.maxQuantity;
-  const paymentReady = verificationPassed && agreements.refundPolicy && selectedTickets.length > 0;
+  const paymentReady = refundPolicyAgreed && selectedTickets.length > 0;
 
   if (!event) {
     if (eventLoading) {
@@ -340,44 +331,58 @@ export function TicketBooking() {
     if (!selectedGrade || !selectedBlock || !paymentReady) return;
 
     try {
+      setTxHash(null);
+      setCompletedTickets([]);
+      setConfirmingBackground(null);
       setMintingStatus("connecting");
+      const totalTickets = selectedTickets.length;
+      const updateMintProgress = (
+        current: number,
+        percent: number,
+        label: string,
+        detail: string,
+      ) => {
+        setMintingProgress({
+          current,
+          total: totalTickets,
+          percent: Math.max(0, Math.min(100, Math.round(percent))),
+          label,
+          detail,
+        });
+      };
+
+      updateMintProgress(0, 3, "지갑 연결 확인", "MetaMask 계정과 네트워크를 확인하고 있습니다.");
 
       // 1. 지갑 주소 확보
-      if (!walletAddress) {
+      let address = walletAddress;
+      if (!address) {
         const ok = await connectWallet();
         if (!ok) throw new Error("지갑 연결이 필요합니다.");
       }
-      const accounts = (await window.ethereum!.request({ method: "eth_accounts" })) as string[];
-      const address = accounts[0];
+      const accounts = window.ethereum
+        ? ((await window.ethereum.request({ method: "eth_accounts" })) as string[])
+        : [];
+      address = accounts[0] ?? address;
       if (!address) throw new Error("지갑 주소를 가져올 수 없습니다.");
 
-      setMintingStatus("signing");
+      const authToken = localStorage.getItem("auth_token");
+      const purchaseIds: string[] = [];
 
-      // 2. 티켓마다 MetaMask 서명 (전송만, 블록 확정 대기 없음)
-      // nonce 충돌 방지: 루프 전에 베이스 nonce를 한 번만 조회 후 i씩 증가
-      const { BrowserProvider: BP } = await import("ethers");
-      const _provider = new BP(window.ethereum!);
-      const baseNonce = await _provider.getTransactionCount(address, "pending");
-
-      // 온체인 좌석 중복 사전 체크
-      for (const ticket of selectedTickets) {
-        const taken = await checkSeatTakenOnChain(
-          String(event.id),
-          selectedBlock.label,
-          ticket.row,
-          ticket.seatNumber,
-        );
-        if (taken) {
-          throw new Error(`${selectedBlock.label}블록 ${ticket.row}열 ${ticket.seatNumber}번 좌석은 이미 예매된 좌석입니다.`);
-        }
-      }
-
-      const sentResults: { txHash: string; waitForConfirm: () => Promise<number | undefined> }[] = [];
-      setMintingProgress({ current: 0, total: selectedTickets.length });
       for (let i = 0; i < selectedTickets.length; i++) {
         const ticket = selectedTickets[i];
-        setMintingProgress({ current: i + 1, total: selectedTickets.length });
-        const result = await sendTicketNFT({
+        const current = i + 1;
+        const basePercent = (i / totalTickets) * 100;
+        const unit = 100 / totalTickets;
+
+        setMintingStatus("signing");
+        updateMintProgress(
+          current,
+          basePercent + unit * 0.15,
+          "MetaMask 컨펌 대기",
+          `${current}/${totalTickets}번째 티켓 거래를 승인해 주세요. 창이 닫히면 다음 티켓 승인으로 넘어갑니다.`,
+        );
+
+        const sent = await sendTicketNFT({
           gameId: String(event.id),
           stadium: event.stadium,
           grade: selectedGrade.name,
@@ -385,13 +390,67 @@ export function TicketBooking() {
           row: ticket.row,
           seatNumber: ticket.seatNumber,
           priceKrw: ticket.price,
-        }, baseNonce + i);
-        sentResults.push(result);
-      }
-      setMintingProgress(null);
-      setTxHash(sentResults[0]?.txHash ?? null);
+        });
+        if (i === 0) setTxHash(sent.txHash);
 
-      // 3. 결과 즉시 표시
+        setMintingStatus("mining");
+        updateMintProgress(
+          current,
+          basePercent + unit * 0.58,
+          "블록체인 기록 중",
+          `${current}/${totalTickets}번째 티켓이 Hoodi 네트워크에 기록되는 중입니다. MetaMask 활동 탭에서도 확인할 수 있습니다.`,
+        );
+        const tokenId = await sent.waitForConfirm();
+
+        setMintingStatus("saving");
+        updateMintProgress(
+          current,
+          basePercent + unit * 0.86,
+          "티켓 저장 중",
+          `${current}/${totalTickets}번째 티켓의 NFT 거래 해시와 좌석 정보를 서버에 저장하고 있습니다.`,
+        );
+
+        const res = await fetch(apiUrl("/api/tickets/purchase"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify({
+            walletAddress: address,
+            gameId: event.id,
+            stadium: event.stadium,
+            grade: selectedGrade.name,
+            block: selectedBlock.label,
+            row: ticket.row,
+            seatNumber: ticket.seatNumber,
+            price: ticket.price,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || data.error || "티켓 예매 저장에 실패했습니다.");
+        }
+
+        const ticketDbId = String(data.data?.id ?? "");
+        purchaseIds[i] = ticketDbId;
+
+        if (tokenId != null && ticketDbId) {
+          await fetch(apiUrl(`/api/tickets/${ticketDbId}/token`), {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tokenId, txHash: sent.txHash }),
+          });
+        }
+
+        updateMintProgress(
+          current,
+          basePercent + unit,
+          "티켓 저장 완료",
+          `${current}/${totalTickets}번째 티켓 처리가 완료되었습니다.`,
+        );
+      }
+
       const created = createStoredTickets({
         event,
         grade: selectedGrade,
@@ -401,55 +460,38 @@ export function TicketBooking() {
           seatNumber: ticket.seatNumber,
           ticketTypeId: ticket.ticketType.id,
         })),
-      });
+      }).map((ticket, index) => ({
+        ...ticket,
+        id: purchaseIds[index] || ticket.id,
+      }));
+
+      const nextStoredTickets = [...storedTickets, ...created];
+      saveStoredTickets(nextStoredTickets);
+      setStoredTickets(nextStoredTickets);
       setCompletedTickets(created);
-
-      // 4. DB 저장 즉시 실행 (블록 확정 대기 없이)
-      setConfirmingBackground("pending");
-      const purchaseIds: string[] = [];
-      await Promise.all(
-        sentResults.map(async (sent, i) => {
-          const ticket = selectedTickets[i];
-          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tickets/purchase`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              walletAddress: address,
-              gameId: event.id,
-              stadium: event.stadium,
-              grade: selectedGrade.name,
-              block: selectedBlock.label,
-              row: ticket.row,
-              seatNumber: ticket.seatNumber,
-              price: ticket.price,
-            }),
-          });
-          const data = await res.json();
-          purchaseIds[i] = data.data?.id ?? null;
-        }),
-      );
+      setMintingProgress({
+        current: totalTickets,
+        total: totalTickets,
+        percent: 100,
+        label: "예매 완료",
+        detail: "모든 티켓이 블록체인과 서버에 저장되었습니다.",
+      });
+      setServerTakenSeats((previous) => {
+        const next = new Set(previous);
+        selectedTickets.forEach((ticket) => {
+          next.add(`${selectedBlock.label}:${ticket.row}-${ticket.seatNumber}`);
+        });
+        return next;
+      });
       setConfirmingBackground("done");
-
-      // 5. 블록 확정 후 tokenId 백엔드에 저장
-      Promise.all(
-        sentResults.map(async (sent, i) => {
-          const tokenId = await sent.waitForConfirm();
-          const ticketDbId = purchaseIds[i];
-          if (tokenId != null && ticketDbId) {
-            await fetch(`${import.meta.env.VITE_API_URL}/api/tickets/${ticketDbId}/token`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ tokenId, txHash: sentResults[i].txHash }),
-            });
-          }
-        }),
-      ).catch(() => {});
     } catch (err: unknown) {
       console.error("예매 실패:", err);
       const msg = err instanceof Error ? err.message : "예매 중 오류가 발생했습니다.";
       alert(msg);
+      setConfirmingBackground("failed");
     } finally {
       setMintingStatus("idle");
+      setMintingProgress(null);
     }
   };
 
@@ -579,7 +621,7 @@ export function TicketBooking() {
             </div>
           </section>
 
-          <section className="grid gap-3 md:grid-cols-4">
+          <section className="grid gap-3 md:grid-cols-3">
             {steps.map((step) => {
               const Icon = step.icon;
               const active = currentStep === step.id;
@@ -591,9 +633,8 @@ export function TicketBooking() {
                   type="button"
                   onClick={() => {
                     if (step.id === 0) updateStep(step.id);
-                    if (step.id === 1 && verificationPassed) updateStep(step.id);
-                    if (step.id === 2 && verificationPassed && selectedGrade && selectedBlock) updateStep(step.id);
-                    if (step.id === 3 && verificationPassed && selectedSeatKeys.length > 0) updateStep(step.id);
+                    if (step.id === 1 && selectedGrade && selectedBlock) updateStep(step.id);
+                    if (step.id === 2 && selectedSeatKeys.length > 0) updateStep(step.id);
                   }}
                   className="rounded-[22px] border px-4 py-4 text-left transition"
                   style={{
@@ -627,128 +668,6 @@ export function TicketBooking() {
           </section>
 
           {currentStep === 0 && (
-            <section
-              className="rounded-[30px] border p-6"
-              style={{ background: "#f5f8fb", borderColor: "#d7e0e8" }}
-            >
-              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-                <div className="space-y-5">
-                  <div>
-                    <p className="text-[0.78rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "#8a9ab0" }}>
-                      Verification
-                    </p>
-                    <h3 className="mt-2 text-[1.18rem] font-bold tracking-[-0.04em]" style={{ color: "#15263d" }}>
-                      {event.verificationLabel}
-                    </h3>
-                    <p className="mt-2 text-[0.95rem] leading-7" style={{ color: "#5b6d84" }}>
-                      {event.verificationHelp}
-                    </p>
-                  </div>
-
-                  <div className="rounded-[24px] border p-5" style={{ background: "#ffffff", borderColor: "#d8e1ea" }}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[0.78rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "#8a9ab0" }}>
-                          보안 코드
-                        </p>
-                        <div
-                          className="mt-2 rounded-[18px] border px-5 py-4 font-mono text-[1.4rem] font-bold tracking-[0.36em]"
-                          style={{ background: "#f2f6fa", borderColor: "#dce5ee", color: "#20344f" }}
-                        >
-                          {verificationCode}
-                        </div>
-                      </div>
-                      <Button
-                        variant="outline"
-                        className="rounded-full border-[#d3dde6] bg-white text-[#4f637b]"
-                        onClick={() => {
-                          setVerificationCode(createVerificationCode());
-                          setVerificationInput("");
-                        }}
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                        새 코드
-                      </Button>
-                    </div>
-
-                    <div className="mt-4 space-y-3">
-                      <label className="block">
-                        <span className="mb-2 block text-[0.88rem] font-medium" style={{ color: "#40546c" }}>
-                          보안 코드 입력
-                        </span>
-                        <input
-                          value={verificationInput}
-                          onChange={(event) => setVerificationInput(event.target.value.toUpperCase())}
-                          placeholder="예: A7BK3M"
-                          className="w-full rounded-2xl border px-4 py-3 text-[0.95rem] outline-none"
-                          style={{ borderColor: "#d5dfe8", background: "#fbfcfd", color: "#1b2c44" }}
-                        />
-                      </label>
-
-                      <label className="flex items-start gap-3 rounded-[18px] border px-4 py-3"
-                        style={{ background: "#fbfcfd", borderColor: "#e0e7ee" }}>
-                        <input
-                          type="checkbox"
-                          checked={agreements.officialOnly}
-                          onChange={(event) =>
-                            setAgreements((prev) => ({ ...prev, officialOnly: event.target.checked }))
-                          }
-                          className="mt-1 h-4 w-4 rounded border-[#cfd8e2]"
-                        />
-                        <span className="text-[0.92rem] leading-6" style={{ color: "#44576f" }}>
-                          선택한 좌석 티켓은 BASE CHAIN 공식 재판매 마켓으로만 양도됩니다.
-                        </span>
-                      </label>
-
-                      <label className="flex items-start gap-3 rounded-[18px] border px-4 py-3"
-                        style={{ background: "#fbfcfd", borderColor: "#e0e7ee" }}>
-                        <input
-                          type="checkbox"
-                          checked={agreements.maxQuantity}
-                          onChange={(event) =>
-                            setAgreements((prev) => ({ ...prev, maxQuantity: event.target.checked }))
-                          }
-                          className="mt-1 h-4 w-4 rounded border-[#cfd8e2]"
-                        />
-                        <span className="text-[0.92rem] leading-6" style={{ color: "#44576f" }}>
-                          1회 예매 한도는 {event.maxTickets}매이며, 좌석 확보 후 5분 안에 결제를 완료해야 합니다.
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  className="rounded-[28px] border p-5"
-                  style={{ background: "linear-gradient(180deg, #e8eff5 0%, #f7fafc 100%)", borderColor: "#d5dfe8" }}
-                >
-                  <div className="flex items-center gap-2 text-[0.85rem] font-semibold" style={{ color: "#1456a0" }}>
-                    <Info className="h-4 w-4" />
-                    예매 전에 확인할 점
-                  </div>
-                  <div className="mt-4 space-y-4 text-[0.92rem] leading-7" style={{ color: "#51637b" }}>
-                    <p>좌석 선택 후에는 블록과 좌석번호가 티켓 NFT 메타데이터에 함께 기록됩니다.</p>
-                    <p>잠실야구장 기준으로 게이트와 응원 구역이 함께 표시되어 입장 동선도 바로 확인할 수 있습니다.</p>
-                    <p>예매 완료 후에는 내 입장권에 QR과 함께 좌석 정보가 저장됩니다.</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end">
-                <Button
-                  className="h-11 rounded-2xl px-5 text-white"
-                  style={{ background: verificationPassed ? "#1456a0" : "#97afcc" }}
-                  disabled={!verificationPassed}
-                  onClick={() => updateStep(1)}
-                >
-                  구역 선택으로 이동
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </section>
-          )}
-
-          {currentStep === 1 && (
             <section className="grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
               <div
                 className="rounded-[30px] border p-6"
@@ -1067,19 +986,12 @@ export function TicketBooking() {
                 )}
 
                 <div className="mt-6 flex justify-between">
-                  <Button
-                    variant="outline"
-                    className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                    onClick={() => updateStep(0)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    이전
-                  </Button>
+                  <div />
                   <Button
                     className="rounded-2xl px-5 text-white"
                     style={{ background: selectedGrade && selectedBlock ? "#1456a0" : "#97afcc" }}
                     disabled={!selectedGrade || !selectedBlock}
-                    onClick={() => updateStep(2)}
+                    onClick={() => updateStep(1)}
                   >
                     좌석번호 보기
                     <ChevronRight className="h-4 w-4" />
@@ -1089,7 +1001,7 @@ export function TicketBooking() {
             </section>
           )}
 
-          {currentStep === 2 && selectedGrade && selectedBlock && (
+          {currentStep === 1 && selectedGrade && selectedBlock && (
             <section
               className="rounded-[30px] border p-6"
               style={{ background: "#f6f9fb", borderColor: "#d8e0e8" }}
@@ -1189,7 +1101,7 @@ export function TicketBooking() {
                 <Button
                   variant="outline"
                   className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                  onClick={() => updateStep(1)}
+                  onClick={() => updateStep(0)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   구역 다시 선택
@@ -1198,7 +1110,7 @@ export function TicketBooking() {
                   className="rounded-2xl px-5 text-white"
                   style={{ background: selectedSeatKeys.length > 0 ? "#1456a0" : "#97afcc" }}
                   disabled={selectedSeatKeys.length === 0}
-                  onClick={() => updateStep(3)}
+                  onClick={() => updateStep(2)}
                 >
                   가격 확인하기
                   <ChevronRight className="h-4 w-4" />
@@ -1207,7 +1119,7 @@ export function TicketBooking() {
             </section>
           )}
 
-          {currentStep === 3 && selectedGrade && selectedBlock && (
+          {currentStep === 2 && selectedGrade && selectedBlock && (
             <section
               className="rounded-[30px] border p-6"
               style={{ background: "#f7f9fb", borderColor: "#d8e0e8" }}
@@ -1284,10 +1196,8 @@ export function TicketBooking() {
                 style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
                 <input
                   type="checkbox"
-                  checked={agreements.refundPolicy}
-                  onChange={(event) =>
-                    setAgreements((previous) => ({ ...previous, refundPolicy: event.target.checked }))
-                  }
+                  checked={refundPolicyAgreed}
+                  onChange={(event) => setRefundPolicyAgreed(event.target.checked)}
                   className="mt-1 h-4 w-4 rounded border-[#cfd8e2]"
                 />
                 <span className="text-[0.92rem] leading-6" style={{ color: "#42556d" }}>
@@ -1299,7 +1209,7 @@ export function TicketBooking() {
                 <Button
                   variant="outline"
                   className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                  onClick={() => updateStep(2)}
+                  onClick={() => updateStep(1)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   좌석 다시 보기
@@ -1311,41 +1221,44 @@ export function TicketBooking() {
                   onClick={() => void handleCompleteBooking()}
                 >
                   {mintingStatus === "connecting" && <><Loader2 className="h-4 w-4 animate-spin" />지갑 연결 중...</>}
-                  {mintingStatus === "signing" && mintingProgress && mintingProgress.total > 1 && (
-                    <><Loader2 className="h-4 w-4 animate-spin" />MetaMask 서명 중 ({mintingProgress.current}/{mintingProgress.total})...</>
+                  {mintingStatus === "signing" && mintingProgress && (
+                    <><Loader2 className="h-4 w-4 animate-spin" />MetaMask 컨펌 대기 ({mintingProgress.current}/{mintingProgress.total})...</>
                   )}
-                  {mintingStatus === "signing" && (!mintingProgress || mintingProgress.total <= 1) && <><Loader2 className="h-4 w-4 animate-spin" />서명 요청 중...</>}
-                  {mintingStatus === "mining" && mintingProgress && mintingProgress.total > 1 && (
-                    <><Loader2 className="h-4 w-4 animate-spin" />블록 처리 중 ({mintingProgress.current}/{mintingProgress.total})...</>
+                  {mintingStatus === "signing" && !mintingProgress && <><Loader2 className="h-4 w-4 animate-spin" />MetaMask 컨펌 대기...</>}
+                  {mintingStatus === "mining" && mintingProgress && (
+                    <><Loader2 className="h-4 w-4 animate-spin" />블록체인 기록 중 ({mintingProgress.current}/{mintingProgress.total})...</>
                   )}
-                  {mintingStatus === "mining" && (!mintingProgress || mintingProgress.total <= 1) && <><Loader2 className="h-4 w-4 animate-spin" />블록체인 처리 중...</>}
-                  {mintingStatus === "saving"     && <><Loader2 className="h-4 w-4 animate-spin" />티켓 저장 중...</>}
+                  {mintingStatus === "mining" && !mintingProgress && <><Loader2 className="h-4 w-4 animate-spin" />블록체인 기록 중...</>}
+                  {mintingStatus === "saving" && mintingProgress && (
+                    <><Loader2 className="h-4 w-4 animate-spin" />티켓 저장 중 ({mintingProgress.current}/{mintingProgress.total})...</>
+                  )}
+                  {mintingStatus === "saving" && !mintingProgress && <><Loader2 className="h-4 w-4 animate-spin" />티켓 저장 중...</>}
                   {mintingStatus === "idle"       && <>예매 완료<CheckCircle2 className="h-4 w-4" /></>}
                 </Button>
               </div>
 
               {/* 진행 바 */}
-              {mintingProgress && mintingProgress.total > 1 && (
+              {mintingProgress && (
                 <div className="mt-4 rounded-2xl border p-4" style={{ background: "#f0f5fb", borderColor: "#d0dcea" }}>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[0.78rem] font-semibold" style={{ color: "#3a5f8a" }}>
-                      티켓 처리 중 {mintingProgress.current} / {mintingProgress.total}
+                      {mintingProgress.label} {mintingProgress.current > 0 ? `${mintingProgress.current} / ${mintingProgress.total}` : ""}
                     </span>
                     <span className="text-[0.78rem] font-semibold" style={{ color: "#1456a0" }}>
-                      {Math.round((mintingProgress.current / mintingProgress.total) * 100)}%
+                      {mintingProgress.percent}%
                     </span>
                   </div>
                   <div className="h-2 rounded-full overflow-hidden" style={{ background: "#d0dcea" }}>
                     <div
                       className="h-full rounded-full transition-all duration-500"
                       style={{
-                        width: `${(mintingProgress.current / mintingProgress.total) * 100}%`,
+                        width: `${mintingProgress.percent}%`,
                         background: "linear-gradient(90deg, #1456a0, #1e7fd0)",
                       }}
                     />
                   </div>
                   <p className="mt-2 text-[0.72rem]" style={{ color: "#8a9ab0" }}>
-                    블록체인 처리 특성상 티켓 1장당 약 12~15초 소요됩니다.
+                    {mintingProgress.detail}
                   </p>
                 </div>
               )}
@@ -1520,7 +1433,7 @@ export function TicketBooking() {
               <div className="mt-4 flex items-center gap-3 rounded-[16px] border px-4 py-3"
                 style={{ background: "#eaf3f0", borderColor: "#b0d9c8", color: "#1d7a55" }}>
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span className="text-[0.82rem] font-medium">블록체인 확정 완료</span>
+                <span className="text-[0.82rem] font-medium">티켓 저장 완료 — 선택 좌석이 판매 완료로 반영되었습니다</span>
               </div>
             )}
             {confirmingBackground === "failed" && (

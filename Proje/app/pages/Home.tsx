@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useTicketQR } from "../hooks/useTicketQR";
 import { useBookingAccess, ACCESS_MESSAGES, type AccessStatus } from "../hooks/useBookingAccess";
+import { apiUrl } from "../lib/api";
 import {
   Ticket, ShoppingBag, Sparkles,
   ArrowRight, MapPin, Calendar, Tag, ChevronRight, ChevronLeft,
@@ -72,7 +73,7 @@ function NftTicketCard() {
 
   useEffect(() => {
     if (!walletAddress) { setLoading(false); return; }
-    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/nearest/${walletAddress}`)
+    fetch(apiUrl(`/api/my-tickets/nearest/${encodeURIComponent(walletAddress)}`))
       .then((r) => r.json())
       .then((d) => { if (d.success) setTicket(d.data); })
       .catch(console.error)
@@ -290,7 +291,7 @@ export function Home() {
   }
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games`)
+    fetch(apiUrl("/api/tickets/games"))
       .then((r) => r.json())
       .then((res: { success: boolean; data: GameData[] }) => {
         const data = res.data ?? [];

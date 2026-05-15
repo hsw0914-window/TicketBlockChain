@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, parseEther } from "ethers";
+import { BrowserProvider, Contract, getAddress, parseEther } from "ethers";
 
 export const HOODI_CHAIN_ID = "0x88BB0"; // 560048 in hex
 
@@ -95,6 +95,45 @@ export async function switchToHoodi(): Promise<void> {
   }
 }
 
+export interface TicketListingSignatureParams {
+  ticketId: string;
+  gameLabel: string;
+  seatSection: string;
+  listedPrice: number;
+}
+
+/**
+ * NFT가 아직 온체인 발급되지 않은 티켓도 판매 등록 의사를 지갑 서명으로 남긴다.
+ */
+export async function signTicketListingAuthorization(params: TicketListingSignatureParams): Promise<{
+  sellerWalletAddress: string;
+  listingMessage: string;
+  listingSignature: string;
+}> {
+  if (!window.ethereum) throw new Error("MetaMask가 설치되어 있지 않습니다.");
+  await switchToHoodi();
+
+  const provider = new BrowserProvider(window.ethereum);
+  const signer = await provider.getSigner();
+  const sellerWalletAddress = await signer.getAddress();
+  const issuedAt = new Date().toISOString();
+  const listingMessage = [
+    "BASE CHAIN 티켓 양도 등록 승인",
+    "",
+    `지갑: ${sellerWalletAddress}`,
+    `티켓 ID: ${params.ticketId}`,
+    `경기: ${params.gameLabel}`,
+    `좌석: ${params.seatSection}`,
+    `판매 희망가: ${Math.round(params.listedPrice).toLocaleString("ko-KR")}원`,
+    `요청 시각: ${issuedAt}`,
+    "",
+    "이 서명은 해당 티켓을 BASE CHAIN 공식 재판매 장터에 등록하는 것에 대한 확인입니다.",
+  ].join("\n");
+
+  const listingSignature = await signer.signMessage(listingMessage);
+  return { sellerWalletAddress, listingMessage, listingSignature };
+}
+
 export interface PurchaseTicketParams {
   gameId: string;
   stadium: string;
@@ -132,6 +171,23 @@ const MARKETPLACE_ABI_STRINGS = [
   "function getListing(uint256 tokenId) external view returns (tuple(address seller, uint256 priceWei, bool active) listing)",
 ];
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntil(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 90_000,
+  intervalMs = 2_000,
+): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await predicate()) return true;
+    await delay(intervalMs);
+  }
+  return false;
+}
+
 async function getMarketplaceSigner() {
   if (!window.ethereum) throw new Error("MetaMask가 설치되어 있지 않습니다.");
   await switchToHoodi();
@@ -149,9 +205,27 @@ export async function approveTicketForMarketplace(tokenId: number): Promise<stri
   const provider = new BrowserProvider(window.ethereum);
   const signer = await provider.getSigner();
   const contract = new Contract(TICKET_NFT_ADDRESS, TICKET_NFT_APPROVE_ABI, signer);
-  const tx = await contract.approve(TICKET_MARKETPLACE_ADDRESS, BigInt(tokenId));
-  const receipt = await tx.wait();
-  return receipt.hash;
+  const token = BigInt(tokenId);
+  const isApproved = async () => {
+    const approved = await contract.getApproved(token);
+    return String(approved).toLowerCase() === TICKET_MARKETPLACE_ADDRESS.toLowerCase();
+  };
+
+  if (await isApproved()) {
+    return "already-approved";
+  }
+
+  const tx = await contract.approve(TICKET_MARKETPLACE_ADDRESS, token);
+  const confirmed = await Promise.race([
+    tx.wait().then(() => true).catch(() => waitUntil(isApproved)),
+    waitUntil(isApproved),
+  ]);
+
+  if (!confirmed && !(await isApproved())) {
+    throw new Error("MetaMask 승인 트랜잭션 확인 시간이 초과되었습니다. 잠시 후 새로고침해서 다시 시도해주세요.");
+  }
+
+  return tx.hash;
 }
 
 /**
@@ -159,9 +233,31 @@ export async function approveTicketForMarketplace(tokenId: number): Promise<stri
  */
 export async function listTicketOnMarketplace(tokenId: number, priceWei: bigint): Promise<string> {
   const contract = await getMarketplaceSigner();
-  const tx = await contract.listTicket(BigInt(tokenId), priceWei);
-  const receipt = await tx.wait();
-  return receipt.hash;
+  const token = BigInt(tokenId);
+  const isListed = async () => {
+    try {
+      const listing = await contract.getListing(token);
+      return Boolean(listing?.active);
+    } catch {
+      return false;
+    }
+  };
+
+  if (await isListed()) {
+    return "already-listed";
+  }
+
+  const tx = await contract.listTicket(token, priceWei);
+  const confirmed = await Promise.race([
+    tx.wait().then(() => true).catch(() => waitUntil(isListed)),
+    waitUntil(isListed),
+  ]);
+
+  if (!confirmed && !(await isListed())) {
+    throw new Error("장터 등록 트랜잭션 확인 시간이 초과되었습니다. MetaMask 활동에서 완료 여부를 확인한 뒤 다시 시도해주세요.");
+  }
+
+  return tx.hash;
 }
 
 /**
@@ -175,13 +271,86 @@ export async function buyTicketFromMarketplace(tokenId: number, priceWei: bigint
 }
 
 /**
+ * NFT가 없는 레거시 매물은 Marketplace 컨트랙트가 소유권/정산을 처리할 수 없으므로
+ * 구매자가 판매자 지갑으로 직접 결제한 뒤 서버가 트랜잭션을 검증한다.
+ */
+export async function payLegacyTicketSeller(sellerWalletAddress: string, priceWei: bigint): Promise<string> {
+  if (!window.ethereum) throw new Error("MetaMask가 설치되어 있지 않습니다.");
+  await switchToHoodi();
+
+  const sellerAddress = getAddress(sellerWalletAddress);
+  const provider = new BrowserProvider(window.ethereum);
+  const signer = await provider.getSigner();
+  const tx = await signer.sendTransaction({
+    to: sellerAddress,
+    value: priceWei,
+  });
+  const receipt = await tx.wait();
+  if (!receipt || receipt.status !== 1) {
+    throw new Error("판매자 지갑 결제 트랜잭션이 실패했습니다.");
+  }
+  return tx.hash;
+}
+
+/**
+ * 기존 시드/레거시 매물처럼 NFT tokenId가 없는 티켓은 0원 트랜잭션 대신 서명으로 구매 의사를 남긴다.
+ * MetaMask의 위험해 보이는 data transaction 경고를 피하고, 서버에서 지갑 서명을 검증한다.
+ */
+export async function signLegacyTicketPurchase(params: {
+  listingId: string;
+  gameLabel: string;
+  seatSection: string;
+  priceKrw: number;
+}): Promise<{
+  buyerWalletAddress: string;
+  legacyBuyMessage: string;
+  legacyBuySignature: string;
+}> {
+  if (!window.ethereum) throw new Error("MetaMask가 설치되어 있지 않습니다.");
+  await switchToHoodi();
+
+  const provider = new BrowserProvider(window.ethereum);
+  const signer = await provider.getSigner();
+  const buyerWalletAddress = await signer.getAddress();
+  const legacyBuyMessage = [
+    "BASE CHAIN 레거시 티켓 구매 승인",
+    "",
+    `구매자 지갑: ${buyerWalletAddress}`,
+    `매물 ID: ${params.listingId}`,
+    `경기: ${params.gameLabel}`,
+    `좌석: ${params.seatSection}`,
+    `결제 금액: ${Math.round(params.priceKrw).toLocaleString("ko-KR")}원`,
+    `요청 시각: ${new Date().toISOString()}`,
+    "",
+    "이 서명은 NFT 발급 전 레거시 티켓 매물을 BASE CHAIN 장터에서 구매하는 것에 대한 확인입니다.",
+  ].join("\n");
+
+  const legacyBuySignature = await signer.signMessage(legacyBuyMessage);
+  return { buyerWalletAddress, legacyBuyMessage, legacyBuySignature };
+}
+
+/**
  * 취소: cancelListing 호출 (NFT → 판매자 반환)
  */
-export async function cancelTicketListingOnChain(tokenId: number): Promise<string> {
+export async function cancelTicketListingOnChain(tokenId: number): Promise<string | "already-not-listed"> {
   const contract = await getMarketplaceSigner();
-  const tx = await contract.cancelListing(BigInt(tokenId));
-  const receipt = await tx.wait();
-  return receipt.hash;
+  const token = BigInt(tokenId);
+  const listing = await contract.getListing(token);
+  if (!listing?.active) {
+    return "already-not-listed";
+  }
+
+  try {
+    const tx = await contract.cancelListing(token);
+    const receipt = await tx.wait();
+    return receipt.hash;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Marketplace: not listed")) {
+      return "already-not-listed";
+    }
+    throw err;
+  }
 }
 
 // 트랜잭션 전송만 하고 즉시 반환 (블록 확정 대기 없음)

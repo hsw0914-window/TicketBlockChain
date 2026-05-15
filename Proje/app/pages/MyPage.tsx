@@ -22,6 +22,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import { connectWalletToServer, getChallenge, verifySignature } from "../api/walletApi";
 import { createDid, getDidStatus, type DidStatus } from "../api/didApi";
+import { apiUrl } from "../lib/api";
 
 type Preferences = {
   ticketAlerts: boolean;
@@ -91,7 +92,7 @@ export function MyPage() {
   useEffect(() => {
     if (!isLoggedIn) return;
     setTxLoading(true);
-    fetch(`${import.meta.env.VITE_API_URL}/api/tx-history`, {
+    fetch(apiUrl("/api/tx-history"), {
       headers: { Authorization: `Bearer ${localStorage.getItem("auth_token") ?? ""}` },
     })
       .then(r => r.json())

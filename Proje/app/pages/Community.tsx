@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { apiUrl } from "../lib/api";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -191,7 +192,7 @@ const emptyDraft: EditorDraft = {
 
 
 
-const API = 'http://localhost:4000/api';
+const API = apiUrl('/api');
 
 function emptyState(): CommunityState {
   return {

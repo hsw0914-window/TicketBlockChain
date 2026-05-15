@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { apiUrl } from "../lib/api";
 
 export interface QRData {
   available: boolean;
@@ -26,8 +27,8 @@ export function useTicketQR(
   const fetchQR = useCallback(async () => {
     if (!ticketId || !walletAddress) return;
     try {
-      const res  = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/tickets/${ticketId}/qr?walletAddress=${walletAddress}`,
+      const res = await fetch(
+        apiUrl(`/api/tickets/${ticketId}/qr?walletAddress=${encodeURIComponent(walletAddress)}`),
       );
       const data: QRData = await res.json();
       setQrData(data);

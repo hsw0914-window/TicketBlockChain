@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { Bell, Pin, PenLine, Lock, Unlock, Trash2, X, Calendar, Megaphone } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
+import { useAuth } from "../context/AuthContext";
+import { apiUrl, uploadUrl } from "../lib/api";
 
 interface Notice {
   id: number;
@@ -17,18 +19,20 @@ interface Notice {
 
 export function Notice() {
   const navigate = useNavigate();
-  const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem("isAdminMode") === "true");
+  const { user, isLoggedIn } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [notices, setNotices] = useState<Notice[]>([]);
   const [selectedTab, setSelectedTab] = useState<"all" | "notice" | "event">("all");
   const [selectedNotice, setSelectedNotice] = useState<Notice | null>(null);
 
-  useEffect(() => {
-    localStorage.setItem("isAdminMode", isAdmin.toString());
-  }, [isAdmin]);
+  const authHeaders = () => {
+    const token = localStorage.getItem("auth_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
 
   const fetchNotices = async () => {
     try {
-      const response = await fetch("http://localhost:4000/api/notices");
+      const response = await fetch(apiUrl("/api/notices"));
       const data = await response.json();
       const formatted: Notice[] = data.map((n: any) => ({
         id: n.id,
@@ -50,7 +54,10 @@ export function Notice() {
   const handleDelete = async (id: number) => {
     if (window.confirm("정말로 이 공지사항을 삭제하시겠습니까?")) {
       try {
-        const response = await fetch(`http://localhost:4000/api/notices/${id}`, { method: "DELETE" });
+        const response = await fetch(apiUrl(`/api/notices/${id}`), {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
         if (response.ok) {
           alert("삭제되었습니다!");
           setNotices(prev => prev.filter(n => n.id !== id));
@@ -63,7 +70,10 @@ export function Notice() {
   const handleDeleteAll = async () => {
     if (window.confirm("⚠️ 경고: 모든 공지사항이 영구적으로 삭제됩니다. 계속하시겠습니까?")) {
       try {
-        const response = await fetch(`http://localhost:4000/api/notices`, { method: "DELETE" });
+        const response = await fetch(apiUrl("/api/notices"), {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
         if (response.ok) {
           alert("모든 공지가 삭제되었습니다!");
           setNotices([]);
@@ -109,11 +119,10 @@ export function Notice() {
           </div>
           <div>
             <p
-              className="page-eyebrow mb-1 font-bold cursor-pointer transition-colors select-none"
+              className="page-eyebrow mb-1 font-bold transition-colors select-none"
               style={{ color: isAdmin ? "#ef4444" : "#1456a0" }}
-              onClick={() => setIsAdmin(!isAdmin)}
             >
-              {isAdmin ? "개발자 모드 ON" : "개발자 모드 OFF"}{" "}
+              {isAdmin ? "관리자 권한 활성" : isLoggedIn ? "일반 사용자" : "비로그인 상태"}{" "}
               {isAdmin
                 ? <Unlock className="w-3 h-3 inline ml-1" />
                 : <Lock className="w-3 h-3 inline ml-1 opacity-30" />}
@@ -232,7 +241,7 @@ export function Notice() {
                 <h2 className="text-2xl font-bold mb-6 text-[#1c2f4a]">{selectedNotice.title}</h2>
                 {selectedNotice.image_url && (
                   <div className="mb-6 w-full rounded-2xl overflow-hidden border border-[#edf1f5] shadow-sm bg-white">
-                    <img src={`http://localhost:4000${selectedNotice.image_url}`} alt="공지 이미지" className="w-full h-auto object-contain" />
+                    <img src={uploadUrl(selectedNotice.image_url)} alt="공지 이미지" className="w-full h-auto object-contain" />
                   </div>
                 )}
                 <div className="text-[#3b4f67] leading-relaxed whitespace-pre-line text-base mb-8">

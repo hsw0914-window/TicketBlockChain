@@ -2,12 +2,54 @@ const express = require("express");
 const crypto  = require("crypto");
 const { purchaseTicket } = require("../services/ticketService");
 const { mintBoxOnChain } = require("../services/nftService");
+const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 let _pool;
 
 function setPool(pool) {
   _pool = pool;
+}
+
+async function requireVerifiedDidForWallet(req, res, next) {
+  try {
+    const walletAddress = String(req.body.walletAddress || "").trim().toLowerCase();
+
+    if (!walletAddress) {
+      return res.status(400).json({ success: false, message: "지갑 주소가 필요합니다" });
+    }
+
+    const [[wallet]] = await _pool.query(
+      `SELECT uw.wallet_address, uw.is_verified,
+              dv.wallet_address AS did_wallet_address,
+              dv.status AS did_status
+       FROM user_wallets uw
+       LEFT JOIN did_verifications dv ON dv.user_id = uw.user_id
+       WHERE uw.user_id = ?`,
+      [req.user.user_id],
+    );
+
+    if (!wallet) {
+      return res.status(403).json({ success: false, message: "먼저 지갑을 연결해주세요" });
+    }
+
+    const registeredWallet = String(wallet.wallet_address || "").toLowerCase();
+    const didWallet = String(wallet.did_wallet_address || "").toLowerCase();
+
+    if (registeredWallet !== walletAddress) {
+      return res.status(403).json({ success: false, message: "DID 인증된 본인 지갑으로만 예매할 수 있습니다" });
+    }
+
+    if (!wallet.is_verified || wallet.did_status !== "verified" || didWallet !== registeredWallet) {
+      return res.status(403).json({ success: false, message: "DID 인증 완료 후 예매할 수 있습니다" });
+    }
+
+    req.verifiedWalletAddress = registeredWallet;
+    next();
+  } catch (err) {
+    console.error("[ticket did gate]", err);
+    res.status(500).json({ success: false, message: "DID 인증 상태 확인 실패" });
+  }
 }
 
 // ─── QR 유틸 ──────────────────────────────────────────────
@@ -96,16 +138,17 @@ router.get("/seats/:gameId", async (req, res) => {
 });
 
 // 티켓 구매
-router.post("/purchase", async (req, res) => {
+router.post("/purchase", requireAuth, requireVerifiedDidForWallet, async (req, res) => {
   try {
     const { walletAddress, gameId, stadium, grade, block, row, seatNumber, price } = req.body;
+    const verifiedWalletAddress = req.verifiedWalletAddress || String(walletAddress).toLowerCase();
 
     if (!walletAddress || !gameId || !grade || !block || !row || !seatNumber) {
       return res.status(400).json({ success: false, message: "필수 정보가 누락되었습니다" });
     }
 
     const result = await purchaseTicket(_pool, {
-      walletAddress,
+      walletAddress: verifiedWalletAddress,
       gameId,
       stadium,
       grade,
@@ -123,7 +166,7 @@ router.post("/purchase", async (req, res) => {
     try {
       const [[walletRow]] = await _pool.query(
         'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
-        [walletAddress]
+        [verifiedWalletAddress]
       );
       if (walletRow) {
         // DB 박스 지급
@@ -138,7 +181,7 @@ router.post("/purchase", async (req, res) => {
         const boxOnChainEnabled = !!(process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS);
         if (boxOnChainEnabled) {
           try {
-            boxTxHash = await mintBoxOnChain(walletAddress);
+            boxTxHash = await mintBoxOnChain(verifiedWalletAddress);
           } catch (mintErr) {
             console.error('[ticket] 박스 온체인 민팅 실패 (DB는 정상):', mintErr.message);
           }
@@ -202,7 +245,7 @@ router.get("/:ticketId/qr", async (req, res) => {
         ].join("-")
       : String(ticket.game_date).slice(0, 10);
     const gameTime    = String(ticket.game_time).slice(0, 8);
-    const gameDateTime = new Date(`${gameDate}T${gameTime}`);
+    const gameDateTime = new Date(`${gameDate}T${gameTime}+09:00`);
 
     // 날짜 파싱 실패 → QR 불가
     if (isNaN(gameDateTime.getTime())) {

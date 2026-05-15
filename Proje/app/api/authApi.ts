@@ -1,4 +1,4 @@
-const BASE = 'http://localhost:4000/api';
+import { apiUrl } from '../lib/api';
 
 function getToken(): string | null {
   return localStorage.getItem('auth_token');
@@ -16,6 +16,7 @@ export type AuthUser = {
   nickname: string;
   email: string;
   profile_image?: string | null;
+  role: 'user' | 'admin';
 };
 
 type AuthResponse = {
@@ -28,7 +29,7 @@ export async function register(
   password: string,
   nickname: string
 ): Promise<AuthResponse> {
-  const res = await fetch(`${BASE}/auth/register`, {
+  const res = await fetch(apiUrl('/api/auth/register'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, nickname }),
@@ -39,7 +40,7 @@ export async function register(
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${BASE}/auth/login`, {
+  const res = await fetch(apiUrl('/api/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -50,17 +51,17 @@ export async function login(email: string, password: string): Promise<AuthRespon
 }
 
 export async function getMe(): Promise<AuthUser> {
-  const res = await fetch(`${BASE}/auth/me`, { headers: authHeader() });
+  const res = await fetch(apiUrl('/api/auth/me'), { headers: authHeader() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? '인증 실패');
   return data as AuthUser;
 }
 
-export async function googleLogin(access_token: string): Promise<AuthResponse> {
-  const res = await fetch(`${BASE}/auth/google`, {
+export async function googleLogin(credential: string): Promise<AuthResponse> {
+  const res = await fetch(apiUrl('/api/auth/google'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ access_token }),
+    body: JSON.stringify({ credential }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? '구글 로그인 실패');

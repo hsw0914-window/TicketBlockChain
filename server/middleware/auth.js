@@ -20,7 +20,7 @@ async function requireAuth(req, res, next) {
   }
 
   const [[user]] = await _pool.query(
-    'SELECT user_id, nickname, email, login_type FROM users WHERE user_id = ?',
+    'SELECT user_id, nickname, email, login_type, role FROM users WHERE user_id = ?',
     [payload.sub]
   );
   if (!user) return res.status(401).json({ error: '사용자를 찾을 수 없습니다.' });
@@ -36,7 +36,7 @@ async function optionalAuth(req, res, next) {
   try {
     const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'fallback-secret');
     const [[user]] = await _pool.query(
-      'SELECT user_id, nickname, email, login_type FROM users WHERE user_id = ?',
+      'SELECT user_id, nickname, email, login_type, role FROM users WHERE user_id = ?',
       [payload.sub]
     );
     if (user) req.user = user;
@@ -46,4 +46,14 @@ async function optionalAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, optionalAuth, setPool };
+function requireAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: '인증이 필요합니다.' });
+  }
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, optionalAuth, requireAdmin, setPool };

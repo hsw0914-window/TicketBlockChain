@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { QRCodeSVG } from "qrcode.react";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useTicketQR } from "../hooks/useTicketQR";
+import { apiUrl } from "../lib/api";
 
 // ─── 타입 ─────────────────────────────────────────────────
 
@@ -253,7 +254,7 @@ export function MyTickets() {
 
   useEffect(() => {
     if (!walletAddress) return;
-    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/${walletAddress}`)
+    fetch(apiUrl(`/api/my-tickets/${encodeURIComponent(walletAddress)}`))
       .then((res) => res.json())
       .then((data) => {
         if (data.success) setApiTickets(data.data.map(normalizeApiTicket));
