@@ -55,16 +55,22 @@ let pool;
 async function start() {
   await initDB();
 
-  // 테스트 계정 Fabric 포인트/멤버십 사전 세팅 (서버 재시작마다 동일하게 복구)
-  mockFabric.seedUser({
-    walletAddress: '0x15f7cc396e4C66296cE92225830e24f491941Fc2',
-    pointBalance:  10000,
-    totalEarned:   15000,
-    totalUsed:     5000,
-    entryCount:    7,   // SILVER 등급
-  });
-
   pool = mysql.createPool({ ...DB_CONFIG, database: DB_NAME });
+
+  // 테스트 계정 Fabric 포인트/멤버십 사전 세팅 (DB 실제 지갑 주소 기준)
+  const seedWallets = ['0x15f7cc396e4C66296cE92225830e24f491941Fc2'];
+  try {
+    const [[row]] = await pool.query(
+      "SELECT wallet_address FROM user_wallets WHERE user_id = 'test_user'"
+    );
+    if (row?.wallet_address && !seedWallets.includes(row.wallet_address)) {
+      seedWallets.push(row.wallet_address);
+    }
+  } catch (_) {}
+  for (const walletAddress of seedWallets) {
+    mockFabric.seedUser({ walletAddress, pointBalance: 10000, totalEarned: 15000, totalUsed: 5000, entryCount: 7 });
+  }
+  console.log(`[Seed] 포인트 시드 완료: ${seedWallets.join(', ')}`);
 
   // pool 주입
   authMiddleware.setPool(pool);
