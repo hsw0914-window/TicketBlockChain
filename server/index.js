@@ -15,15 +15,35 @@ const combineRoute   = require('./routes/combine');
 const marketRoute       = require('./routes/market');
 const ticketResaleRoute = require('./routes/ticketResale');
 const txHistoryRoute    = require('./routes/txHistory');
+const entryRoute        = require('./routes/entryRoutes');
+const pointRoute        = require('./routes/pointRoutes');
+const refundRoute       = require('./routes/refundRoutes');
+const settlementRoute   = require('./routes/settlementRoutes');
+const raffleRoute       = require('./routes/raffleRoutes');
+const mockFabric        = require('./services/fabricBridge');
 
 const app = express();
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-  ],
+  origin: (origin, callback) => {
+    const allowed = [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+    ];
+    // ngrok / 외부 접속 허용 (개발 환경)
+    if (!origin || allowed.includes(origin) ||
+        origin.endsWith('.ngrok-free.app') ||
+        origin.endsWith('.ngrok-free.dev') ||
+        origin.endsWith('.ngrok.io')) {
+      return callback(null, true);
+    }
+    // 로컬 네트워크 IP 허용 (192.168.x.x, 10.x.x.x, 172.x.x.x)
+    if (/^https?:\/\/(192\.168\.|10\.|172\.)/.test(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error('CORS 차단: ' + origin));
+  },
   credentials: true,
 }));
 app.use(express.json());
@@ -34,6 +54,15 @@ let pool;
 
 async function start() {
   await initDB();
+
+  // 테스트 계정 Fabric 포인트/멤버십 사전 세팅 (서버 재시작마다 동일하게 복구)
+  mockFabric.seedUser({
+    walletAddress: '0x15f7cc396e4C66296cE92225830e24f491941Fc2',
+    pointBalance:  10000,
+    totalEarned:   15000,
+    totalUsed:     5000,
+    entryCount:    7,   // SILVER 등급
+  });
 
   pool = mysql.createPool({ ...DB_CONFIG, database: DB_NAME });
 
@@ -49,6 +78,11 @@ async function start() {
   marketRoute.setPool(pool);
   ticketResaleRoute.setPool(pool);
   txHistoryRoute.setPool(pool);
+  entryRoute.setPool(pool);
+  pointRoute.setPool(pool);
+  refundRoute.setPool(pool);
+  settlementRoute.setPool(pool);
+  raffleRoute.setPool(pool);
 
   // ─── 신규 라우트 ────────────────────────────────────────
   app.use('/api/auth',       authRoute.router);
@@ -61,6 +95,11 @@ async function start() {
   app.use('/api/market',        marketRoute.router);
   app.use('/api/ticket-resale', ticketResaleRoute.router);
   app.use('/api/tx-history',   txHistoryRoute.router);
+  app.use('/api/entry',        entryRoute.router);
+  app.use('/api/points',       pointRoute.router);
+  app.use('/api/refunds',      refundRoute.router);
+  app.use('/api/settlements',  settlementRoute.router);
+  app.use('/api/raffle',       raffleRoute.router);
 
   // 업로드 이미지 정적 서빙
   app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));

@@ -1,5 +1,6 @@
 require('dotenv').config();
-const mysql = require("mysql2/promise");
+const mysql  = require("mysql2/promise");
+const bcrypt = require("bcryptjs");
 
 const DB_CONFIG = {
   host: "localhost",
@@ -96,6 +97,15 @@ const SEED_COMMENTS = [
   },
 ];
 
+// ─── 테스트 계정 (서버 재시작마다 동일하게 복구) ──────────
+const TEST_USER = {
+  user_id:       'test_user',
+  nickname:      '테스트유저',
+  email:         'test@basechain.dev',
+  password:      'test1234',
+  wallet_address: '0x15f7cc396e4C66296cE92225830e24f491941Fc2',
+};
+
 const SEED_STADIUMS = [
   { id: "jamsil",  name: "잠실야구장",              location: "서울특별시 송파구",   capacity: 25000 },
   { id: "sajik",   name: "사직야구장",              location: "부산광역시 동래구",   capacity: 24000 },
@@ -130,6 +140,10 @@ async function initDB() {
 
   // ─── 매 재시작마다 초기화: FK 역순으로 DROP ───────────
   await conn.query(`SET FOREIGN_KEY_CHECKS = 0`);
+  // raffle / reservation 테이블
+  await conn.query(`DROP TABLE IF EXISTS reservations`);
+  await conn.query(`DROP TABLE IF EXISTS draws`);
+  await conn.query(`DROP TABLE IF EXISTS raffle_nfts`);
   // combine/market 테이블 (FK 역순)
   await conn.query(`DROP TABLE IF EXISTS box_open_logs`);
   await conn.query(`DROP TABLE IF EXISTS combine_logs`);
@@ -147,6 +161,10 @@ async function initDB() {
   await conn.query(`DROP TABLE IF EXISTS combine_recipes`);
   await conn.query(`DROP TABLE IF EXISTS card_types`);
   await conn.query(`DROP TABLE IF EXISTS fragment_types`);
+  // fabric 이벤트 로그 테이블
+  await conn.query(`DROP TABLE IF EXISTS fabric_events`);
+  // refunds 테이블
+  await conn.query(`DROP TABLE IF EXISTS refunds`);
   // ticket resale 테이블
   await conn.query(`DROP TABLE IF EXISTS ticket_trades`);
   await conn.query(`DROP TABLE IF EXISTS ticket_listings`);
@@ -273,7 +291,7 @@ async function initDB() {
       game_date  DATE         NOT NULL,
       game_time  TIME,
       stadium_id VARCHAR(50)  NOT NULL,
-      status     ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED') NOT NULL DEFAULT 'OPEN',
+      status     ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED','CANCELLED') NOT NULL DEFAULT 'OPEN',
       base_price DECIMAL(10,2) DEFAULT NULL,
       FOREIGN KEY (stadium_id) REFERENCES stadiums(id)
     )
@@ -306,9 +324,94 @@ async function initDB() {
       price          DECIMAL(15,2),
       token_id       INT           DEFAULT NULL,
       ticket_tx_hash VARCHAR(66)   DEFAULT NULL,
-      status         ENUM('confirmed','used','listed','sold') NOT NULL DEFAULT 'confirmed',
+      purchase_type  ENUM('PRIMARY','TRANSFERRED') NOT NULL DEFAULT 'PRIMARY',
+      status         ENUM('confirmed','used','listed','sold','refund_processing','refund_rejected','refunded') NOT NULL DEFAULT 'confirmed',
       booked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (game_id) REFERENCES games(id)
+    )
+  `);
+
+  // ─── Fabric 이벤트 로그 테이블 ───────────────────────────
+  await conn.query(`
+    CREATE TABLE fabric_events (
+      id           CHAR(36)     PRIMARY KEY,
+      event_name   VARCHAR(60)  NOT NULL,
+      ticket_id    VARCHAR(36)  DEFAULT NULL,
+      game_id      VARCHAR(50)  DEFAULT NULL,
+      user_did_hash VARCHAR(64) DEFAULT NULL,
+      payload_json JSON         DEFAULT NULL,
+      fabric_tx_id VARCHAR(100) DEFAULT NULL,
+      created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // ─── 환불 테이블 ─────────────────────────────────────
+  await conn.query(`
+    CREATE TABLE refunds (
+      refund_id       CHAR(36)      PRIMARY KEY,
+      ticket_id       VARCHAR(36)   NOT NULL,
+      user_id         VARCHAR(50)   NOT NULL,
+      purchase_type   ENUM('PRIMARY','TRANSFERRED') NOT NULL DEFAULT 'PRIMARY',
+      refund_rate     DECIMAL(5,2)  NOT NULL DEFAULT 100.00,
+      original_price  DECIMAL(15,2) NOT NULL,
+      refund_amount   DECIMAL(15,2) NOT NULL,
+      reason          VARCHAR(255)  DEFAULT NULL,
+      status          ENUM('processing','completed','rejected') NOT NULL DEFAULT 'processing',
+      fabric_refund_id VARCHAR(100) DEFAULT NULL,
+      created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at    DATETIME      DEFAULT NULL,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id),
+      FOREIGN KEY (user_id)   REFERENCES users(user_id)
+    )
+  `);
+
+  // ─── 응모권 NFT 테이블 ───────────────────────────────
+  await conn.query(`
+    CREATE TABLE raffle_nfts (
+      id              CHAR(36)     PRIMARY KEY,
+      user_id         VARCHAR(50)  NOT NULL,
+      wallet_address  VARCHAR(100) NOT NULL,
+      user_did_hash   VARCHAR(64)  NOT NULL,
+      game_id         VARCHAR(50)  DEFAULT NULL,
+      status          ENUM('ISSUED','ENTERED','WINNER','LOST','USED','EXPIRED') NOT NULL DEFAULT 'ISSUED',
+      draw_id         CHAR(36)     DEFAULT NULL,
+      fabric_token_id VARCHAR(100) DEFAULT NULL,
+      issued_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )
+  `);
+
+  // ─── 추첨 테이블 ──────────────────────────────────────
+  await conn.query(`
+    CREATE TABLE draws (
+      id              CHAR(36)     PRIMARY KEY,
+      game_id         VARCHAR(50)  NOT NULL,
+      status          ENUM('PENDING','COMPLETED') NOT NULL DEFAULT 'PENDING',
+      winner_count    INT          NOT NULL DEFAULT 10,
+      total_entries   INT          NOT NULL DEFAULT 0,
+      executed_at     DATETIME     DEFAULT NULL,
+      created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (game_id) REFERENCES games(id)
+    )
+  `);
+
+  // ─── 예약 테이블 ──────────────────────────────────────
+  await conn.query(`
+    CREATE TABLE reservations (
+      id                CHAR(36)     PRIMARY KEY,
+      user_id           VARCHAR(50)  NOT NULL,
+      wallet_address    VARCHAR(100) NOT NULL,
+      game_id           VARCHAR(50)  NOT NULL,
+      raffle_nft_id     CHAR(36)     DEFAULT NULL,
+      priority_booking  TINYINT(1)   NOT NULL DEFAULT 0,
+      ticket_id         VARCHAR(36)  DEFAULT NULL,
+      status            ENUM('PENDING','CONFIRMED','CANCELLED','EXPIRED') NOT NULL DEFAULT 'PENDING',
+      fabric_record_id  VARCHAR(100) DEFAULT NULL,
+      reserved_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at        DATETIME     DEFAULT NULL,
+      FOREIGN KEY (user_id)  REFERENCES users(user_id),
+      FOREIGN KEY (game_id)  REFERENCES games(id)
     )
   `);
 
@@ -778,6 +881,33 @@ async function initDB() {
     ('tigers-towel-2',   5400, DATE_SUB(CURDATE(), INTERVAL 1 DAY)),
     ('tigers-towel-2',   5600, CURDATE())
   `);
+
+  // ─── 테스트 추첨 시드 (서버 재시작마다 복구) ─────────
+  await conn.query(`
+    INSERT INTO draws (id, game_id, status, winner_count, total_entries) VALUES
+    ('draw-seed-0000-0001', 'G004', 'PENDING',   5, 0),
+    ('draw-seed-0000-0002', 'G007', 'PENDING',   3, 0),
+    ('draw-seed-0000-0003', 'G009', 'PENDING',  10, 0)
+  `);
+  console.log('✅ 테스트 추첨 3건 생성 완료');
+
+  // ─── 테스트 계정 삽입 ─────────────────────────────────
+  const testPasswordHash = await bcrypt.hash(TEST_USER.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type)
+     VALUES (?, ?, ?, ?, 'local')`,
+    [TEST_USER.user_id, TEST_USER.nickname, TEST_USER.email, testPasswordHash]
+  );
+  await conn.query(
+    `INSERT INTO user_wallets (user_id, wallet_address, is_verified, verified_at)
+     VALUES (?, ?, TRUE, NOW())`,
+    [TEST_USER.user_id, TEST_USER.wallet_address]
+  );
+  await conn.query(
+    `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 0)`,
+    [TEST_USER.user_id]
+  );
+  console.log(`✅ 테스트 계정 생성: ${TEST_USER.email} / ${TEST_USER.password}`);
 
   await conn.end();
   console.log("✅ DB 초기화 및 시드 데이터 삽입 완료");

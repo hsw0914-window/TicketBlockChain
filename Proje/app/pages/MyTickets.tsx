@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { MapPin, Calendar, CheckCircle, Clock } from "lucide-react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { MapPin, Calendar, CheckCircle, Clock, RotateCcw, X } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../components/ui/button";
 import { QRCodeSVG } from "qrcode.react";
@@ -99,7 +99,7 @@ function TicketQRPanel({
       style={{ borderTop: `1px dashed ${color}33` }}>
       <div className="rounded-2xl overflow-hidden bg-white p-3 shadow"
         style={{ border: `1px solid ${color}22` }}>
-        <QRCodeSVG value={qrData.qrToken!} size={128} />
+        <QRCodeSVG value={JSON.stringify({ ticketId, qrToken: qrData.qrToken })} size={128} />
       </div>
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#2dba73" }} />
@@ -112,18 +112,170 @@ function TicketQRPanel({
   );
 }
 
+// ─── 환불 모달 ────────────────────────────────────────────
+
+interface RefundPreview {
+  originalPrice: number;
+  refundRate:    number;
+  refundAmount:  number;
+  refundable:    boolean;
+  purchaseType:  string;
+}
+
+function RefundModal({
+  ticket,
+  walletAddress,
+  onClose,
+  onSuccess,
+}: {
+  ticket:        NormalizedTicket;
+  walletAddress: string;
+  onClose:       () => void;
+  onSuccess:     (ticketId: string) => void;
+}) {
+  const [preview,    setPreview]    = useState<RefundPreview | null>(null);
+  const [reason,     setReason]     = useState("");
+  const [loading,    setLoading]    = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+
+  const apiUrl = import.meta.env.VITE_API_URL;
+  const token  = localStorage.getItem("auth_token");
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${apiUrl}/api/refunds/preview?ticketId=${ticket.ticketId}&walletAddress=${walletAddress}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) setError(d.error);
+        else setPreview(d);
+      })
+      .catch(() => setError("환불 정보를 불러오지 못했습니다."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleConfirm = async () => {
+    if (!preview?.refundable) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res  = await fetch(`${apiUrl}/api/refunds`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ ticketId: ticket.ticketId, walletAddress, reason: reason || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "환불 처리에 실패했습니다."); return; }
+      onSuccess(ticket.ticketId);
+    } catch {
+      setError("네트워크 오류가 발생했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.5)" }}
+      onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl p-6"
+        style={{ background: "#fff", boxShadow: "0 24px 56px rgba(17,40,73,0.18)" }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* 헤더 */}
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-bold text-[1.1rem]" style={{ color: "#14253f" }}>환불 신청</h3>
+          <button onClick={onClose}><X className="w-5 h-5" style={{ color: "#9ca3af" }} /></button>
+        </div>
+
+        {loading && (
+          <p className="text-center text-sm py-6" style={{ color: "#6d7d90" }}>환불 정보 조회 중...</p>
+        )}
+
+        {!loading && error && (
+          <p className="text-center text-sm py-4" style={{ color: "#e53e3e" }}>{error}</p>
+        )}
+
+        {!loading && preview && (
+          <>
+            <div className="rounded-xl p-4 mb-4" style={{ background: "#f5f8fb", border: "1px solid #dbe4ed" }}>
+              <div className="flex justify-between text-sm mb-2">
+                <span style={{ color: "#6d7d90" }}>티켓 금액</span>
+                <span style={{ color: "#14253f" }}>₩{Number(preview.originalPrice).toLocaleString("ko-KR")}</span>
+              </div>
+              <div className="flex justify-between text-sm mb-2">
+                <span style={{ color: "#6d7d90" }}>구매 유형</span>
+                <span style={{ color: "#14253f" }}>
+                  {preview.purchaseType === "TRANSFERRED" ? "양도 구매" : "직접 구매"}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm mb-2">
+                <span style={{ color: "#6d7d90" }}>환불 비율</span>
+                <span style={{ color: preview.refundRate === 100 ? "#2dba73" : "#f59e0b" }}>
+                  {preview.refundRate}%
+                </span>
+              </div>
+              <div className="border-t mt-2 pt-2 flex justify-between font-bold">
+                <span style={{ color: "#14253f" }}>환불 예상 금액</span>
+                <span style={{ color: "#1456a0" }}>₩{Number(preview.refundAmount).toLocaleString("ko-KR")}</span>
+              </div>
+            </div>
+
+            {preview.refundRate < 100 && (
+              <p className="text-xs mb-3" style={{ color: "#f59e0b" }}>
+                * 경기 3일 미만 잔여 시 10% 수수료가 부과됩니다.
+              </p>
+            )}
+
+            {preview.refundable ? (
+              <>
+                <textarea
+                  className="w-full rounded-xl p-3 text-sm mb-4 resize-none"
+                  style={{ border: "1px solid #dbe4ed", background: "#f9fbfc", color: "#14253f", outline: "none" }}
+                  placeholder="환불 사유 (선택)"
+                  rows={2}
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                />
+                {error && <p className="text-xs mb-3" style={{ color: "#e53e3e" }}>{error}</p>}
+                <Button
+                  className="w-full h-11 font-bold text-white rounded-xl"
+                  style={{ background: "linear-gradient(135deg, #e53e3e, #c53030)" }}
+                  disabled={submitting}
+                  onClick={handleConfirm}
+                >
+                  {submitting ? "처리 중..." : "환불 확인"}
+                </Button>
+              </>
+            ) : (
+              <p className="text-center text-sm py-2" style={{ color: "#e53e3e" }}>
+                현재 환불이 불가능한 상태입니다.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── 티켓 카드 ────────────────────────────────────────────
 
 function TicketCard({
   ticket,
   walletAddress,
   index,
+  onRefunded,
 }: {
   ticket:        NormalizedTicket;
   walletAddress: string;
   index:         number;
+  onRefunded:    (ticketId: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open,         setOpen]         = useState(false);
+  const [showRefund,   setShowRefund]   = useState(false);
 
   return (
     <motion.div
@@ -226,20 +378,38 @@ function TicketCard({
             )}
 
             {ticket.status === "ACTIVE" && (
-              <Button
-                className="w-full mt-4 h-11 font-bold text-white rounded-xl"
-                style={{
-                  background: `linear-gradient(135deg, ${ticket.color}, #1e7fd0)`,
-                  boxShadow: `0 10px 18px ${ticket.color}22`,
-                }}
-                onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-              >
-                {open ? "QR 닫기" : "QR 코드 보기"}
-              </Button>
+              <div className="flex gap-2 mt-4">
+                <Button
+                  className="flex-1 h-11 font-bold text-white rounded-xl"
+                  style={{
+                    background: `linear-gradient(135deg, ${ticket.color}, #1e7fd0)`,
+                    boxShadow: `0 10px 18px ${ticket.color}22`,
+                  }}
+                  onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+                >
+                  {open ? "QR 닫기" : "QR 코드 보기"}
+                </Button>
+                <Button
+                  className="h-11 px-4 font-bold rounded-xl"
+                  style={{ background: "#fff5f5", border: "1px solid #feb2b2", color: "#c53030" }}
+                  onClick={(e) => { e.stopPropagation(); setShowRefund(true); }}
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </Button>
+              </div>
             )}
           </div>
         </div>
       </div>
+
+      {showRefund && (
+        <RefundModal
+          ticket={ticket}
+          walletAddress={walletAddress}
+          onClose={() => setShowRefund(false)}
+          onSuccess={(id) => { setShowRefund(false); onRefunded(id); }}
+        />
+      )}
     </motion.div>
   );
 }
@@ -247,7 +417,7 @@ function TicketCard({
 // ─── 메인 컴포넌트 ────────────────────────────────────────
 
 export function MyTickets() {
-  const { walletAddress } = useAppSettings();
+  const { effectiveWallet: walletAddress } = useAppSettings();
   const [ticketView, setTicketView] = useState<"active" | "completed">("active");
   const [apiTickets, setApiTickets] = useState<NormalizedTicket[]>([]);
 
@@ -260,6 +430,10 @@ export function MyTickets() {
       })
       .catch((err) => console.error("내 티켓 조회 실패:", err));
   }, [walletAddress]);
+
+  const handleRefunded = useCallback((ticketId: string) => {
+    setApiTickets(prev => prev.filter(t => t.ticketId !== ticketId));
+  }, []);
 
   const visibleTickets = useMemo(
     () => apiTickets.filter((t) =>
@@ -339,6 +513,7 @@ export function MyTickets() {
             ticket={ticket}
             walletAddress={walletAddress ?? ""}
             index={i}
+            onRefunded={handleRefunded}
           />
         ))}
       </div>

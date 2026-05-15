@@ -17,7 +17,12 @@ import { TicketBooking } from "./pages/TicketBooking";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 import { NoticeWrite } from "./pages/NoticeWrite";
-import { TicketResale } from "./pages/TicketResale";
+import { TicketResale }    from "./pages/TicketResale";
+import { EntryScanner }    from "./pages/EntryScanner";
+import { PointExchange }   from "./pages/PointExchange";
+import { RaffleStatus }    from "./pages/RaffleStatus";
+import { PriorityBooking } from "./pages/PriorityBooking";
+import { AdminDraw }       from "./pages/AdminDraw";
 
 export const router = createBrowserRouter([
   {
@@ -48,7 +53,12 @@ export const router = createBrowserRouter([
       { path: "collection", Component: Collection },
       { path: "meme-info", Component: MemeInfo },
       { path: "attendance", Component: Attendance },
-      { path: "detail/:id", Component: Detail },
+      { path: "detail/:id",    Component: Detail },
+      { path: "entry-scan",       Component: EntryScanner },
+      { path: "point-exchange",   Component: PointExchange },
+      { path: "raffle-status",    Component: RaffleStatus },
+      { path: "priority-booking", Component: PriorityBooking },
+      { path: "admin-draw",       Component: AdminDraw },
     ],
   },
   {

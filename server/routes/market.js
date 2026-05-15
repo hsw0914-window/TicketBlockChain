@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto  = require('crypto');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
+const fabricService = require('../services/fabricBridge');
 
 const router = express.Router();
 let _pool;
@@ -444,6 +445,25 @@ router.post('/buy', requireAuth, async (req, res) => {
 
     await conn.commit();
 
+    // 판매자 포인트 적립 (거래금액 0.1%, 하루 2건 한도)
+    let earnedPoint = 0;
+    try {
+      const [[{ cnt }]] = await _pool.query(
+        'SELECT COUNT(*) AS cnt FROM trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
+        [listing.seller_id]
+      );
+      if (Number(cnt) <= 2) {
+        const result = await fabricService.earnPointFromTrade({
+          userDidHash: fabricService.hashDid(sellerWalletAddress),
+          amount: listing.price,
+          rate:   0.001,
+        });
+        earnedPoint = result.earnedPoint;
+      }
+    } catch (pointErr) {
+      console.error('[market] 포인트 적립 실패:', pointErr.message);
+    }
+
     const [[assetRow]] = await _pool.query(
       'SELECT id, idol, asset_name FROM market_assets WHERE fragment_type_id = ? LIMIT 1',
       [listing.fragment_type_id]
@@ -452,7 +472,7 @@ router.post('/buy', requireAuth, async (req, res) => {
     const updatedFragment = await buildFragmentMarket(assetId, userId);
 
     res.json({
-      receipt: { fragmentId: assetId, sellerName: listing.seller_name, price: listing.price },
+      receipt: { fragmentId: assetId, sellerName: listing.seller_name, price: listing.price, earnedPoint },
       purchaseRecord: {
         id: purchaseHistoryId,
         fragmentId: assetId,

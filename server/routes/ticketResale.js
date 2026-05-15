@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto  = require('crypto');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
+const fabricService = require('../services/fabricBridge');
 
 const router = express.Router();
 let _pool;
@@ -237,16 +238,46 @@ router.post('/buy/:id', requireAuth, async (req, res) => {
       );
       if (buyerWallet?.wallet_address) {
         await conn.query(
-          `UPDATE tickets SET wallet_address = ?, status = 'confirmed' WHERE id = ?`,
+          `UPDATE tickets SET wallet_address = ?, status = 'confirmed', purchase_type = 'TRANSFERRED' WHERE id = ?`,
           [buyerWallet.wallet_address, listing.ticket_id]
         );
       } else {
-        await conn.query(`UPDATE tickets SET status = 'confirmed' WHERE id = ?`, [listing.ticket_id]);
+        await conn.query(
+          `UPDATE tickets SET status = 'confirmed', purchase_type = 'TRANSFERRED' WHERE id = ?`,
+          [listing.ticket_id]
+        );
       }
     }
     await conn.commit();
+
+    // 판매자 포인트 적립 (거래금액 0.3%, 하루 3건 한도)
+    let earnedPoint = 0;
+    try {
+      const [[sellerWalletRow]] = await _pool.query(
+        'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
+        [listing.seller_id]
+      );
+      if (sellerWalletRow?.wallet_address) {
+        const [[{ cnt }]] = await _pool.query(
+          'SELECT COUNT(*) AS cnt FROM ticket_trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
+          [listing.seller_id]
+        );
+        if (Number(cnt) <= 3) {
+          const result = await fabricService.earnPointFromTrade({
+            userDidHash: fabricService.hashDid(sellerWalletRow.wallet_address),
+            amount: listing.listed_price,
+            rate:   0.003,
+          });
+          earnedPoint = result.earnedPoint;
+        }
+      }
+    } catch (pointErr) {
+      console.error('[ticketResale] 포인트 적립 실패:', pointErr.message);
+    }
+
     res.json({
       success: true,
+      earnedPoint,
       receipt: {
         homeTeam:    listing.home_team,
         awayTeam:    listing.away_team,

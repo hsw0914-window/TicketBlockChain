@@ -148,7 +148,7 @@ const blockFlowMeta: Record<string, { startLabel: string; endLabel: string }> = 
 export function TicketBooking() {
   const { eventId = "" } = useParams();
   const navigate = useNavigate();
-  const { walletAddress, connectWallet } = useAppSettings();
+  const { effectiveWallet: walletAddress, connectWallet } = useAppSettings();
   const accessStatus = useBookingAccess();
 
   // 로컬 이벤트 먼저 시도, 없으면 API에서 게임 정보 가져와서 템플릿으로 변환
@@ -187,6 +187,16 @@ export function TicketBooking() {
   const [mintingStatus, setMintingStatus] = useState<"idle" | "connecting" | "signing" | "mining" | "saving">("idle");
   const [mintingProgress, setMintingProgress] = useState<{ current: number; total: number } | null>(null);
   const [confirmingBackground, setConfirmingBackground] = useState<"pending" | "done" | "failed" | null>(null);
+
+  // ─── 포인트 할인 ─────────────────────────────────────────
+  const [pointBalance, setPointBalance]   = useState<number | null>(null);
+  const [pointInput, setPointInput]       = useState("");
+  const [pointDiscount, setPointDiscount] = useState(0);
+  const [pointApplied, setPointApplied]   = useState(false);
+  const [pointError, setPointError]       = useState<string | null>(null);
+
+  const base      = import.meta.env.VITE_API_URL;
+  const authToken = () => localStorage.getItem("auth_token") || "";
 
   useEffect(() => {
     setStoredTickets(loadStoredTickets());
@@ -266,9 +276,41 @@ export function TicketBooking() {
     });
   }, [selectedBlock, selectedGrade, selectedSeatKeys, ticketTypesBySeat]);
 
+  // step 3 진입 시 포인트 잔액 조회
+  useEffect(() => {
+    if (currentStep !== 3 || !walletAddress) return;
+    fetch(`${base}/api/points?walletAddress=${walletAddress}`, {
+      headers: { Authorization: `Bearer ${authToken()}` },
+    })
+      .then((r) => r.json())
+      .then((d) => { if (d.data?.balance !== undefined) setPointBalance(d.data.balance); })
+      .catch(() => {});
+  }, [currentStep, walletAddress, base]);
+
+  const applyPoint = () => {
+    setPointError(null);
+    const amount = parseInt(pointInput.replace(/,/g, ""), 10);
+    if (isNaN(amount) || amount <= 0) { setPointError("올바른 포인트를 입력하세요"); return; }
+    if (amount < 1000) { setPointError("최소 1,000P 이상 사용 가능합니다"); return; }
+    if (pointBalance !== null && amount > pointBalance) {
+      setPointError(`보유 포인트가 부족합니다 (잔액: ${pointBalance.toLocaleString()}P)`); return;
+    }
+    const maxDiscount = ticketTotal + Math.round(ticketTotal * 0.03);
+    if (amount > maxDiscount) { setPointError("총 결제금액을 초과할 수 없습니다"); return; }
+    setPointDiscount(amount);
+    setPointApplied(true);
+  };
+
+  const cancelPoint = () => {
+    setPointDiscount(0);
+    setPointApplied(false);
+    setPointInput("");
+    setPointError(null);
+  };
+
   const ticketTotal = selectedTickets.reduce((sum, ticket) => sum + ticket.price, 0);
   const serviceFee = Math.round(ticketTotal * 0.03); // 3% 서비스 이용료
-  const finalTotal = ticketTotal + serviceFee;
+  const finalTotal = Math.max(0, ticketTotal + serviceFee - pointDiscount);
   const verificationPassed =
     verificationInput.trim().toUpperCase() === verificationCode &&
     agreements.officialOnly &&
@@ -428,6 +470,22 @@ export function TicketBooking() {
           purchaseIds[i] = data.data?.id ?? null;
         }),
       );
+      // 4-b. 포인트 할인 차감
+      if (pointDiscount > 0) {
+        await fetch(`${import.meta.env.VITE_API_URL}/api/points/use`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken()}`,
+          },
+          body: JSON.stringify({
+            walletAddress: address,
+            ticketId: purchaseIds[0] ?? null,
+            pointAmount: pointDiscount,
+          }),
+        });
+      }
+
       setConfirmingBackground("done");
 
       // 5. 블록 확정 후 tokenId 백엔드에 저장
@@ -1400,6 +1458,62 @@ export function TicketBooking() {
             </div>
           </div>
 
+          {/* 포인트 할인 */}
+          <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[0.78rem] font-semibold uppercase tracking-[0.2em]" style={{ color: "#8a9ab0" }}>
+                포인트 할인
+              </p>
+              {pointBalance !== null && (
+                <span className="text-[0.78rem] font-semibold" style={{ color: "#1456a0" }}>
+                  보유 {pointBalance.toLocaleString()}P
+                </span>
+              )}
+            </div>
+            {pointApplied ? (
+              <div className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                style={{ background: "#f0fbf5", border: "1px solid #c6ebd8" }}>
+                <span className="text-sm font-semibold" style={{ color: "#059669" }}>
+                  -{pointDiscount.toLocaleString()}P 적용됨
+                </span>
+                <button onClick={cancelPoint}
+                  className="text-xs font-semibold px-2.5 py-1 rounded-lg"
+                  style={{ background: "#fee2e2", color: "#dc2626" }}>
+                  취소
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min={1000}
+                    step={100}
+                    value={pointInput}
+                    onChange={(e) => { setPointInput(e.target.value); setPointError(null); }}
+                    placeholder="사용할 포인트 (최소 1,000P)"
+                    className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: pointError ? "#f87171" : "#d0d8e4", color: "#14253f" }}
+                  />
+                  <button
+                    onClick={applyPoint}
+                    disabled={!pointInput || !walletAddress}
+                    className="rounded-xl px-4 py-2 text-sm font-bold text-white"
+                    style={{ background: pointInput && walletAddress ? "#1456a0" : "#94a3b8" }}
+                  >
+                    적용
+                  </button>
+                </div>
+                {pointError && (
+                  <p className="text-xs" style={{ color: "#ef4444" }}>{pointError}</p>
+                )}
+                <p className="text-xs" style={{ color: "#9ca3af" }}>
+                  1P = 1원 · 최소 1,000P 이상 · 총 결제금액 이하
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
             <p className="text-[0.78rem] font-semibold uppercase tracking-[0.2em]" style={{ color: "#8a9ab0" }}>
               결제 금액
@@ -1413,6 +1527,12 @@ export function TicketBooking() {
                 <span>예매 수수료</span>
                 <strong style={{ color: "#162840" }}>{formatPrice(serviceFee)}</strong>
               </div>
+              {pointDiscount > 0 && (
+                <div className="flex items-center justify-between">
+                  <span style={{ color: "#059669" }}>포인트 할인</span>
+                  <strong style={{ color: "#059669" }}>-{formatPrice(pointDiscount)}</strong>
+                </div>
+              )}
               <div className="border-t pt-3 flex items-center justify-between" style={{ borderColor: "#e3e9ef" }}>
                 <span className="font-semibold" style={{ color: "#162840" }}>총 결제금액</span>
                 <strong className="text-[1.12rem]" style={{ color: "#1456a0" }}>

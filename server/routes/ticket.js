@@ -2,6 +2,7 @@ const express = require("express");
 const crypto  = require("crypto");
 const { purchaseTicket } = require("../services/ticketService");
 const { mintBoxOnChain } = require("../services/nftService");
+const fabricService = require("../services/fabricBridge");
 
 const router = express.Router();
 let _pool;
@@ -146,6 +147,39 @@ router.post("/purchase", async (req, res) => {
       }
     } catch (boxErr) {
       console.error('[ticket box reward]', boxErr);
+    }
+
+    // Fabric 티켓 등록 + 예약 레코드 생성 (실패해도 구매 자체는 성공 처리)
+    try {
+      const [[gameRow]] = await _pool.query(
+        "SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date FROM games WHERE id = ?",
+        [gameId]
+      );
+      const { v4: uuidv4 } = require('uuid');
+      await fabricService.registerTicket({
+        ticketId:     result.id,
+        tokenId:      ticketTokenId || '0',
+        gameId:       String(gameId),
+        seatId:       `${block}-${row}-${seatNumber}`,
+        walletAddress,
+        price:        Number(price),
+        purchaseType: 'PRIMARY',
+        gameDate:     gameRow?.game_date || '',
+      });
+
+      // Fabric 예약 레코드 (1차 구매 = 일반 예약)
+      const userDidHash    = fabricService.hashDid(walletAddress);
+      const reservationId  = uuidv4();
+      await fabricService.createReservation({
+        reservationId,
+        userDidHash,
+        gameId:      String(gameId),
+        raffleNftId: '',
+        isPriority:  false,
+      });
+      await fabricService.confirmReservation({ reservationId, ticketId: result.id });
+    } catch (fabErr) {
+      console.error('[ticket] Fabric registerTicket/reservation 실패 (무시):', fabErr.message);
     }
 
     res.json({

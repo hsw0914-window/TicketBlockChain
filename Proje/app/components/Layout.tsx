@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag } from "lucide-react";
+import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, ScanLine, Gift, Star, Settings2 } from "lucide-react";
 import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
@@ -65,14 +65,19 @@ export function Layout() {
   const dropdownBorder = theme === "dark" ? "rgba(90,116,146,0.22)" : "#d0d8e2";
 
   const navItems = [
-    { path: "/tickets", label: "경기 예매", icon: Ticket },
-    { path: "/my-tickets", label: "내 입장권", icon: Ticket },
-    { path: "/ticket-resale", label: "티켓 양도", icon: Tag },
-    { path: "/combine", label: "카드 조합", icon: Layers },
-    { path: "/market", label: "팬 자산 장터", icon: ShoppingBag },
-    { path: "/community", label: "커뮤니티", icon: MessagesSquare },
-    { path: "/notice", label: "공지사항", icon: Bell },
-  ];
+    { path: "/tickets",          label: "경기 예매",    icon: Ticket,       adminOnly: false },
+    { path: "/my-tickets",       label: "내 입장권",    icon: Ticket,       adminOnly: false },
+    { path: "/ticket-resale",    label: "티켓 양도",    icon: Tag,          adminOnly: false },
+    { path: "/point-exchange",   label: "포인트 교환",  icon: Gift,         adminOnly: false },
+    { path: "/raffle-status",    label: "응모권 NFT",   icon: Star,         adminOnly: false },
+    { path: "/priority-booking", label: "우선 예매",    icon: Ticket,       adminOnly: false },
+    { path: "/admin-draw",       label: "추첨 관리",    icon: Settings2,    adminOnly: true  },
+    { path: "/entry-scan",       label: "입장 스캔",    icon: ScanLine,     adminOnly: true  },
+    { path: "/combine",          label: "카드 조합",    icon: Layers,       adminOnly: false },
+    { path: "/market",           label: "팬 자산 장터", icon: ShoppingBag,  adminOnly: false },
+    { path: "/community",        label: "커뮤니티",     icon: MessagesSquare, adminOnly: false },
+    { path: "/notice",           label: "공지사항",     icon: Bell,         adminOnly: false },
+  ].filter(item => !item.adminOnly || isLoggedIn);
 
   const isActive = (path: string) => {
     if (path === "/") return location.pathname === "/";
