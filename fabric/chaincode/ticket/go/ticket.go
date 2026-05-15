@@ -926,34 +926,6 @@ func (t *TicketChaincode) EarnPointByEntry(
 	return string(out), nil
 }
 
-// ─── 23. EarnPointFromTrade ──────────────────────────────
-// 양도/장터 거래 수수료 포인트 적립
-
-func (t *TicketChaincode) EarnPointFromTrade(
-	ctx contractapi.TransactionContextInterface,
-	userDidHash string,
-	amount, rate float64,
-) (string, error) {
-	earnedPoint := math.Floor(amount * rate)
-	if earnedPoint <= 0 {
-		out, _ := json.Marshal(map[string]interface{}{"earnedPoint": 0})
-		return string(out), nil
-	}
-
-	point, err := getOrCreatePoint(ctx, userDidHash)
-	if err != nil { return "", err }
-
-	point.Balance     += earnedPoint
-	point.TotalEarned += earnedPoint
-	if err = putPoint(ctx, point); err != nil { return "", err }
-
-	out, _ := json.Marshal(map[string]interface{}{
-		"earnedPoint": earnedPoint,
-		"balance":     point.Balance,
-	})
-	return string(out), nil
-}
-
 // ─── 24. UpdateMembershipGrade ───────────────────────────
 // 입장 횟수 +1 후 등급 재계산
 

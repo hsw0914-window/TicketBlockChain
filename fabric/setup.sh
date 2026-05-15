@@ -39,14 +39,24 @@ echo ""
 
 # ─── 0. 의존성 확인 ────────────────────────────────────────
 echo "[ 0/7 ] 의존성 확인..."
-for cmd in docker docker-compose go node; do
+for cmd in docker go node; do
   if ! command -v $cmd &>/dev/null; then
     echo "❌ '$cmd' 이 설치되어 있지 않습니다."
-    echo "   sudo apt-get install -y docker.io docker-compose golang-go nodejs npm"
+    echo "   sudo apt-get install -y docker.io golang-go nodejs npm"
     exit 1
   fi
 done
-echo "✅ docker, go, node 확인됨"
+# Docker Compose v1(docker-compose) 또는 v2(docker compose) 자동 감지
+if command -v docker-compose &>/dev/null; then
+  DC="docker-compose"
+elif docker compose version &>/dev/null 2>&1; then
+  DC="docker compose"
+else
+  echo "❌ Docker Compose 를 찾을 수 없습니다."
+  echo "   sudo apt-get install -y docker-compose-plugin"
+  exit 1
+fi
+echo "✅ docker ($DC), go, node 확인됨"
 
 # ─── 1. Fabric 바이너리 다운로드 ──────────────────────────
 echo ""
@@ -70,7 +80,7 @@ if $RESET || [ ! -d "$BASIC_NET/organizations/peerOrganizations" ]; then
   echo ""
   echo "[ 2/7 ] 기존 네트워크 정리..."
   cd "$DOCKER_DIR"
-  docker-compose -f docker-compose-test-net.yaml down --volumes --remove-orphans 2>/dev/null || true
+  $DC -f docker-compose-test-net.yaml down --volumes --remove-orphans 2>/dev/null || true
   rm -rf "$BASIC_NET/organizations/peerOrganizations"
   rm -rf "$BASIC_NET/organizations/ordererOrganizations"
   rm -rf "$BASIC_NET/system-genesis-block"
@@ -93,7 +103,7 @@ bash "$SCRIPTS/createConfigtxgen.sh"
 echo ""
 echo "[ 5/7 ] Docker 컨테이너 기동 (orderer, peer, ca, cli)..."
 cd "$DOCKER_DIR"
-docker-compose -f docker-compose-test-net.yaml up -d
+$DC -f docker-compose-test-net.yaml up -d
 echo "▶ 컨테이너 안정화 대기 (5초)..."
 sleep 5
 docker ps --format "table {{.Names}}\t{{.Status}}"
