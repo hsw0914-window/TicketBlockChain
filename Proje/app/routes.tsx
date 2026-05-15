@@ -13,6 +13,7 @@ import { MyTickets } from "./pages/MyTickets";
 import { Market } from "./pages/Market";
 import { Community } from "./pages/Community";
 import { MyPage } from "./pages/MyPage";
+import { Membership } from "./pages/Membership";
 import { TicketBooking } from "./pages/TicketBooking";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
@@ -44,6 +45,7 @@ export const router = createBrowserRouter([
       { path: "notice/write", Component: NoticeWrite },
       { path: "notice/write/:id", Component: NoticeWrite },
       { path: "mypage", Component: MyPage },
+      { path: "mypage/membership", Component: Membership },
       { path: "ticket-resale", Component: TicketResale },
       { path: "collection", Component: Collection },
       { path: "meme-info", Component: MemeInfo },

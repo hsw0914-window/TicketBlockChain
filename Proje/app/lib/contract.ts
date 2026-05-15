@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, parseEther } from "ethers";
+import { BrowserProvider, Contract, isAddress, parseEther } from "ethers";
 
 export const HOODI_CHAIN_ID = "0x88BB0"; // 560048 in hex
 
@@ -13,6 +13,21 @@ export const HOODI_NETWORK = {
   rpcUrls: ["https://ethereum-hoodi-rpc.publicnode.com"],
   blockExplorerUrls: ["https://hoodi.ethpandaops.io"],
 };
+
+function getTicketNftAddress(): string {
+  const contractAddress = (import.meta.env.VITE_CONTRACT_ADDRESS as string | undefined) || TICKET_NFT_ADDRESS;
+  if (!isAddress(contractAddress)) {
+    throw new Error("티켓 NFT 컨트랙트 주소가 올바르지 않습니다. VITE_CONTRACT_ADDRESS 설정을 확인해 주세요.");
+  }
+  return contractAddress;
+}
+
+async function assertContractDeployed(provider: BrowserProvider, contractAddress: string): Promise<void> {
+  const code = await provider.getCode(contractAddress);
+  if (code === "0x") {
+    throw new Error("현재 네트워크에서 티켓 NFT 컨트랙트를 찾을 수 없습니다. MetaMask 네트워크를 Hoodi Testnet으로 전환한 뒤 다시 시도해 주세요.");
+  }
+}
 
 const TICKET_NFT_ABI = [
   {
@@ -68,8 +83,10 @@ export async function checkSeatTakenOnChain(
   row: number,
   seatNumber: number,
 ): Promise<boolean> {
+  await switchToHoodi();
   const provider = new BrowserProvider(window.ethereum!);
-  const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS as string;
+  const contractAddress = getTicketNftAddress();
+  await assertContractDeployed(provider, contractAddress);
   const contract = new Contract(contractAddress, TICKET_NFT_ABI, provider);
   return await contract.isSeatTaken(gameId, blockLabel, BigInt(row), BigInt(seatNumber));
 }
@@ -194,7 +211,8 @@ export async function sendTicketNFT(
   const provider = new BrowserProvider(window.ethereum!);
   const signer = await provider.getSigner();
 
-  const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS as string;
+  const contractAddress = getTicketNftAddress();
+  await assertContractDeployed(provider, contractAddress);
   const contract = new Contract(contractAddress, TICKET_NFT_ABI, signer);
 
   const tokenURI = JSON.stringify({

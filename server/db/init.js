@@ -128,40 +128,64 @@ async function initDB() {
   );
   await conn.query(`USE \`${DB_NAME}\``);
 
-  // ─── 매 재시작마다 초기화: FK 역순으로 DROP ───────────
-  await conn.query(`SET FOREIGN_KEY_CHECKS = 0`);
-  // combine/market 테이블 (FK 역순)
-  await conn.query(`DROP TABLE IF EXISTS box_open_logs`);
-  await conn.query(`DROP TABLE IF EXISTS combine_logs`);
-  await conn.query(`DROP TABLE IF EXISTS purchase_history`);
-  await conn.query(`DROP TABLE IF EXISTS price_history`);
-  await conn.query(`DROP TABLE IF EXISTS trades`);
-  await conn.query(`DROP TABLE IF EXISTS market_listings`);
-  await conn.query(`DROP TABLE IF EXISTS market_assets`);
-  await conn.query(`DROP TABLE IF EXISTS onchain_tx_logs`);
-  await conn.query(`DROP TABLE IF EXISTS nft_tokens`);
-  await conn.query(`DROP TABLE IF EXISTS user_boxes`);
-  await conn.query(`DROP TABLE IF EXISTS user_cards`);
-  await conn.query(`DROP TABLE IF EXISTS user_fragments`);
-  await conn.query(`DROP TABLE IF EXISTS box_reward_pool`);
-  await conn.query(`DROP TABLE IF EXISTS combine_recipes`);
-  await conn.query(`DROP TABLE IF EXISTS card_types`);
-  await conn.query(`DROP TABLE IF EXISTS fragment_types`);
-  // ticket resale 테이블
-  await conn.query(`DROP TABLE IF EXISTS ticket_trades`);
-  await conn.query(`DROP TABLE IF EXISTS ticket_listings`);
-  // 기존 테이블
-  await conn.query(`DROP TABLE IF EXISTS tickets`);
-  await conn.query(`DROP TABLE IF EXISTS did_verifications`);
-  await conn.query(`DROP TABLE IF EXISTS user_wallets`);
-  await conn.query(`DROP TABLE IF EXISTS post_likes`);
-  await conn.query(`DROP TABLE IF EXISTS comments`);
-  await conn.query(`DROP TABLE IF EXISTS posts`);
-  await conn.query(`DROP TABLE IF EXISTS games`);
-  await conn.query(`DROP TABLE IF EXISTS stadiums`);
-  await conn.query(`DROP TABLE IF EXISTS notices`);
-  await conn.query(`DROP TABLE IF EXISTS users`);
-  await conn.query(`SET FOREIGN_KEY_CHECKS = 1`);
+  const shouldReset = process.env.RESET_DB === "true";
+  const [existingUserTables] = await conn.query(`SHOW TABLES LIKE 'users'`);
+  if (existingUserTables.length > 0 && !shouldReset) {
+    // 기존 DB에 마이그레이션만 실행
+    const [tierCol] = await conn.query(`SHOW COLUMNS FROM users LIKE 'membership_tier'`);
+    if (tierCol.length === 0) {
+      await conn.query(`ALTER TABLE users ADD COLUMN membership_tier ENUM('일반','브론즈','실버','골드') NOT NULL DEFAULT '일반'`);
+      console.log("✅ membership_tier 컬럼 추가 완료");
+    }
+    const [earlyAccessRow] = await conn.query(`SELECT id FROM fragment_types WHERE id = 'early-access-pass'`);
+    if (earlyAccessRow.length === 0) {
+      await conn.query(
+        `INSERT INTO fragment_types (id, onchain_id, family, team, name, result_name, image_url, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['early-access-pass', 99, 'raffle', '플랫폼', '응모권', '응모권', 'https://images.unsplash.com/photo-1518688248740-7c31f1a945c4?w=400&q=80', '티어업 보상으로 지급되는 응모권 NFT']
+      );
+      console.log("✅ early-access-pass fragment_type 추가 완료");
+    }
+    console.log("✅ 기존 DB 유지 (초기화 생략). RESET_DB=true 설정 시에만 재생성합니다.");
+    await conn.end();
+    return;
+  }
+
+  if (shouldReset) {
+    // ─── 명시적으로 요청한 경우에만 초기화: FK 역순으로 DROP ───────────
+    await conn.query(`SET FOREIGN_KEY_CHECKS = 0`);
+    // combine/market 테이블 (FK 역순)
+    await conn.query(`DROP TABLE IF EXISTS box_open_logs`);
+    await conn.query(`DROP TABLE IF EXISTS combine_logs`);
+    await conn.query(`DROP TABLE IF EXISTS purchase_history`);
+    await conn.query(`DROP TABLE IF EXISTS price_history`);
+    await conn.query(`DROP TABLE IF EXISTS trades`);
+    await conn.query(`DROP TABLE IF EXISTS market_listings`);
+    await conn.query(`DROP TABLE IF EXISTS market_assets`);
+    await conn.query(`DROP TABLE IF EXISTS onchain_tx_logs`);
+    await conn.query(`DROP TABLE IF EXISTS nft_tokens`);
+    await conn.query(`DROP TABLE IF EXISTS user_boxes`);
+    await conn.query(`DROP TABLE IF EXISTS user_cards`);
+    await conn.query(`DROP TABLE IF EXISTS user_fragments`);
+    await conn.query(`DROP TABLE IF EXISTS box_reward_pool`);
+    await conn.query(`DROP TABLE IF EXISTS combine_recipes`);
+    await conn.query(`DROP TABLE IF EXISTS card_types`);
+    await conn.query(`DROP TABLE IF EXISTS fragment_types`);
+    // ticket resale 테이블
+    await conn.query(`DROP TABLE IF EXISTS ticket_trades`);
+    await conn.query(`DROP TABLE IF EXISTS ticket_listings`);
+    // 기존 테이블
+    await conn.query(`DROP TABLE IF EXISTS tickets`);
+    await conn.query(`DROP TABLE IF EXISTS did_verifications`);
+    await conn.query(`DROP TABLE IF EXISTS user_wallets`);
+    await conn.query(`DROP TABLE IF EXISTS post_likes`);
+    await conn.query(`DROP TABLE IF EXISTS comments`);
+    await conn.query(`DROP TABLE IF EXISTS posts`);
+    await conn.query(`DROP TABLE IF EXISTS games`);
+    await conn.query(`DROP TABLE IF EXISTS stadiums`);
+    await conn.query(`DROP TABLE IF EXISTS notices`);
+    await conn.query(`DROP TABLE IF EXISTS users`);
+    await conn.query(`SET FOREIGN_KEY_CHECKS = 1`);
+  }
 
   // ─── 테이블 생성 ──────────────────────────────────────
 
@@ -174,9 +198,10 @@ async function initDB() {
       login_type    ENUM('local','google') NOT NULL DEFAULT 'local',
       google_id     VARCHAR(255) UNIQUE DEFAULT NULL,
       profile_image VARCHAR(255) DEFAULT NULL,
-      is_active     TINYINT(1)   NOT NULL DEFAULT 1,
-      created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      is_active       TINYINT(1)   NOT NULL DEFAULT 1,
+      membership_tier ENUM('일반','브론즈','실버','골드') NOT NULL DEFAULT '일반',
+      created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
 
@@ -663,7 +688,8 @@ async function initDB() {
     ('giants-photo-1',  5, 'giants-photo',  '롯데', '롯데 원정 포토카드 파편',    '롯데 원정 포토카드',        'https://images.unsplash.com/photo-1529516548873-9ce57c8f155e?w=400&q=80', '원정 직관 인증에 자주 쓰이는 포토카드 조각'),
     ('giants-photo-2',  6, 'giants-photo',  '롯데', '롯데 응원석 파노라마 파편',  '롯데 응원석 파노라마 카드', 'https://images.unsplash.com/photo-1508344928928-7165b67de128?w=400&q=80', '응원석 장면이 들어간 확장 컷 조각'),
     ('tigers-towel-1',  7, 'tigers-towel',  'KIA', 'KIA 응원타월 배지 파편',     'KIA 응원타월 배지 카드',   'https://images.unsplash.com/photo-1567427017947-545c5f8d16ad?w=400&q=80', '굿즈형 배지 카드에 쓰이는 대표 파편'),
-    ('tigers-towel-2',  8, 'tigers-towel',  'KIA', 'KIA 레전드 응원컷 파편',     'KIA 레전드 응원컷 카드',   'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=400&q=80', '응원석 장면이 들어간 시즌형 특별 파편')
+    ('tigers-towel-2',  8, 'tigers-towel',  'KIA', 'KIA 레전드 응원컷 파편',     'KIA 레전드 응원컷 카드',   'https://images.unsplash.com/photo-1569517282132-25d22f4573e6?w=400&q=80', '응원석 장면이 들어간 시즌형 특별 파편'),
+    ('early-access-pass', 99, 'raffle', '플랫폼', '응모권', '응모권', 'https://images.unsplash.com/photo-1518688248740-7c31f1a945c4?w=400&q=80', '티어업 보상으로 지급되는 응모권 NFT')
   `);
 
   await conn.query(`

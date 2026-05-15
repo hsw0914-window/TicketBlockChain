@@ -11,11 +11,13 @@ import {
   FileText,
   MessageCircle,
   Bookmark,
+  ChevronRight,
   Store,
   Settings2,
   ExternalLink,
   History,
 } from "lucide-react";
+import { GiBaseballGlove } from "react-icons/gi";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -77,6 +79,16 @@ export function MyPage() {
   } = useAppSettings();
   const { isLoggedIn, user } = useAuth();
   const [preferences] = useState<Preferences>(loadPreferences);
+
+  // 멤버십 티어
+  const [memberTier, setMemberTier] = useState<string>("...");
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const token = localStorage.getItem("auth_token") ?? "";
+    fetch(`${import.meta.env.VITE_API_URL}/api/auth/membership`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.json()).then(d => { if (d.success) setMemberTier(d.currentTier); }).catch(() => {});
+  }, [isLoggedIn]);
 
   // DID 상태
   const [didStatus, setDidStatus] = useState<DidStatus | null>(null);
@@ -274,7 +286,7 @@ export function MyPage() {
           <Settings2 className="h-5 w-5" style={{ color: "#526183" }} />
           <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>내 활동 내역</h2>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           {[
             { icon: FileText,      label: "내 글",   count: "0", bg: "#eff6ff", text: "#3b82f6", border: "#dbeafe" },
             { icon: MessageCircle, label: "내 댓글", count: "0", bg: "#f0fdf4", text: "#22c55e", border: "#dcfce7" },
@@ -293,6 +305,45 @@ export function MyPage() {
               </div>
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => navigate("/mypage/membership")}
+            className="group relative col-span-2 overflow-hidden rounded-[24px] border h-[140px] transition-all hover:brightness-95 md:col-span-1"
+            style={{
+              background: "linear-gradient(145deg, #f8fbff 0%, #eefcf7 100%)",
+              borderColor: "#cbd5e1",
+              boxShadow: `inset 0 4px 0 ${{ 일반: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b"}, inset -4px 0 0 ${{ 일반: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8"}`,
+            }}
+          >
+            <div className="flex h-full flex-col items-center justify-center gap-1.5">
+              <div
+                className="relative flex h-12 w-12 items-center justify-center"
+                style={{
+                  clipPath: "polygon(50% 3%, 92% 25%, 92% 75%, 50% 97%, 8% 75%, 8% 25%)",
+                  background: `linear-gradient(145deg, ${{ 일반: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8"}, ${{ 일반: "#6b7280", 브론즈: "#b45309", 실버: "#475569", 골드: "#d97706" }[memberTier] ?? "#475569"})`,
+                }}
+              >
+                <div
+                  className="flex h-9 w-9 items-center justify-center rounded-full border-2"
+                  style={{
+                    background: "linear-gradient(145deg, #f8fafc, #cbd5e1)",
+                    borderColor: "#f8fafc",
+                    color: { 일반: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b",
+                  }}
+                >
+                  <GiBaseballGlove className="h-6 w-6" />
+                </div>
+              </div>
+              <div className="text-center">
+                <p className="text-[1rem] font-bold leading-tight" style={{ color: "#3f4e68" }}>멤버십</p>
+                <p className="text-[1.35rem] font-black leading-tight" style={{ color: { 일반: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b" }}>{memberTier}</p>
+              </div>
+              <span className="mt-1 inline-flex items-center gap-1 text-[0.76rem] font-extrabold" style={{ color: "#475569" }}>
+                정보 보기
+                <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </span>
+            </div>
+          </button>
         </div>
       </section>
 

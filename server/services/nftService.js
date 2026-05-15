@@ -49,6 +49,52 @@ async function getNextNonce() {
   }
 }
 
+function isNonceError(err) {
+  const code = err?.code;
+  const message = [
+    err?.message,
+    err?.shortMessage,
+    err?.info?.error?.message,
+    err?.error?.message,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return code === 'NONCE_EXPIRED'
+    || message.includes('nonce too low')
+    || message.includes('nonce has already been used')
+    || message.includes('already known');
+}
+
+async function syncNonceFromChain() {
+  _nonce = await getProvider().getTransactionCount(getSigner().address, 'pending');
+  return _nonce;
+}
+
+async function sendManagedTransaction(sendTx) {
+  let resolve;
+  const prev = _nonceLock;
+  _nonceLock = new Promise(r => { resolve = r; });
+  await prev;
+
+  try {
+    if (_nonce === null) await syncNonceFromChain();
+
+    try {
+      const tx = await sendTx(_nonce);
+      _nonce += 1;
+      return tx;
+    } catch (err) {
+      if (!isNonceError(err)) throw err;
+
+      await syncNonceFromChain();
+      const tx = await sendTx(_nonce);
+      _nonce += 1;
+      return tx;
+    }
+  } finally {
+    resolve();
+  }
+}
+
 // ─── FragmentNFT ABI (파편/카드) ────────────────────────────
 
 const FRAGMENT_NFT_ABI = [
@@ -64,22 +110,19 @@ function getFragmentContract() {
 }
 
 async function mintFragmentOnChain(toAddress, onchainId) {
-  const nonce   = await getNextNonce();
-  const tx      = await getFragmentContract().mintFragment(toAddress, BigInt(onchainId), 1n, { nonce });
+  const tx      = await sendManagedTransaction((nonce) => getFragmentContract().mintFragment(toAddress, BigInt(onchainId), 1n, { nonce }));
   const receipt = await tx.wait();
   return receipt.hash;
 }
 
 async function burnFragmentOnChain(ownerAddress, onchainId) {
-  const nonce   = await getNextNonce();
-  const tx      = await getFragmentContract().burnFragment(ownerAddress, BigInt(onchainId), 2n, { nonce });
+  const tx      = await sendManagedTransaction((nonce) => getFragmentContract().burnFragment(ownerAddress, BigInt(onchainId), 2n, { nonce }));
   const receipt = await tx.wait();
   return receipt.hash;
 }
 
 async function mintCardOnChain(toAddress, cardTypeId) {
-  const nonce   = await getNextNonce();
-  const tx      = await getFragmentContract().mintCard(toAddress, BigInt(cardTypeId), { nonce });
+  const tx      = await sendManagedTransaction((nonce) => getFragmentContract().mintCard(toAddress, BigInt(cardTypeId), { nonce }));
   const receipt = await tx.wait();
   return receipt.hash;
 }
@@ -159,8 +202,7 @@ function getBoxContract() {
  * 티켓 구매 보상: 박스 NFT 민팅
  */
 async function mintBoxOnChain(toAddress) {
-  const nonce   = await getNextNonce();
-  const tx      = await getBoxContract().mint(toAddress, SEASON_BOX, 1n, { nonce });
+  const tx      = await sendManagedTransaction((nonce) => getBoxContract().mint(toAddress, SEASON_BOX, 1n, { nonce }));
   const receipt = await tx.wait();
   return receipt.hash;
 }
@@ -169,8 +211,7 @@ async function mintBoxOnChain(toAddress) {
  * 박스 오픈: 박스 NFT 소각
  */
 async function burnBoxOnChain(ownerAddress) {
-  const nonce   = await getNextNonce();
-  const tx      = await getBoxContract().burn(ownerAddress, SEASON_BOX, 1n, { nonce });
+  const tx      = await sendManagedTransaction((nonce) => getBoxContract().burn(ownerAddress, SEASON_BOX, 1n, { nonce }));
   const receipt = await tx.wait();
   return receipt.hash;
 }
