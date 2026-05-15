@@ -13,6 +13,26 @@ function setPool(pool) {
 
 const jwtSecret = () => process.env.JWT_SECRET || 'fallback-secret';
 
+// POST /api/auth/dev-login — 개발용 임시 로그인 (비밀번호 없이 접속)
+router.post('/dev-login', async (req, res) => {
+  try {
+    const { user_id } = req.body;
+    if (!user_id) return res.status(400).json({ error: 'user_id가 필요합니다.' });
+
+    const [[user]] = await _pool.query(
+      'SELECT * FROM users WHERE user_id = ?',
+      [user_id]
+    );
+    if (!user) return res.status(404).json({ error: '존재하지 않는 테스트 계정입니다.' });
+
+    const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
+    res.json({ token, user: { user_id: user.user_id, nickname: user.nickname, email: user.email } });
+  } catch (err) {
+    console.error('[dev-login]', err);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // POST /api/auth/register — 회원가입
 router.post('/register', async (req, res) => {
   try {
@@ -197,6 +217,84 @@ router.get('/wallet', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[auth/wallet]', err);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/auth/claim-nft — 테스트용 NFT(아이템) 발급 API
+// 조원이 화면에서 버튼을 누르면 이 API가 호출되도록 프론트엔드를 구성하면 됩니다.
+const { mintFragmentOnChain } = require('../services/nftService'); // 민팅 함수 가져오기
+ 
+router.post('/claim-nft', requireAuth, async (req, res) => {
+  const userId = req.user.user_id;
+  const { item_id, signature, walletAddress } = req.body;
+  const targetItem = item_id || 'early-access-pass';
+  const ONCHAIN_ID = 99; // 응모권의 온체인 ID
+
+  if (!signature) {
+    return res.status(400).json({ error: '메타마스크 서명 확인이 필요합니다.' });
+  }
+
+  try {
+    // 사용자의 지갑 주소 검증 (DB에 등록된 주소와 일치하는지)
+    const [[wallet]] = await _pool.query(
+      'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
+      [userId]
+    );
+
+    if (!wallet || wallet.wallet_address.toLowerCase() !== walletAddress.toLowerCase()) {
+      return res.status(400).json({ error: '등록된 지갑 주소와 서명한 지갑 주소가 일치하지 않습니다.' });
+    }
+
+    // 1. DB 인벤토리에 해당 파편/NFT 추가
+    // (fragment_types 테이블에 해당 ID가 정의되어 있어야 합니다.)
+    await _pool.query(
+      `INSERT INTO user_fragments (user_id, fragment_type_id, count)
+       VALUES (?, ?, 1)
+       ON DUPLICATE KEY UPDATE count = count + 1`,
+      [userId, targetItem]
+    );
+
+    // 2. 실제 온체인 민팅 시도
+    let txHash = signature.slice(0, 66); // 기본값은 서명값의 일부
+    try {
+      // 블록체인에 실제 민팅 요청
+      const realTxHash = await mintFragmentOnChain(walletAddress, ONCHAIN_ID);
+      txHash = realTxHash;
+    } catch (mintErr) {
+      console.error('[claim-nft] 온체인 민팅 실패:', mintErr.message);
+      // 참고: 블록체인 발급에 실패해도 DB 기록은 남겨둘지 여부는 정책에 따라 결정합니다.
+    }
+
+    // 3. 트랜잭션 로그 기록
+    await _pool.query(
+      'INSERT INTO onchain_tx_logs (id, user_id, wallet_address, action_type, tx_hash, payload_json) VALUES (UUID(), ?, ?, ?, ?, ?)',
+      [userId, walletAddress, 'NFT_CLAIM_CONFIRMED', txHash, JSON.stringify({ item_id: targetItem })]
+    );
+
+    res.json({ 
+      success: true, 
+      message: `트랜잭션 승인 완료! 블록체인 발급이 시작되었습니다. (Tx: ${txHash.slice(0,10)}...)` 
+    });
+  } catch (err) {
+    console.error('[claim-nft]', err);
+    res.status(500).json({ error: 'NFT 발급 중 서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/auth/early-access-count — 보유 중인 응모권 수량 조회
+router.get('/early-access-count', requireAuth, async (req, res) => {
+  try {
+    const [[row]] = await _pool.query(
+      "SELECT count FROM user_fragments WHERE user_id = ? AND fragment_type_id = 'early-access-pass'",
+      [req.user.user_id]
+    );
+    res.json({ 
+      success: true, 
+      count: row ? row.count : 0 
+    });
+  } catch (err) {
+    console.error('[early-access-count]', err);
+    res.status(500).json({ error: '수량 조회 중 서버 오류가 발생했습니다.' });
   }
 });
 

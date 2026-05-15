@@ -22,7 +22,10 @@ let _nonce    = null;
 let _nonceLock = Promise.resolve();
 
 function getProvider() {
-  if (!_provider) _provider = new ethers.JsonRpcProvider(RPC_URL);
+  if (!_provider) {
+    // ENS를 지원하지 않는 네트워크 오류 방지 및 체인 ID 명시
+    _provider = new ethers.JsonRpcProvider(RPC_URL, undefined, { staticNetwork: true });
+  }
   return _provider;
 }
 

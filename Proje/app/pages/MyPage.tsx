@@ -15,6 +15,7 @@ import {
   Settings2,
   ExternalLink,
   History,
+  Sparkles,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
@@ -82,6 +83,66 @@ export function MyPage() {
   const [didStatus, setDidStatus] = useState<DidStatus | null>(null);
   const [isDIDLoading, setIsDIDLoading] = useState(false);
   const [didError, setDidError] = useState<string | null>(null);
+
+  // 응모권 관련 상태 추가
+  const [passCount, setPassCount] = useState(0);
+  const [isClaiming, setIsClaiming] = useState(false);
+
+  const fetchPassCount = async () => {
+    if (!isLoggedIn) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/early-access-count`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("auth_token") ?? ""}` },
+      });
+      const data = await res.json();
+      if (data.success) setPassCount(data.count);
+    } catch (err) { console.error(err); }
+  };
+
+  useEffect(() => { fetchPassCount(); }, [isLoggedIn]);
+
+  async function handleClaimNFT() {
+    if (!isLoggedIn) {
+      alert("로그인이 필요합니다.");
+      return;
+    }
+    if (!walletConnected || !walletAddress) {
+      alert("메타마스크 지갑을 먼저 연결해주세요.");
+      return;
+    }
+
+    setIsClaiming(true);
+    try {
+      // 1. 메타마스크 서명 요청 (트랜잭션 연결)
+      const provider = window.ethereum as any;
+      const message = `[BASE CHAIN] 응모권 NFT 발급을 승인합니다.\n발급 대상: ${nickname}\n지갑 주소: ${walletAddress}\n일시: ${new Date().toLocaleString()}`;
+      
+      const signature = await provider.request({
+        method: "personal_sign",
+        params: [message, walletAddress],
+      });
+
+      // 2. 서버에 서명값과 함께 발급 요청
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/claim-nft`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          Authorization: `Bearer ${localStorage.getItem("auth_token") ?? ""}` 
+        },
+        body: JSON.stringify({ 
+          item_id: "early-access-pass",
+          signature,
+          walletAddress
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "발급 실패");
+      alert(data.message);
+      fetchPassCount(); // 수량 갱신
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "발급 오류");
+    } finally { setIsClaiming(false); }
+  }
 
   // 트랜잭션 이력
   type TxLog = { id: string; label: string; txHash: string; createdAt: string; explorerUrl: string; };
@@ -247,7 +308,7 @@ export function MyPage() {
           <div className="grid gap-3 sm:grid-cols-3">
             {[
               { icon: Ticket, label: "입장권 알림", value: preferences.ticketAlerts ? "켜짐" : "꺼짐" },
-              { icon: ShoppingBag, label: "거래 보호", value: preferences.requireTradeSignature ? "서명 확인" : "기본" },
+              { icon: ShoppingBag, label: "응모권 NFT", value: `${passCount}개 보유` },
               { icon: Wallet, label: "지갑 상태", value: walletConnected ? "연결됨" : "미연결" },
             ].map((item) => {
               const Icon = item.icon;
@@ -274,12 +335,13 @@ export function MyPage() {
           <Settings2 className="h-5 w-5" style={{ color: "#526183" }} />
           <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>내 활동 내역</h2>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
             { icon: FileText,      label: "내 글",   count: "0", bg: "#eff6ff", text: "#3b82f6", border: "#dbeafe" },
             { icon: MessageCircle, label: "내 댓글", count: "0", bg: "#f0fdf4", text: "#22c55e", border: "#dcfce7" },
             { icon: Bookmark,      label: "북마크",  count: "0", bg: "#fefce8", text: "#ca8a04", border: "#fef9c3" },
             { icon: Store,         label: "매물",    count: "0", bg: "#faf5ff", text: "#a855f7", border: "#f3e8ff" },
+            { icon: Ticket,        label: "응모권",  count: String(passCount), bg: "#fff1f2", text: "#e11d48", border: "#ffe4e6" },
           ].map((item) => (
             <button
               key={item.label}
@@ -459,6 +521,28 @@ export function MyPage() {
                 {didError}
               </div>
             )}
+          </section>
+
+          {/* ─── 테스트 발급 섹션 ───────────────────────────── */}
+          <section
+            className="rounded-[24px] border px-6 py-6"
+            style={{ background: "#fdfcfe", borderColor: "#e2d6e8", boxShadow: "0 10px 24px rgba(114, 82, 131, 0.05)" }}
+          >
+            <div className="mb-5 flex items-center gap-3">
+              <Sparkles className="h-5 w-5" style={{ color: "#725283" }} />
+              <div>
+                <h2 className="section-title text-[1.15rem]" style={{ color: "#3a2a44" }}>개발용 테스트 도구</h2>
+                <p className="page-muted mt-1" style={{ color: "#7a6d90" }}>응모권 NFT 발급을 테스트해볼 수 있는 버튼입니다.</p>
+              </div>
+            </div>
+            <Button
+              className="w-full h-11 rounded-[14px] font-semibold text-white"
+              style={{ background: "#725283" }}
+              onClick={handleClaimNFT}
+              disabled={isClaiming || !isLoggedIn}
+            >
+              {isClaiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "트랜잭션 연결 및 NFT 발급받기"}
+            </Button>
           </section>
 
           {/* 온체인 트랜잭션 이력 */}
