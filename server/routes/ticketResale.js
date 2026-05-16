@@ -605,7 +605,7 @@ router.post('/buy/:id', requireAuth, async (req, res) => {
           'SELECT COUNT(*) AS cnt FROM ticket_trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
           [listing.seller_id]
         );
-        if (Number(cnt) <= 3) {
+        if (Number(cnt) < 3) {
           const result = await fabricService.earnPointFromTrade({
             userDidHash: fabricService.hashDid(sellerWalletRow.wallet_address),
             amount: listing.listed_price,
