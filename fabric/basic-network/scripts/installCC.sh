@@ -13,11 +13,11 @@ ORG1_PEER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/pe
 ORG2_PEER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
 ORG2_ADMIN_MSP=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
 
-## 체인코드 빌드
+## 체인코드 빌드 (vendor 포함 — Docker 빌드 중 인터넷 불필요)
 echo "체인코드 빌드: $CC_NAME"
 cd ./chaincode/${CC_NAME}/go/
 go mod tidy
-go build .
+go mod vendor
 
 ## 체인코드 패키지화
 echo "체인코드 패키지화"
