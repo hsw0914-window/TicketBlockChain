@@ -297,12 +297,29 @@ export function TicketResale() {
       }
     }
 
-    // Step 3: 서버 등록
+    // Step 3: MetaMask 서명
+    let sellerWalletAddress: string | null = null;
+    let listingMessage: string | null = null;
+    let listingSignature: string | null = null;
+    try {
+      const { BrowserProvider } = await import("ethers");
+      const provider = new BrowserProvider(window.ethereum!);
+      const signer = await provider.getSigner();
+      sellerWalletAddress = await signer.getAddress();
+      listingMessage = `Listing ticket ${selectedTicket.id} for ${price} KRW at ${Date.now()}`;
+      listingSignature = await signer.signMessage(listingMessage);
+    } catch (err: unknown) {
+      const e = err as { code?: number; message?: string };
+      setPostError(e.code === 4001 ? "MetaMask 서명을 취소했습니다." : (e.message ?? "서명 오류"));
+      setPosting(false); setPostStep("idle"); return;
+    }
+
+    // Step 4: 서버 등록
     setPostStep("saving");
     try {
       const res  = await fetch(`${API}/listings`, {
         method: "POST", headers: authHeaders(),
-        body: JSON.stringify({ ticketId: selectedTicket.id, listedPrice: price, nftTokenId, priceWei, listTxHash }),
+        body: JSON.stringify({ ticketId: selectedTicket.id, listedPrice: price, nftTokenId, priceWei, listTxHash, sellerWalletAddress, listingMessage, listingSignature }),
       });
       const data = await res.json();
       if (!res.ok) { setPostError(data.error ?? "등록 실패"); setPosting(false); setPostStep("idle"); return; }
