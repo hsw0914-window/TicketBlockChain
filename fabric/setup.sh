@@ -88,6 +88,8 @@ if $RESET || [ ! -d "$BASIC_NET/organizations/peerOrganizations" ]; then
   done
   rm -rf "$BASIC_NET/organizations/peerOrganizations"
   rm -rf "$BASIC_NET/organizations/ordererOrganizations"
+  rm -f  "$BASIC_NET/organizations/fabric-ca/org1/fabric-ca-server.db"
+  rm -f  "$BASIC_NET/organizations/fabric-ca/org2/fabric-ca-server.db"
   rm -rf "$BASIC_NET/system-genesis-block"
   rm -rf "$BASIC_NET/channel-artifacts"
   rm -rf "$FABRIC_DIR/wallet"
