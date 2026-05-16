@@ -297,28 +297,6 @@ export function TicketBooking() {
   const finalTotal = Math.max(0, ticketTotal + serviceFee - pointDiscount);
   const paymentReady = selectedTickets.length > 0;
 
-  if (!event) {
-    if (eventLoading) {
-      return (
-        <div className="page-shell">
-          <div className="rounded-[28px] border p-8 text-center" style={{ background: "#f4f7fa", borderColor: "#d7e0e8", color: "#304257" }}>
-            경기 정보를 불러오는 중...
-          </div>
-        </div>
-      );
-    }
-    return (
-      <div className="page-shell">
-        <div
-          className="rounded-[28px] border p-8"
-          style={{ background: "#f4f7fa", borderColor: "#d7e0e8", color: "#304257" }}
-        >
-          예매할 경기를 찾지 못했습니다.
-        </div>
-      </div>
-    );
-  }
-
   const updateStep = (nextStep: number) => {
     setCurrentStep(Math.max(0, Math.min(nextStep, steps.length - 1)));
   };
@@ -463,10 +441,18 @@ export function TicketBooking() {
     );
   }
 
-  if (eventLoading || !event) {
+  if (eventLoading) {
     return (
       <div className="page-shell flex items-center justify-center min-h-[40vh]">
         <p className="text-[0.95rem]" style={{ color: "#8a9ab0" }}>경기 정보를 불러오는 중...</p>
+      </div>
+    );
+  }
+
+  if (!event) {
+    return (
+      <div className="page-shell flex items-center justify-center min-h-[40vh]">
+        <p className="text-[0.95rem]" style={{ color: "#8a9ab0" }}>예매할 경기를 찾지 못했습니다.</p>
       </div>
     );
   }
