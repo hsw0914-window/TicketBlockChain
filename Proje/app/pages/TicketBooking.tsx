@@ -436,7 +436,10 @@ export function TicketBooking() {
           const ticket = selectedTickets[i];
           const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tickets/purchase`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${authToken()}`,
+            },
             body: JSON.stringify({
               walletAddress: address,
               gameId: event.id,
