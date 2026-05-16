@@ -10,8 +10,12 @@ async function main() {
         const ccpPath = path.resolve(__dirname, '..', 'connection-org1.json');
         const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
 
-        const caURL = ccp.certificateAuthorities['ca.org1.example.com'].url;
-        const ca = new FabricCAServices(caURL);
+        const caInfo = ccp.certificateAuthorities['ca.org1.example.com'];
+        const ca = new FabricCAServices(
+            caInfo.url,
+            { trustedRoots: caInfo.tlsCACerts.pem, verify: false },
+            caInfo.caName
+        );
 
         const walletPath = path.join(process.cwd(), '..', 'wallet');
         const wallet = await Wallets.newFileSystemWallet(walletPath);
