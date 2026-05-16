@@ -22,18 +22,4 @@ echo "▶ 채널 트랜잭션 생성..."
   -outputCreateChannelTx ./channel-artifacts/channel.tx \
   -channelID channel1
 
-echo "▶ Org1 앵커피어 트랜잭션 생성..."
-"$BIN_PATH/configtxgen" \
-  -profile DevChannel \
-  -outputAnchorPeersUpdate ./channel-artifacts/Org1MSPanchors.tx \
-  -channelID channel1 \
-  -asOrg Org1MSP
-
-echo "▶ Org2 앵커피어 트랜잭션 생성..."
-"$BIN_PATH/configtxgen" \
-  -profile DevChannel \
-  -outputAnchorPeersUpdate ./channel-artifacts/Org2MSPanchors.tx \
-  -channelID channel1 \
-  -asOrg Org2MSP
-
 echo "✅ configtxgen 완료"
