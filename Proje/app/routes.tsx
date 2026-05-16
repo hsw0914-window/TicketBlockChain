@@ -1,37 +1,49 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router";
 import { Layout } from "./components/Layout";
 import { Home } from "./pages/Home";
-import { Combine } from "./pages/Combine";
-import { MemeInfo } from "./pages/MemeInfo";
-import { Detail } from "./pages/Detail";
 import { NotFound } from "./pages/NotFound";
-import { Notice } from "./pages/Notice";
-import { Collection } from "./pages/Collection";
-import { Attendance } from "./pages/Attendance";
-import { Tickets } from "./pages/Tickets";
-import { MyTickets } from "./pages/MyTickets";
-import { Market } from "./pages/Market";
-import { Community } from "./pages/Community";
-import { MyPage } from "./pages/MyPage";
-import { TicketBooking } from "./pages/TicketBooking";
-import { Login } from "./pages/Login";
-import { Register } from "./pages/Register";
-import { NoticeWrite } from "./pages/NoticeWrite";
-import { TicketResale }    from "./pages/TicketResale";
-import { EntryScanner }    from "./pages/EntryScanner";
-import { PointExchange }   from "./pages/PointExchange";
-import { RaffleStatus }    from "./pages/RaffleStatus";
-import { PriorityBooking } from "./pages/PriorityBooking";
-import { AdminDraw }       from "./pages/AdminDraw";
+
+const Login          = lazy(() => import("./pages/Login").then((m) => ({ default: m.Login })));
+const Register       = lazy(() => import("./pages/Register").then((m) => ({ default: m.Register })));
+const Tickets        = lazy(() => import("./pages/Tickets").then((m) => ({ default: m.Tickets })));
+const TicketBooking  = lazy(() => import("./pages/TicketBooking").then((m) => ({ default: m.TicketBooking })));
+const MyTickets      = lazy(() => import("./pages/MyTickets").then((m) => ({ default: m.MyTickets })));
+const Combine        = lazy(() => import("./pages/Combine").then((m) => ({ default: m.Combine })));
+const Market         = lazy(() => import("./pages/Market").then((m) => ({ default: m.Market })));
+const Community      = lazy(() => import("./pages/Community").then((m) => ({ default: m.Community })));
+const Notice         = lazy(() => import("./pages/Notice").then((m) => ({ default: m.Notice })));
+const NoticeWrite    = lazy(() => import("./pages/NoticeWrite").then((m) => ({ default: m.NoticeWrite })));
+const MyPage         = lazy(() => import("./pages/MyPage").then((m) => ({ default: m.MyPage })));
+const TicketResale   = lazy(() => import("./pages/TicketResale").then((m) => ({ default: m.TicketResale })));
+const Collection     = lazy(() => import("./pages/Collection").then((m) => ({ default: m.Collection })));
+const MemeInfo       = lazy(() => import("./pages/MemeInfo").then((m) => ({ default: m.MemeInfo })));
+const Attendance     = lazy(() => import("./pages/Attendance").then((m) => ({ default: m.Attendance })));
+const Detail         = lazy(() => import("./pages/Detail").then((m) => ({ default: m.Detail })));
+const EntryScanner   = lazy(() => import("./pages/EntryScanner").then((m) => ({ default: m.EntryScanner })));
+const PointExchange  = lazy(() => import("./pages/PointExchange").then((m) => ({ default: m.PointExchange })));
+const RaffleStatus   = lazy(() => import("./pages/RaffleStatus").then((m) => ({ default: m.RaffleStatus })));
+const PriorityBooking = lazy(() => import("./pages/PriorityBooking").then((m) => ({ default: m.PriorityBooking })));
+const AdminDraw      = lazy(() => import("./pages/AdminDraw").then((m) => ({ default: m.AdminDraw })));
+
+function withSuspense(Component: React.ComponentType) {
+  return function LazyRoute() {
+    return (
+      <Suspense fallback={<div className="page-shell" />}>
+        <Component />
+      </Suspense>
+    );
+  };
+}
 
 export const router = createBrowserRouter([
   {
     path: "/login",
-    Component: Login,
+    Component: withSuspense(Login),
   },
   {
     path: "/register",
-    Component: Register,
+    Component: withSuspense(Register),
   },
   {
     path: "/",
@@ -39,26 +51,26 @@ export const router = createBrowserRouter([
     ErrorBoundary: NotFound,
     children: [
       { index: true, Component: Home },
-      { path: "tickets", Component: Tickets },
-      { path: "tickets/:eventId/booking", Component: TicketBooking },
-      { path: "my-tickets", Component: MyTickets },
-      { path: "combine", Component: Combine },
-      { path: "market", Component: Market },
-      { path: "community", Component: Community },
-      { path: "notice", Component: Notice },
-      { path: "notice/write", Component: NoticeWrite },
-      { path: "notice/write/:id", Component: NoticeWrite },
-      { path: "mypage", Component: MyPage },
-      { path: "ticket-resale", Component: TicketResale },
-      { path: "collection", Component: Collection },
-      { path: "meme-info", Component: MemeInfo },
-      { path: "attendance", Component: Attendance },
-      { path: "detail/:id",    Component: Detail },
-      { path: "entry-scan",       Component: EntryScanner },
-      { path: "point-exchange",   Component: PointExchange },
-      { path: "raffle-status",    Component: RaffleStatus },
-      { path: "priority-booking", Component: PriorityBooking },
-      { path: "admin-draw",       Component: AdminDraw },
+      { path: "tickets",                  Component: withSuspense(Tickets) },
+      { path: "tickets/:eventId/booking", Component: withSuspense(TicketBooking) },
+      { path: "my-tickets",               Component: withSuspense(MyTickets) },
+      { path: "combine",                  Component: withSuspense(Combine) },
+      { path: "market",                   Component: withSuspense(Market) },
+      { path: "community",                Component: withSuspense(Community) },
+      { path: "notice",                   Component: withSuspense(Notice) },
+      { path: "notice/write",             Component: withSuspense(NoticeWrite) },
+      { path: "notice/write/:id",         Component: withSuspense(NoticeWrite) },
+      { path: "mypage",                   Component: withSuspense(MyPage) },
+      { path: "ticket-resale",            Component: withSuspense(TicketResale) },
+      { path: "collection",               Component: withSuspense(Collection) },
+      { path: "meme-info",                Component: withSuspense(MemeInfo) },
+      { path: "attendance",               Component: withSuspense(Attendance) },
+      { path: "detail/:id",               Component: withSuspense(Detail) },
+      { path: "entry-scan",               Component: withSuspense(EntryScanner) },
+      { path: "point-exchange",           Component: withSuspense(PointExchange) },
+      { path: "raffle-status",            Component: withSuspense(RaffleStatus) },
+      { path: "priority-booking",         Component: withSuspense(PriorityBooking) },
+      { path: "admin-draw",               Component: withSuspense(AdminDraw) },
     ],
   },
   {

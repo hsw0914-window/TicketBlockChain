@@ -13,7 +13,6 @@ import {
   Loader2,
   MapPin,
   Receipt,
-  RefreshCw,
   ShieldCheck,
   Ticket,
   Wallet,
@@ -40,21 +39,15 @@ function formatPrice(value: number) {
   return `₩${value.toLocaleString("ko-KR")}`;
 }
 
-function createVerificationCode() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-}
-
 function parseSeatKey(seatKey: string) {
   const [row, seatNumber] = seatKey.split("-").map(Number);
   return { row, seatNumber };
 }
 
 const steps = [
-  { id: 0, label: "예매 전 확인", icon: ShieldCheck },
-  { id: 1, label: "구역 선택", icon: LayoutGrid },
-  { id: 2, label: "좌석 선택", icon: Armchair },
-  { id: 3, label: "가격 확인", icon: Receipt },
+  { id: 0, label: "구역 선택", icon: LayoutGrid },
+  { id: 1, label: "좌석 선택", icon: Armchair },
+  { id: 2, label: "가격 확인", icon: Receipt },
 ] as const;
 
 const mapBlockBadgePositions: Record<string, CSSProperties> = {
@@ -148,7 +141,7 @@ const blockFlowMeta: Record<string, { startLabel: string; endLabel: string }> = 
 export function TicketBooking() {
   const { eventId = "" } = useParams();
   const navigate = useNavigate();
-  const { effectiveWallet: walletAddress, connectWallet } = useAppSettings();
+  const { walletAddress, connectWallet } = useAppSettings();
   const accessStatus = useBookingAccess();
 
   // 로컬 이벤트 먼저 시도, 없으면 API에서 게임 정보 가져와서 템플릿으로 변환
@@ -169,13 +162,6 @@ export function TicketBooking() {
   }, [eventId]);
 
   const [currentStep, setCurrentStep] = useState(0);
-  const [verificationCode, setVerificationCode] = useState(() => createVerificationCode());
-  const [verificationInput, setVerificationInput] = useState("");
-  const [agreements, setAgreements] = useState({
-    officialOnly: false,
-    maxQuantity: false,
-    refundPolicy: false,
-  });
   const [selectedGradeId, setSelectedGradeId] = useState<string | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [selectedSeatKeys, setSelectedSeatKeys] = useState<string[]>([]);
@@ -276,9 +262,9 @@ export function TicketBooking() {
     });
   }, [selectedBlock, selectedGrade, selectedSeatKeys, ticketTypesBySeat]);
 
-  // step 3 진입 시 포인트 잔액 조회
+  // step 2 진입 시 포인트 잔액 조회
   useEffect(() => {
-    if (currentStep !== 3 || !walletAddress) return;
+    if (currentStep !== 2 || !walletAddress) return;
     fetch(`${base}/api/points?walletAddress=${walletAddress}`, {
       headers: { Authorization: `Bearer ${authToken()}` },
     })
@@ -311,11 +297,7 @@ export function TicketBooking() {
   const ticketTotal = selectedTickets.reduce((sum, ticket) => sum + ticket.price, 0);
   const serviceFee = Math.round(ticketTotal * 0.03); // 3% 서비스 이용료
   const finalTotal = Math.max(0, ticketTotal + serviceFee - pointDiscount);
-  const verificationPassed =
-    verificationInput.trim().toUpperCase() === verificationCode &&
-    agreements.officialOnly &&
-    agreements.maxQuantity;
-  const paymentReady = verificationPassed && agreements.refundPolicy && selectedTickets.length > 0;
+  const paymentReady = selectedTickets.length > 0;
 
   if (!event) {
     if (eventLoading) {
@@ -637,7 +619,7 @@ export function TicketBooking() {
             </div>
           </section>
 
-          <section className="grid gap-3 md:grid-cols-4">
+          <section className="grid gap-3 md:grid-cols-3">
             {steps.map((step) => {
               const Icon = step.icon;
               const active = currentStep === step.id;
@@ -649,9 +631,8 @@ export function TicketBooking() {
                   type="button"
                   onClick={() => {
                     if (step.id === 0) updateStep(step.id);
-                    if (step.id === 1 && verificationPassed) updateStep(step.id);
-                    if (step.id === 2 && verificationPassed && selectedGrade && selectedBlock) updateStep(step.id);
-                    if (step.id === 3 && verificationPassed && selectedSeatKeys.length > 0) updateStep(step.id);
+                    if (step.id === 1 && selectedGrade && selectedBlock) updateStep(step.id);
+                    if (step.id === 2 && selectedSeatKeys.length > 0) updateStep(step.id);
                   }}
                   className="rounded-[22px] border px-4 py-4 text-left transition"
                   style={{
@@ -685,128 +666,6 @@ export function TicketBooking() {
           </section>
 
           {currentStep === 0 && (
-            <section
-              className="rounded-[30px] border p-6"
-              style={{ background: "#f5f8fb", borderColor: "#d7e0e8" }}
-            >
-              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-                <div className="space-y-5">
-                  <div>
-                    <p className="text-[0.78rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "#8a9ab0" }}>
-                      Verification
-                    </p>
-                    <h3 className="mt-2 text-[1.18rem] font-bold tracking-[-0.04em]" style={{ color: "#15263d" }}>
-                      {event.verificationLabel}
-                    </h3>
-                    <p className="mt-2 text-[0.95rem] leading-7" style={{ color: "#5b6d84" }}>
-                      {event.verificationHelp}
-                    </p>
-                  </div>
-
-                  <div className="rounded-[24px] border p-5" style={{ background: "#ffffff", borderColor: "#d8e1ea" }}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[0.78rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "#8a9ab0" }}>
-                          보안 코드
-                        </p>
-                        <div
-                          className="mt-2 rounded-[18px] border px-5 py-4 font-mono text-[1.4rem] font-bold tracking-[0.36em]"
-                          style={{ background: "#f2f6fa", borderColor: "#dce5ee", color: "#20344f" }}
-                        >
-                          {verificationCode}
-                        </div>
-                      </div>
-                      <Button
-                        variant="outline"
-                        className="rounded-full border-[#d3dde6] bg-white text-[#4f637b]"
-                        onClick={() => {
-                          setVerificationCode(createVerificationCode());
-                          setVerificationInput("");
-                        }}
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                        새 코드
-                      </Button>
-                    </div>
-
-                    <div className="mt-4 space-y-3">
-                      <label className="block">
-                        <span className="mb-2 block text-[0.88rem] font-medium" style={{ color: "#40546c" }}>
-                          보안 코드 입력
-                        </span>
-                        <input
-                          value={verificationInput}
-                          onChange={(event) => setVerificationInput(event.target.value.toUpperCase())}
-                          placeholder="예: A7BK3M"
-                          className="w-full rounded-2xl border px-4 py-3 text-[0.95rem] outline-none"
-                          style={{ borderColor: "#d5dfe8", background: "#fbfcfd", color: "#1b2c44" }}
-                        />
-                      </label>
-
-                      <label className="flex items-start gap-3 rounded-[18px] border px-4 py-3"
-                        style={{ background: "#fbfcfd", borderColor: "#e0e7ee" }}>
-                        <input
-                          type="checkbox"
-                          checked={agreements.officialOnly}
-                          onChange={(event) =>
-                            setAgreements((prev) => ({ ...prev, officialOnly: event.target.checked }))
-                          }
-                          className="mt-1 h-4 w-4 rounded border-[#cfd8e2]"
-                        />
-                        <span className="text-[0.92rem] leading-6" style={{ color: "#44576f" }}>
-                          선택한 좌석 티켓은 BASE CHAIN 공식 재판매 마켓으로만 양도됩니다.
-                        </span>
-                      </label>
-
-                      <label className="flex items-start gap-3 rounded-[18px] border px-4 py-3"
-                        style={{ background: "#fbfcfd", borderColor: "#e0e7ee" }}>
-                        <input
-                          type="checkbox"
-                          checked={agreements.maxQuantity}
-                          onChange={(event) =>
-                            setAgreements((prev) => ({ ...prev, maxQuantity: event.target.checked }))
-                          }
-                          className="mt-1 h-4 w-4 rounded border-[#cfd8e2]"
-                        />
-                        <span className="text-[0.92rem] leading-6" style={{ color: "#44576f" }}>
-                          1회 예매 한도는 {event.maxTickets}매이며, 좌석 확보 후 5분 안에 결제를 완료해야 합니다.
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  className="rounded-[28px] border p-5"
-                  style={{ background: "linear-gradient(180deg, #e8eff5 0%, #f7fafc 100%)", borderColor: "#d5dfe8" }}
-                >
-                  <div className="flex items-center gap-2 text-[0.85rem] font-semibold" style={{ color: "#1456a0" }}>
-                    <Info className="h-4 w-4" />
-                    예매 전에 확인할 점
-                  </div>
-                  <div className="mt-4 space-y-4 text-[0.92rem] leading-7" style={{ color: "#51637b" }}>
-                    <p>좌석 선택 후에는 블록과 좌석번호가 티켓 NFT 메타데이터에 함께 기록됩니다.</p>
-                    <p>잠실야구장 기준으로 게이트와 응원 구역이 함께 표시되어 입장 동선도 바로 확인할 수 있습니다.</p>
-                    <p>예매 완료 후에는 내 입장권에 QR과 함께 좌석 정보가 저장됩니다.</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end">
-                <Button
-                  className="h-11 rounded-2xl px-5 text-white"
-                  style={{ background: verificationPassed ? "#1456a0" : "#97afcc" }}
-                  disabled={!verificationPassed}
-                  onClick={() => updateStep(1)}
-                >
-                  구역 선택으로 이동
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </section>
-          )}
-
-          {currentStep === 1 && (
             <section className="grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
               <div
                 className="rounded-[30px] border p-6"
@@ -1124,20 +983,12 @@ export function TicketBooking() {
                   </div>
                 )}
 
-                <div className="mt-6 flex justify-between">
-                  <Button
-                    variant="outline"
-                    className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                    onClick={() => updateStep(0)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    이전
-                  </Button>
+                <div className="mt-6 flex justify-end">
                   <Button
                     className="rounded-2xl px-5 text-white"
                     style={{ background: selectedGrade && selectedBlock ? "#1456a0" : "#97afcc" }}
                     disabled={!selectedGrade || !selectedBlock}
-                    onClick={() => updateStep(2)}
+                    onClick={() => updateStep(1)}
                   >
                     좌석번호 보기
                     <ChevronRight className="h-4 w-4" />
@@ -1147,7 +998,7 @@ export function TicketBooking() {
             </section>
           )}
 
-          {currentStep === 2 && selectedGrade && selectedBlock && (
+          {currentStep === 1 && selectedGrade && selectedBlock && (
             <section
               className="rounded-[30px] border p-6"
               style={{ background: "#f6f9fb", borderColor: "#d8e0e8" }}
@@ -1247,7 +1098,7 @@ export function TicketBooking() {
                 <Button
                   variant="outline"
                   className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                  onClick={() => updateStep(1)}
+                  onClick={() => updateStep(0)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   구역 다시 선택
@@ -1256,7 +1107,7 @@ export function TicketBooking() {
                   className="rounded-2xl px-5 text-white"
                   style={{ background: selectedSeatKeys.length > 0 ? "#1456a0" : "#97afcc" }}
                   disabled={selectedSeatKeys.length === 0}
-                  onClick={() => updateStep(3)}
+                  onClick={() => updateStep(2)}
                 >
                   가격 확인하기
                   <ChevronRight className="h-4 w-4" />
@@ -1265,7 +1116,7 @@ export function TicketBooking() {
             </section>
           )}
 
-          {currentStep === 3 && selectedGrade && selectedBlock && (
+          {currentStep === 2 && selectedGrade && selectedBlock && (
             <section
               className="rounded-[30px] border p-6"
               style={{ background: "#f7f9fb", borderColor: "#d8e0e8" }}
@@ -1338,26 +1189,11 @@ export function TicketBooking() {
                 ))}
               </div>
 
-              <label className="mt-5 flex items-start gap-3 rounded-[20px] border px-4 py-4"
-                style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
-                <input
-                  type="checkbox"
-                  checked={agreements.refundPolicy}
-                  onChange={(event) =>
-                    setAgreements((previous) => ({ ...previous, refundPolicy: event.target.checked }))
-                  }
-                  className="mt-1 h-4 w-4 rounded border-[#cfd8e2]"
-                />
-                <span className="text-[0.92rem] leading-6" style={{ color: "#42556d" }}>
-                  결제 후 티켓 NFT는 즉시 발급되며, 경기 시작 4시간 전까지는 공식 재판매 또는 취소 정책에 따라 처리됩니다.
-                </span>
-              </label>
-
               <div className="mt-6 flex justify-between">
                 <Button
                   variant="outline"
                   className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                  onClick={() => updateStep(2)}
+                  onClick={() => updateStep(1)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   좌석 다시 보기

@@ -48,7 +48,7 @@ const EXCHANGE_COSTS = { RAFFLE_NFT: 1500, CARD_NFT: 5000 };
 // ─── 메인 컴포넌트 ────────────────────────────────────────
 
 export function PointExchange() {
-  const { effectiveWallet: walletAddress } = useAppSettings();
+  const { walletAddress } = useAppSettings();
 
   const [point,        setPoint]        = useState<PointData | null>(null);
   const [membership,   setMembership]   = useState<MembershipData | null>(null);

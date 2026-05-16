@@ -417,7 +417,7 @@ function TicketCard({
 // ─── 메인 컴포넌트 ────────────────────────────────────────
 
 export function MyTickets() {
-  const { effectiveWallet: walletAddress } = useAppSettings();
+  const { walletAddress } = useAppSettings();
   const [ticketView, setTicketView] = useState<"active" | "completed">("active");
   const [apiTickets, setApiTickets] = useState<NormalizedTicket[]>([]);
 

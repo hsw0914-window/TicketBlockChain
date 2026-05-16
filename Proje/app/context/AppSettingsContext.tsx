@@ -13,10 +13,9 @@ type ThemeMode = "light" | "dark";
 type AppSettingsContextValue = {
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
-  walletAddress: string | null;       // MetaMask 연결 주소
+  walletAddress: string | null;
   walletChainId: string | null;
-  walletConnected: boolean;           // MetaMask 실제 연결 여부
-  effectiveWallet: string | null;     // API 호출용: MetaMask 주소 또는 DB 등록 주소
+  walletConnected: boolean;
   walletProviderName: string;
   walletError: string | null;
   isConnectingWallet: boolean;
@@ -46,7 +45,6 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [walletChainId, setWalletChainId] = useState<string | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
-  const [dbWalletAddress, setDbWalletAddress] = useState<string | null>(null);
 
   const applyWalletState = useCallback((address: string | null, chainId: string | null) => {
     setWalletAddress(address);
@@ -84,22 +82,6 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       // keep stored state fallback only
     }
   }, [applyWalletState]);
-
-  // MetaMask 미연결 + 로그인 상태일 때 DB 등록 지갑을 자동 로드
-  useEffect(() => {
-    if (walletAddress) { setDbWalletAddress(null); return; }
-    const token = localStorage.getItem("auth_token");
-    if (!token) { setDbWalletAddress(null); return; }
-    const apiBase = import.meta.env.VITE_API_URL as string ?? "http://localhost:4000";
-    fetch(`${apiBase}/api/auth/wallet`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        setDbWalletAddress((data as { walletAddress?: string } | null)?.walletAddress ?? null);
-      })
-      .catch(() => setDbWalletAddress(null));
-  }, [walletAddress]);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -178,7 +160,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       const token = localStorage.getItem("auth_token");
       if (token) {
         try {
-          const walletRes = await fetch("http://localhost:4000/api/auth/wallet", {
+          const walletRes = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/wallet`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (walletRes.ok) {
@@ -222,8 +204,6 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     }
   }, [applyWalletState]);
 
-  const effectiveWallet = walletAddress ?? dbWalletAddress;
-
   const value = useMemo<AppSettingsContextValue>(
     () => ({
       theme,
@@ -231,12 +211,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       walletAddress,
       walletChainId,
       walletConnected: Boolean(walletAddress),
-      effectiveWallet,
-      walletProviderName: effectiveWallet
-        ? walletAddress
-          ? `MetaMask · ${shortAddress(walletAddress)}`
-          : `지갑 · ${shortAddress(effectiveWallet)}`
-        : "MetaMask 연결 안 됨",
+      walletProviderName: walletAddress ? `MetaMask · ${shortAddress(walletAddress)}` : "MetaMask 연결 안 됨",
       walletError,
       isConnectingWallet,
       connectWallet,
@@ -247,7 +222,6 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       setTheme,
       walletAddress,
       walletChainId,
-      effectiveWallet,
       walletError,
       isConnectingWallet,
       connectWallet,

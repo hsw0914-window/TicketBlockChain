@@ -45,7 +45,7 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string }> 
 
 export function RaffleStatus() {
   const navigate = useNavigate();
-  const { effectiveWallet: walletAddress } = useAppSettings();
+  const { walletAddress } = useAppSettings();
 
   const [nfts,       setNfts]       = useState<RaffleNFT[]>([]);
   const [draws,      setDraws]      = useState<Draw[]>([]);

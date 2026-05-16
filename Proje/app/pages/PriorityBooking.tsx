@@ -32,7 +32,7 @@ interface DrawInfo {
 
 export function PriorityBooking() {
   const navigate  = useNavigate();
-  const { effectiveWallet: walletAddress } = useAppSettings();
+  const { walletAddress } = useAppSettings();
 
   const [winnerNfts, setWinnerNfts] = useState<RaffleNFT[]>([]);
   const [draws,      setDraws]      = useState<Record<string, DrawInfo>>({});
