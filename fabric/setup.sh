@@ -166,8 +166,7 @@ echo "[ 7/7 ] Fabric CA 사용자 등록..."
 bash "$SCRIPTS/updateConnection.sh"
 cd "$APP_DIR"
 npm install --silent 2>/dev/null || true
-node sdk/enrollAdmin.js
-node sdk/registUser.js
+node sdk/importAdminAsUser.js
 
 # ─── 완료 ─────────────────────────────────────────────────
 echo ""
