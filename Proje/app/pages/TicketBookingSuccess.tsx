@@ -88,7 +88,7 @@ export function TicketBookingSuccess() {
           sessionStorage.removeItem(`toss_order_${orderId}`);
           setStatus("done");
         } else {
-          setErrorMsg(data.error ?? "결제 승인 처리 중 오류가 발생했습니다.");
+          setErrorMsg(data.message ?? data.error ?? "결제 승인 처리 중 오류가 발생했습니다.");
           setStatus("error");
         }
       })
