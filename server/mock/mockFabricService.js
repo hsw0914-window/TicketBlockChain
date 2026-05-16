@@ -428,7 +428,38 @@ async function createSettlement({ gameId, pool }) {
   return { success: true, settlementId, ...record };
 }
 
-// ─── 11. EarnPointFromTrade (양도/장터 거래 포인트) ──────────
+// ─── 11. TransferTicket (2차 거래 소유권 이전) ────────────────
+async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, transferPrice }) {
+  const ticket = _store.tickets[ticketId];
+  if (!ticket) throw new Error('TICKET_NOT_FOUND');
+
+  const fromNorm = fromWalletAddress.toLowerCase();
+  if (ticket.walletAddress && ticket.walletAddress !== fromNorm) {
+    throw new Error('NOT_OWNER');
+  }
+
+  ticket.walletAddress  = toWalletAddress.toLowerCase();
+  ticket.purchaseType   = 'TRANSFERRED';
+  ticket.userDidHash    = hashDid(toWalletAddress);
+  ticket.updatedAt      = now();
+
+  // 판매자 포인트 0.3% 적립
+  const earnedPoint = Math.floor(Number(transferPrice) * 0.003);
+  if (earnedPoint > 0) {
+    const fromDidHash = hashDid(fromWalletAddress);
+    const point = _getOrCreatePoint(fromDidHash);
+    point.balance     += earnedPoint;
+    point.totalEarned += earnedPoint;
+    point.lastUpdatedAt = now();
+    _store.points[fromDidHash] = point;
+  }
+
+  _emitEvent('TICKET_TRANSFERRED', { ticketId, fromWalletAddress, toWalletAddress, transferPrice, earnedPoint });
+  console.log(`[MockFabric] TransferTicket: ${ticketId} ${fromWalletAddress.slice(0, 8)} → ${toWalletAddress.slice(0, 8)}`);
+  return { success: true, txId: `mock-tx-${uuidv4().slice(0, 8)}` };
+}
+
+// ─── EarnPointFromTrade (양도/장터 거래 포인트) ────────────────
 async function earnPointFromTrade({ userDidHash, amount, rate }) {
   const earnedPoint = Math.floor(amount * rate);
   if (earnedPoint <= 0) return { earnedPoint: 0, balance: _getOrCreatePoint(userDidHash).balance };
@@ -703,6 +734,7 @@ module.exports = {
   registerTicket,
   verifyEntry,
   earnPointByEntry,
+  transferTicket,
   earnPointFromTrade,
   updateMembershipGrade,
   usePointForTicket,

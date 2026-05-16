@@ -8,6 +8,11 @@ fi
 
 CC_NAME=$1
 
+ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+ORG1_PEER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+ORG2_PEER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
+ORG2_ADMIN_MSP=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
+
 ## 체인코드 빌드
 echo "체인코드 빌드: $CC_NAME"
 cd ./chaincode/${CC_NAME}/go/
@@ -22,7 +27,7 @@ peer lifecycle chaincode package ${CC_NAME}.tar.gz \
   --lang golang \
   --label ${CC_NAME}_1
 
-## 설치
+## Org1 설치
 echo "Org1 peer0 체인코드 설치"
 peer lifecycle chaincode install ${CC_NAME}.tar.gz
 
@@ -31,30 +36,57 @@ peer lifecycle chaincode queryinstalled >&log.txt
 export PACKAGE_ID=$(sed -n '/Package/{s/^Package ID: //; s/, Label:.*$//; $p;}' log.txt)
 echo "packageID=$PACKAGE_ID"
 
-## 승인
-echo "체인코드 승인"
+## Org1 승인
+echo "Org1 체인코드 승인"
 peer lifecycle chaincode approveformyorg \
   -o orderer.example.com:7050 \
   --ordererTLSHostnameOverride orderer.example.com \
   --tls \
-  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
+  --cafile $ORDERER_CA \
   --channelID channel1 \
   --name ${CC_NAME} \
   --version 1 \
   --package-id $PACKAGE_ID \
   --sequence 1
 
-## 커밋
+## Org2 설치
+echo "Org2 peer0 체인코드 설치"
+CORE_PEER_LOCALMSPID=Org2MSP \
+CORE_PEER_ADDRESS=peer0.org2.example.com:9051 \
+CORE_PEER_MSPCONFIGPATH=$ORG2_ADMIN_MSP \
+CORE_PEER_TLS_ROOTCERT_FILE=$ORG2_PEER_CA \
+peer lifecycle chaincode install ${CC_NAME}.tar.gz
+
+## Org2 승인
+echo "Org2 체인코드 승인"
+CORE_PEER_LOCALMSPID=Org2MSP \
+CORE_PEER_ADDRESS=peer0.org2.example.com:9051 \
+CORE_PEER_MSPCONFIGPATH=$ORG2_ADMIN_MSP \
+CORE_PEER_TLS_ROOTCERT_FILE=$ORG2_PEER_CA \
+peer lifecycle chaincode approveformyorg \
+  -o orderer.example.com:7050 \
+  --ordererTLSHostnameOverride orderer.example.com \
+  --tls \
+  --cafile $ORDERER_CA \
+  --channelID channel1 \
+  --name ${CC_NAME} \
+  --version 1 \
+  --package-id $PACKAGE_ID \
+  --sequence 1
+
+## 커밋 (Org1 + Org2 양쪽 피어로 MAJORITY Endorsement 충족)
 echo "체인코드 커밋"
 peer lifecycle chaincode commit \
   -o orderer.example.com:7050 \
   --ordererTLSHostnameOverride orderer.example.com \
   --tls \
-  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
+  --cafile $ORDERER_CA \
   --channelID channel1 \
   --name ${CC_NAME} \
   --peerAddresses peer0.org1.example.com:7051 \
-  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
+  --tlsRootCertFiles $ORG1_PEER_CA \
+  --peerAddresses peer0.org2.example.com:9051 \
+  --tlsRootCertFiles $ORG2_PEER_CA \
   --version 1 \
   --sequence 1
 

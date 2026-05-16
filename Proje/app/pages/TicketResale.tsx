@@ -1,19 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Ticket, Plus, X, Loader2, CheckCircle2, AlertCircle, Trash2, ExternalLink, Lock, Wallet, ShieldCheck } from "lucide-react";
+import { Ticket, Plus, X, Loader2, CheckCircle2, AlertCircle, Trash2, Lock, Wallet, ShieldCheck } from "lucide-react";
+import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
 import { useAuth } from "../context/AuthContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { getDidStatus } from "../api/didApi";
-import {
-  approveTicketForMarketplace,
-  listTicketOnMarketplace,
-  buyTicketFromMarketplace,
-  cancelTicketListingOnChain,
-  krwToWei,
-} from "../lib/contract";
+import { signListingMessage } from "../lib/contract";
 
 const API = "http://localhost:4000/api/ticket-resale";
-const HOODI_EXPLORER = "https://hoodi.ethpandaops.io/tx";
 
 function authHeaders() {
   return {
@@ -91,24 +85,6 @@ const mutedPanel   = { background: "#eef2f5", border: "1px solid #dde4ec" };
 const accentSurface = "#e9eef4";
 const accentBorder  = "#c6d2df";
 
-function weiToGwei(priceWei: string | null): string {
-  if (!priceWei) return "";
-  try {
-    const gwei = Number(BigInt(priceWei)) / 1e9;
-    return gwei.toLocaleString() + " Gwei";
-  } catch { return ""; }
-}
-
-function TxLink({ hash }: { hash: string }) {
-  return (
-    <a href={`${HOODI_EXPLORER}/${hash}`} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-[0.72rem] hover:underline"
-      style={{ color: actionBlue }}>
-      Tx {hash.slice(0, 10)}… <ExternalLink className="w-3 h-3" />
-    </a>
-  );
-}
-
 export function TicketResale() {
   const { isLoggedIn, user } = useAuth();
   const { walletConnected, connectWallet, isConnectingWallet } = useAppSettings();
@@ -134,10 +110,11 @@ export function TicketResale() {
 
   // ── 구매 상태 ──────────────────────────────────────────────
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
-  const [buyStep, setBuyStep]   = useState(0); // 0=none 1=confirm 2=metamask 3=done
-  const [buyError, setBuyError] = useState("");
-  const [buying, setBuying]     = useState(false);
-  const [buyTxHash, setBuyTxHash] = useState("");
+  const [buyStep, setBuyStep]           = useState(0); // 0=none 1=confirm+widget
+  const [buyError, setBuyError]         = useState("");
+  const [buying, setBuying]             = useState(false);
+  const [buyPaymentWidgets, setBuyPaymentWidgets] = useState<any>(null);
+  const [buyWidgetReady, setBuyWidgetReady]       = useState(false);
 
   // ── 내 거래 상태 ──────────────────────────────────────────
   const [myListings, setMyListings] = useState<MyListing[]>([]);
@@ -153,7 +130,7 @@ export function TicketResale() {
   const [listedPrice, setListedPrice]     = useState("");
   const [posting, setPosting]             = useState(false);
   const [postError, setPostError]         = useState("");
-  const [postStep, setPostStep]           = useState<"idle" | "approving" | "listing" | "saving">("idle");
+  const [postStep, setPostStep]           = useState<"idle" | "signing" | "saving">("idle");
 
   // ── 조회 ──────────────────────────────────────────────────
   const fetchListings = useCallback(async () => {
@@ -193,61 +170,63 @@ export function TicketResale() {
     setLoadingTickets(false);
   };
 
+  // ── 구매 위젯 초기화 ──────────────────────────────────────
+  useEffect(() => {
+    if (!selectedListing || buyStep !== 1) return;
+    setBuyWidgetReady(false);
+    setBuyPaymentWidgets(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const tossPayments = await loadTossPayments(import.meta.env.VITE_TOSS_CLIENT_KEY as string);
+        const widgets = tossPayments.widgets({ customerKey: ANONYMOUS });
+        await widgets.setAmount({ value: selectedListing.listedPrice, currency: "KRW" });
+        await widgets.renderPaymentMethods({ selector: "#toss-buy-payment-widget", variantKey: "DEFAULT" });
+        await widgets.renderAgreement({ selector: "#toss-buy-agreement-widget", variantKey: "AGREEMENT" });
+        if (!cancelled) { setBuyPaymentWidgets(widgets); setBuyWidgetReady(true); }
+      } catch {
+        if (!cancelled) setBuyError("결제 위젯 초기화에 실패했습니다.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedListing, buyStep]);
+
   // ── 구매 ──────────────────────────────────────────────────
   async function handleBuy() {
-    if (!selectedListing) return;
-    setBuying(true); setBuyError(""); setBuyTxHash("");
+    if (!selectedListing || !buyPaymentWidgets) return;
+    setBuying(true); setBuyError("");
 
-    let txHash: string | null = null;
+    const orderId    = `resale-${selectedListing.id}-${Date.now()}`;
+    const orderName  = `${selectedListing.homeTeam} vs ${selectedListing.awayTeam} ${selectedListing.seatSection}`;
 
-    // 온체인 거래가 있는 경우 MetaMask 호출
-    if (selectedListing.nftTokenId !== null && selectedListing.priceWei) {
-      setBuyStep(2); // MetaMask 확인 중
-      try {
-        const priceWei = BigInt(selectedListing.priceWei);
-        txHash = await buyTicketFromMarketplace(selectedListing.nftTokenId, priceWei);
-        setBuyTxHash(txHash);
-      } catch (err: unknown) {
-        const e = err as { code?: number; message?: string };
-        const msg = e.code === 4001 ? "MetaMask에서 거래를 취소했습니다." : (e.message ?? "MetaMask 오류");
-        setBuyError(msg);
-        setBuying(false);
-        setBuyStep(1);
-        return;
-      }
-    }
+    sessionStorage.setItem(`toss_resale_${orderId}`, JSON.stringify({
+      listingId:     selectedListing.id,
+      homeTeam:      selectedListing.homeTeam,
+      awayTeam:      selectedListing.awayTeam,
+      gameDate:      selectedListing.gameDate,
+      seatSection:   selectedListing.seatSection,
+      listedPrice:   selectedListing.listedPrice,
+      sellerName:    selectedListing.sellerName,
+    }));
 
-    // 서버 DB 업데이트
     try {
-      const res  = await fetch(`${API}/buy/${selectedListing.id}`, {
-        method: "POST", headers: authHeaders(),
-        body: JSON.stringify({ buyTxHash: txHash }),
+      await buyPaymentWidgets.requestPayment({
+        orderId,
+        orderName,
+        successUrl: `${window.location.origin}/market/buy/success`,
+        failUrl:    `${window.location.origin}/ticket-resale`,
       });
-      const data = await res.json();
-      if (!res.ok) { setBuyError(data.error ?? "구매 실패"); setBuying(false); setBuyStep(1); return; }
-      setBuyStep(3);
-      fetchListings(); fetchMine();
-    } catch { setBuyError("네트워크 오류"); setBuyStep(1); }
-    setBuying(false);
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
+      if (e.code !== "USER_CANCEL") setBuyError(e.message ?? "결제 오류가 발생했습니다.");
+      setBuying(false);
+    }
   }
 
   // ── 취소 ──────────────────────────────────────────────────
   async function handleCancel(listing: MyListing) {
     setCancelling(listing.id);
     try {
-      // 온체인 취소 (NFT가 있는 경우)
-      if (listing.nftTokenId !== null) {
-        try {
-          await cancelTicketListingOnChain(listing.nftTokenId);
-        } catch (err: unknown) {
-          const e = err as { code?: number; message?: string };
-          if (e.code === 4001) { alert("MetaMask에서 취소를 거부했습니다."); setCancelling(null); return; }
-          // MetaMask 오류 시에도 DB만 취소하는 것은 위험하므로 중단
-          alert("온체인 취소 실패: " + (e.message ?? "오류"));
-          setCancelling(null);
-          return;
-        }
-      }
       const res  = await fetch(`${API}/listings/${listing.id}`, { method: "DELETE", headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) alert(data.error ?? "취소 실패");
@@ -266,60 +245,36 @@ export function TicketResale() {
 
     setPosting(true); setPostError("");
 
-    let nftTokenId: number | null = null;
-    let priceWei: string | null   = null;
-    let listTxHash: string | null = null;
-
-    // 온체인 등록 (NFT tokenId가 있는 경우)
-    if (selectedTicket.tokenId !== null) {
-      const wei = krwToWei(price);
-      nftTokenId = selectedTicket.tokenId;
-      priceWei   = wei.toString();
-
-      // Step 1: approve
-      setPostStep("approving");
-      try {
-        await approveTicketForMarketplace(selectedTicket.tokenId);
-      } catch (err: unknown) {
-        const e = err as { code?: number; message?: string };
-        setPostError(e.code === 4001 ? "MetaMask에서 approve를 취소했습니다." : (e.message ?? "approve 오류"));
-        setPosting(false); setPostStep("idle"); return;
-      }
-
-      // Step 2: listTicket
-      setPostStep("listing");
-      try {
-        listTxHash = await listTicketOnMarketplace(selectedTicket.tokenId, wei);
-      } catch (err: unknown) {
-        const e = err as { code?: number; message?: string };
-        setPostError(e.code === 4001 ? "MetaMask에서 등록을 취소했습니다." : (e.message ?? "listTicket 오류"));
-        setPosting(false); setPostStep("idle"); return;
-      }
-    }
-
-    // Step 3: MetaMask 서명
+    // MetaMask 서명 (1회)
+    setPostStep("signing");
     let sellerWalletAddress: string | null = null;
     let listingMessage: string | null = null;
     let listingSignature: string | null = null;
     try {
       const { BrowserProvider } = await import("ethers");
       const provider = new BrowserProvider(window.ethereum!);
-      const signer = await provider.getSigner();
+      const signer   = await provider.getSigner();
       sellerWalletAddress = await signer.getAddress();
-      listingMessage = `Listing ticket ${selectedTicket.id} seat ${selectedTicket.seatSection} for ${price} KRW at ${Date.now()}`;
-      listingSignature = await signer.signMessage(listingMessage);
+      listingMessage  = `Listing ticket ${selectedTicket.id} seat ${selectedTicket.seatSection} for ${price} KRW at ${Date.now()}`;
+      listingSignature = await signListingMessage(listingMessage, sellerWalletAddress);
     } catch (err: unknown) {
       const e = err as { code?: number; message?: string };
       setPostError(e.code === 4001 ? "MetaMask 서명을 취소했습니다." : (e.message ?? "서명 오류"));
       setPosting(false); setPostStep("idle"); return;
     }
 
-    // Step 4: 서버 등록
+    // 서버 등록
     setPostStep("saving");
     try {
       const res  = await fetch(`${API}/listings`, {
         method: "POST", headers: authHeaders(),
-        body: JSON.stringify({ ticketId: selectedTicket.id, listedPrice: price, nftTokenId, priceWei, listTxHash, sellerWalletAddress, listingMessage, listingSignature }),
+        body: JSON.stringify({
+          ticketId: selectedTicket.id,
+          listedPrice: price,
+          sellerWalletAddress,
+          listingMessage,
+          listingSignature,
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setPostError(data.error ?? "등록 실패"); setPosting(false); setPostStep("idle"); return; }
@@ -334,13 +289,10 @@ export function TicketResale() {
   const toggleTeam = (t: string) =>
     setSelectedTeams(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
 
-
-
   // ── 등록 진행 메시지 ──────────────────────────────────────
   const postStepLabel =
-    postStep === "approving" ? "MetaMask: NFT 승인 중…" :
-    postStep === "listing"   ? "MetaMask: 장터 등록 중…" :
-    postStep === "saving"    ? "서버 저장 중…" :
+    postStep === "signing" ? "MetaMask: 서명 중…" :
+    postStep === "saving"  ? "서버 저장 중…" :
     "장터에 올리기";
 
   // ── 접근 제한 게이트 ─────────────────────────────────────
@@ -454,7 +406,7 @@ export function TicketResale() {
             티켓 거래소
           </h1>
           <p className="mt-3 text-[0.98rem] leading-7" style={{ color: mutedText }}>
-            팬들이 직접 올린 티켓을 사고 팔 수 있어요. 블록체인 스마트컨트랙트가 거래를 보증하며 3% 수수료가 플랫폼에 자동 분배됩니다.
+            팬들이 직접 올린 티켓을 사고 팔 수 있어요. NFT 소유권 이전이 블록체인에 기록되며 3% 수수료가 플랫폼에 분배됩니다.
           </p>
         </div>
       </section>
@@ -481,7 +433,7 @@ export function TicketResale() {
             <div className="rounded-[18px] p-4" style={panelStyle}>
               <p className="text-[0.72rem] font-bold uppercase tracking-[.16em] mb-3" style={{ color: mutedText }}>정렬</p>
               <div className="space-y-2">
-                {[["date_asc","경기 날짜순"],["price_asc","낮은 가격순"],["price_desc","높은 가격순"]] .map(([val, label]) => (
+                {[["date_asc","경기 날짜순"],["price_asc","낮은 가격순"],["price_desc","높은 가격순"]].map(([val, label]) => (
                   <label key={val} className="flex items-center gap-2.5 cursor-pointer select-none">
                     <input type="radio" name="sort" value={val} checked={sort === val} onChange={() => setSort(val as typeof sort)}
                       className="accent-[#4b6581] w-3.5 h-3.5" />
@@ -521,7 +473,10 @@ export function TicketResale() {
                   <div key={l.id}
                     className={`rounded-[18px] p-5 transition-all ${l.isMine ? "" : "cursor-pointer hover:shadow-md"}`}
                     style={{ ...panelStyle, transition: "box-shadow .2s", opacity: l.isMine ? 0.85 : 1 }}
-                    onClick={() => { if (l.isMine) return; setSelectedListing(l); setBuyStep(1); setBuyError(""); setBuyTxHash(""); }}>
+                    onClick={() => {
+                      if (l.isMine) return;
+                      setSelectedListing(l); setBuyStep(1); setBuyError(""); setBuyWidgetReady(false); setBuyPaymentWidgets(null);
+                    }}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
@@ -554,11 +509,6 @@ export function TicketResale() {
                         <p className="text-[1.22rem] font-bold" style={{ color: priceGreen }}>
                           {l.listedPrice.toLocaleString()}원
                         </p>
-                        {l.priceWei && (
-                          <p className="text-[0.68rem]" style={{ color: "#9aaab8" }}>
-                            {weiToGwei(l.priceWei)}
-                          </p>
-                        )}
                         <p className="text-[0.72rem]" style={{ color: mutedText }}>
                           원가 {l.originalPrice.toLocaleString()}원
                         </p>
@@ -666,122 +616,76 @@ export function TicketResale() {
       </div>
 
       {/* ════════ 구매 모달 ════════ */}
-      {selectedListing && buyStep > 0 && (
+      {selectedListing && buyStep === 1 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(17,40,73,.45)", backdropFilter: "blur(6px)" }}
           onClick={e => { if (e.target === e.currentTarget && !buying) { setSelectedListing(null); setBuyStep(0); } }}>
-          <div className="w-full max-w-sm rounded-[24px] p-6" style={{ background: "#fff", border: "1px solid #d6dee8", boxShadow: "0 24px 64px rgba(17,40,73,.14)" }}>
+          <div className="w-full max-w-sm rounded-[24px] p-6 overflow-y-auto" style={{ background: "#fff", border: "1px solid #d6dee8", boxShadow: "0 24px 64px rgba(17,40,73,.14)", maxHeight: "90vh" }}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-[1.05rem] font-bold" style={{ color: neutralText }}>구매 확인</h2>
+              {!buying && (
+                <button onClick={() => { setSelectedListing(null); setBuyStep(0); }} style={{ background: "none", border: "none", cursor: "pointer", color: mutedText }}>
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
 
-            {(buyStep === 1 || buyStep === 2) && (
-              <>
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="text-[1.05rem] font-bold" style={{ color: neutralText }}>구매 확인</h2>
-                  {!buying && (
-                    <button onClick={() => { setSelectedListing(null); setBuyStep(0); }} style={{ background: "none", border: "none", cursor: "pointer", color: mutedText }}>
-                      <X className="w-5 h-5" />
-                    </button>
-                  )}
+            <div className="rounded-[16px] p-4 mb-4 space-y-2.5" style={mutedPanel}>
+              {[
+                ["경기", `${selectedListing.homeTeam} vs ${selectedListing.awayTeam}`],
+                ["날짜", selectedListing.gameDate],
+                ["좌석", selectedListing.seatSection],
+                ["판매자", selectedListing.sellerName],
+                ["원가", `${selectedListing.originalPrice.toLocaleString()}원`],
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between text-[0.85rem]">
+                  <span style={{ color: mutedText }}>{k}</span>
+                  <span style={{ color: neutralText, fontWeight: 500 }}>{v}</span>
                 </div>
-                <div className="rounded-[16px] p-4 mb-4 space-y-2.5" style={mutedPanel}>
-                  {[
-                    ["경기", `${selectedListing.homeTeam} vs ${selectedListing.awayTeam}`],
-                    ["날짜", selectedListing.gameDate],
-                    ["좌석", selectedListing.seatSection],
-                    ["판매자", selectedListing.sellerName],
-                    ["원가", `${selectedListing.originalPrice.toLocaleString()}원`],
-                  ].map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-[0.85rem]">
-                      <span style={{ color: mutedText }}>{k}</span>
-                      <span style={{ color: neutralText, fontWeight: 500 }}>{v}</span>
-                    </div>
-                  ))}
-                  <div className="pt-2 border-t" style={{ borderColor: lineColor }}>
-                    <div className="flex justify-between text-[0.95rem]">
-                      <span style={{ color: mutedText }}>결제 금액</span>
-                      <span style={{ color: priceGreen, fontWeight: 700 }}>{selectedListing.listedPrice.toLocaleString()}원</span>
-                    </div>
-                    {selectedListing.priceWei && (
-                      <div className="flex justify-between text-[0.75rem] mt-1">
-                        <span style={{ color: "#9aaab8" }}>온체인 가격</span>
-                        <span style={{ color: "#9aaab8" }}>{weiToGwei(selectedListing.priceWei)}</span>
-                      </div>
-                    )}
-                    {selectedListing.nftTokenId !== null && (
-                      <div className="flex justify-between text-[0.75rem] mt-1">
-                        <span style={{ color: "#9aaab8" }}>수수료</span>
-                        <span style={{ color: "#9aaab8" }}>3% (스마트컨트랙트)</span>
-                      </div>
-                    )}
-                  </div>
+              ))}
+              <div className="pt-2 border-t" style={{ borderColor: lineColor }}>
+                <div className="flex justify-between text-[0.95rem]">
+                  <span style={{ color: mutedText }}>결제 금액</span>
+                  <span style={{ color: priceGreen, fontWeight: 700 }}>{selectedListing.listedPrice.toLocaleString()}원</span>
                 </div>
+                <div className="flex justify-between text-[0.75rem] mt-1">
+                  <span style={{ color: "#9aaab8" }}>수수료</span>
+                  <span style={{ color: "#9aaab8" }}>3% (플랫폼)</span>
+                </div>
+              </div>
+            </div>
 
-                {buyStep === 2 && (
-                  <div className="flex items-center gap-2 p-3 rounded-xl text-[0.84rem] mb-3"
-                    style={{ background: "#eef4ff", color: actionBlue, border: "1px solid #c8d8ef" }}>
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                    MetaMask에서 거래를 확인해주세요…
-                  </div>
-                )}
+            {/* 토스 결제 위젯 */}
+            <div id="toss-buy-payment-widget" className="mb-3" />
+            <div id="toss-buy-agreement-widget" className="mb-3" />
 
-                {buyError && (
-                  <div className="flex items-center gap-2 p-3 rounded-xl text-[0.84rem] mb-3"
-                    style={{ background: "#fce8e8", color: "#b94040", border: "1px solid #f0c4c4" }}>
-                    <AlertCircle className="w-4 h-4 shrink-0" />{buyError}
-                  </div>
-                )}
-                {!isLoggedIn ? (
-                  <button onClick={() => navigate("/login")} className="w-full py-3 rounded-xl font-bold"
-                    style={{ background: actionBlue, color: "#fff", border: "none", cursor: "pointer" }}>
-                    로그인 후 구매
-                  </button>
-                ) : (
-                  <button onClick={handleBuy} disabled={buying}
-                    className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2"
-                    style={{ background: actionBlue, color: "#fff", border: "none", cursor: buying ? "not-allowed" : "pointer", opacity: buying ? .7 : 1 }}>
-                    {buying && <Loader2 className="w-4 h-4 animate-spin" />}
-                    {buying
-                      ? (selectedListing.nftTokenId !== null ? "MetaMask 확인 중…" : "처리 중…")
-                      : (selectedListing.nftTokenId !== null ? "MetaMask로 구매" : "구매하기")}
-                  </button>
-                )}
-              </>
+            {!buyWidgetReady && !buyError && (
+              <div className="flex items-center gap-2 p-3 rounded-xl text-[0.84rem] mb-3"
+                style={{ background: "#eef4ff", color: actionBlue, border: "1px solid #c8d8ef" }}>
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                결제 위젯을 불러오는 중...
+              </div>
             )}
 
-            {buyStep === 3 && (
-              <>
-                <div className="text-center mb-5">
-                  <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: priceGreen }} />
-                  <h2 className="text-[1.1rem] font-bold" style={{ color: neutralText }}>구매 완료!</h2>
-                  {buyTxHash && (
-                    <div className="mt-2">
-                      <TxLink hash={buyTxHash} />
-                    </div>
-                  )}
-                </div>
-                <div className="rounded-[16px] p-4 mb-5 space-y-2.5" style={mutedPanel}>
-                  {[
-                    ["경기", `${selectedListing.homeTeam} vs ${selectedListing.awayTeam}`],
-                    ["날짜", selectedListing.gameDate],
-                    ["좌석", selectedListing.seatSection],
-                  ].map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-[0.85rem]">
-                      <span style={{ color: mutedText }}>{k}</span>
-                      <span style={{ color: neutralText, fontWeight: 500 }}>{v}</span>
-                    </div>
-                  ))}
-                  <div className="pt-2 border-t" style={{ borderColor: lineColor }}>
-                    <div className="flex justify-between text-[0.95rem]">
-                      <span style={{ color: mutedText }}>결제 금액</span>
-                      <span style={{ color: priceGreen, fontWeight: 700 }}>{selectedListing.listedPrice.toLocaleString()}원</span>
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => { setSelectedListing(null); setBuyStep(0); }}
-                  className="w-full py-3 rounded-xl font-bold"
-                  style={{ background: actionBlue, color: "#fff", border: "none", cursor: "pointer" }}>
-                  확인
-                </button>
-              </>
+            {buyError && (
+              <div className="flex items-center gap-2 p-3 rounded-xl text-[0.84rem] mb-3"
+                style={{ background: "#fce8e8", color: "#b94040", border: "1px solid #f0c4c4" }}>
+                <AlertCircle className="w-4 h-4 shrink-0" />{buyError}
+              </div>
+            )}
+
+            {!isLoggedIn ? (
+              <button onClick={() => navigate("/login")} className="w-full py-3 rounded-xl font-bold"
+                style={{ background: actionBlue, color: "#fff", border: "none", cursor: "pointer" }}>
+                로그인 후 구매
+              </button>
+            ) : (
+              <button onClick={handleBuy} disabled={buying || !buyWidgetReady}
+                className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2"
+                style={{ background: actionBlue, color: "#fff", border: "none", cursor: (buying || !buyWidgetReady) ? "not-allowed" : "pointer", opacity: (buying || !buyWidgetReady) ? .6 : 1 }}>
+                {buying && <Loader2 className="w-4 h-4 animate-spin" />}
+                {buying ? "결제 처리 중…" : "토스페이로 구매"}
+              </button>
             )}
           </div>
         </div>
@@ -867,17 +771,12 @@ export function TicketResale() {
                       </p>
                     </div>
 
-                    {selectedTicket.tokenId !== null && listedPrice && Number(listedPrice) >= 1000 && (
-                      <div className="rounded-[12px] p-3 mb-4 text-[0.78rem] space-y-1"
-                        style={{ background: "#f0f4ff", border: "1px solid #c8d8ef", color: actionBlue }}>
-                        <p className="font-semibold">온체인 등록 안내</p>
-                        <p>MetaMask 서명 2회가 필요합니다:</p>
-                        <p>① TicketNFT approve → ② Marketplace listTicket</p>
-                        <p style={{ color: "#9aaab8" }}>
-                          온체인 가격: {weiToGwei((krwToWei(Number(listedPrice))).toString())}
-                        </p>
-                      </div>
-                    )}
+                    <div className="rounded-[12px] p-3 mb-4 text-[0.78rem]"
+                      style={{ background: "#f0f4ff", border: "1px solid #c8d8ef", color: actionBlue }}>
+                      <p className="font-semibold">등록 안내</p>
+                      <p className="mt-1">MetaMask 서명 1회로 판매 등록이 완료됩니다.</p>
+                      <p className="mt-0.5" style={{ color: "#9aaab8" }}>구매자가 결제하면 NFT 소유권이 자동 이전됩니다.</p>
+                    </div>
                   </>
                 )}
 
@@ -900,7 +799,7 @@ export function TicketResale() {
                   className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2"
                   style={{ background: selectedTicket ? actionBlue : "#b0bec8", color: "#fff", border: "none", cursor: selectedTicket && !posting ? "pointer" : "not-allowed", opacity: posting ? .7 : 1 }}>
                   {posting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {posting ? postStepLabel : (selectedTicket?.tokenId !== null ? "MetaMask로 장터에 올리기" : "장터에 올리기")}
+                  {posting ? postStepLabel : "장터에 올리기"}
                 </button>
               </>
             )}

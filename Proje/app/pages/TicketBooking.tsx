@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  ExternalLink,
   Info,
   LayoutGrid,
   Loader2,
@@ -32,7 +31,7 @@ import {
   type TicketEvent,
 } from "../data/ticketing";
 import { useAppSettings } from "../context/AppSettingsContext";
-import { sendTicketNFT, checkSeatTakenOnChain } from "../lib/contract";
+import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
 import { useBookingAccess, ACCESS_MESSAGES } from "../hooks/useBookingAccess";
 
 function formatPrice(value: number) {
@@ -167,12 +166,11 @@ export function TicketBooking() {
   const [selectedSeatKeys, setSelectedSeatKeys] = useState<string[]>([]);
   const [ticketTypesBySeat, setTicketTypesBySeat] = useState<Record<string, SeatTicketTypeId>>({});
   const [storedTickets, setStoredTickets] = useState<StoredTicketRecord[]>(() => loadStoredTickets());
-  const [completedTickets, setCompletedTickets] = useState<StoredTicketRecord[]>([]);
   const [serverTakenSeats, setServerTakenSeats] = useState<Set<string>>(new Set());
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [mintingStatus, setMintingStatus] = useState<"idle" | "connecting" | "signing" | "mining" | "saving">("idle");
-  const [mintingProgress, setMintingProgress] = useState<{ current: number; total: number } | null>(null);
-  const [confirmingBackground, setConfirmingBackground] = useState<"pending" | "done" | "failed" | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [paymentWidgets, setPaymentWidgets] = useState<any>(null);
+  const [widgetReady, setWidgetReady] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
 
   // ─── 포인트 할인 ─────────────────────────────────────────
   const [pointBalance, setPointBalance]   = useState<number | null>(null);
@@ -360,13 +358,46 @@ export function TicketBooking() {
     });
   };
 
+  // ─── Toss 위젯 초기화 (step 2 진입 시) ─────────────────────
+  useEffect(() => {
+    if (currentStep !== 2 || finalTotal <= 0) return;
+    let cancelled = false;
+    setWidgetReady(false);
+    setPaymentWidgets(null);
+
+    (async () => {
+      try {
+        const tossPayments = await loadTossPayments(import.meta.env.VITE_TOSS_CLIENT_KEY as string);
+        if (cancelled) return;
+        const widgets = tossPayments.widgets({ customerKey: ANONYMOUS });
+        await widgets.setAmount({ value: finalTotal, currency: "KRW" });
+        if (cancelled) return;
+        await widgets.renderPaymentMethods({ selector: "#toss-payment-widget", variantKey: "DEFAULT" });
+        await widgets.renderAgreement({ selector: "#toss-agreement-widget", variantKey: "AGREEMENT" });
+        if (!cancelled) {
+          setPaymentWidgets(widgets);
+          setWidgetReady(true);
+        }
+      } catch (err) {
+        console.error("[TossPayment] 위젯 초기화 실패:", err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, finalTotal]);
+
+  // 포인트 할인 적용 시 위젯 금액 갱신
+  useEffect(() => {
+    if (!paymentWidgets || finalTotal <= 0) return;
+    paymentWidgets.setAmount({ value: finalTotal, currency: "KRW" }).catch(console.error);
+  }, [paymentWidgets, finalTotal]);
+
   const handleCompleteBooking = async () => {
-    if (!selectedGrade || !selectedBlock || !paymentReady) return;
-
+    if (!selectedGrade || !selectedBlock || !paymentReady || !paymentWidgets) return;
+    setPaymentLoading(true);
     try {
-      setMintingStatus("connecting");
-
-      // 1. 지갑 주소 확보
+      // 지갑 주소 확보 (MetaMask — NFT 민팅 대상 주소)
       if (!walletAddress) {
         const ok = await connectWallet();
         if (!ok) throw new Error("지갑 연결이 필요합니다.");
@@ -375,124 +406,44 @@ export function TicketBooking() {
       const address = accounts[0];
       if (!address) throw new Error("지갑 주소를 가져올 수 없습니다.");
 
-      setMintingStatus("signing");
-
-      // 2. 티켓마다 MetaMask 서명 (전송만, 블록 확정 대기 없음)
-      // nonce 충돌 방지: 루프 전에 베이스 nonce를 한 번만 조회 후 i씩 증가
-      const { BrowserProvider: BP } = await import("ethers");
-      const _provider = new BP(window.ethereum!);
-      const baseNonce = await _provider.getTransactionCount(address, "pending");
-
-      // 온체인 좌석 중복 사전 체크
-      for (const ticket of selectedTickets) {
-        const taken = await checkSeatTakenOnChain(
-          String(event.id),
-          selectedBlock.label,
-          ticket.row,
-          ticket.seatNumber,
-        );
-        if (taken) {
-          throw new Error(`${selectedBlock.label}블록 ${ticket.row}열 ${ticket.seatNumber}번 좌석은 이미 예매된 좌석입니다.`);
-        }
-      }
-
-      const sentResults: { txHash: string; waitForConfirm: () => Promise<number | undefined> }[] = [];
-      setMintingProgress({ current: 0, total: selectedTickets.length });
-      for (let i = 0; i < selectedTickets.length; i++) {
-        const ticket = selectedTickets[i];
-        setMintingProgress({ current: i + 1, total: selectedTickets.length });
-        const result = await sendTicketNFT({
-          gameId: String(event.id),
-          stadium: event.stadium,
-          grade: selectedGrade.name,
-          blockLabel: selectedBlock.label,
-          row: ticket.row,
-          seatNumber: ticket.seatNumber,
-          priceKrw: ticket.price,
-        }, baseNonce + i);
-        sentResults.push(result);
-      }
-      setMintingProgress(null);
-      setTxHash(sentResults[0]?.txHash ?? null);
-
-      // 3. 결과 즉시 표시
-      const created = createStoredTickets({
-        event,
-        grade: selectedGrade,
-        block: selectedBlock,
-        seats: selectedTickets.map((ticket) => ({
-          row: ticket.row,
-          seatNumber: ticket.seatNumber,
-          ticketTypeId: ticket.ticketType.id,
-        })),
-      });
-      setCompletedTickets(created);
-
-      // 4. DB 저장 즉시 실행 (블록 확정 대기 없이)
-      setConfirmingBackground("pending");
-      const purchaseIds: string[] = [];
-      await Promise.all(
-        sentResults.map(async (sent, i) => {
-          const ticket = selectedTickets[i];
-          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tickets/purchase`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${authToken()}`,
-            },
-            body: JSON.stringify({
-              walletAddress: address,
-              gameId: event.id,
-              stadium: event.stadium,
-              grade: selectedGrade.name,
-              block: selectedBlock.label,
-              row: ticket.row,
-              seatNumber: ticket.seatNumber,
-              price: ticket.price,
-            }),
-          });
-          const data = await res.json();
-          purchaseIds[i] = data.data?.id ?? null;
+      // 주문 정보 저장 (성공 페이지에서 서버 컨펌 시 사용)
+      const orderId = crypto.randomUUID();
+      sessionStorage.setItem(
+        `toss_order_${orderId}`,
+        JSON.stringify({
+          walletAddress: address,
+          gameId:        event.id,
+          eventName:     event.name,
+          stadium:       event.stadium,
+          grade:         selectedGrade.name,
+          block:         selectedBlock.label,
+          gate:          selectedBlock.gate,
+          seats: selectedTickets.map((t) => ({
+            row:            t.row,
+            seatNumber:     t.seatNumber,
+            price:          t.price,
+            ticketTypeLabel: t.ticketType.label,
+          })),
+          pointDiscount,
+          finalTotal,
         }),
       );
-      // 4-b. 포인트 할인 차감
-      if (pointDiscount > 0) {
-        await fetch(`${import.meta.env.VITE_API_URL}/api/points/use`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken()}`,
-          },
-          body: JSON.stringify({
-            walletAddress: address,
-            ticketId: purchaseIds[0] ?? null,
-            pointAmount: pointDiscount,
-          }),
-        });
-      }
 
-      setConfirmingBackground("done");
-
-      // 5. 블록 확정 후 tokenId 백엔드에 저장
-      Promise.all(
-        sentResults.map(async (sent, i) => {
-          const tokenId = await sent.waitForConfirm();
-          const ticketDbId = purchaseIds[i];
-          if (tokenId != null && ticketDbId) {
-            await fetch(`${import.meta.env.VITE_API_URL}/api/tickets/${ticketDbId}/token`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ tokenId, txHash: sentResults[i].txHash }),
-            });
-          }
-        }),
-      ).catch(() => {});
+      await paymentWidgets.requestPayment({
+        orderId,
+        orderName:
+          selectedTickets.length > 1
+            ? `${event.name} 외 ${selectedTickets.length - 1}매`
+            : event.name,
+        successUrl: `${window.location.origin}/tickets/booking/success`,
+        failUrl:    `${window.location.origin}/tickets/booking/fail`,
+      });
+      // requestPayment는 브라우저를 토스 결제 페이지로 리다이렉트함
     } catch (err: unknown) {
-      console.error("예매 실패:", err);
-      const msg = err instanceof Error ? err.message : "예매 중 오류가 발생했습니다.";
+      const msg = err instanceof Error ? err.message : "결제 요청 중 오류가 발생했습니다.";
       alert(msg);
     } finally {
-      setMintingStatus("idle");
+      setPaymentLoading(false);
     }
   };
 
@@ -1203,49 +1154,29 @@ export function TicketBooking() {
                 </Button>
                 <Button
                   className="rounded-2xl px-5 text-white"
-                  style={{ background: paymentReady && mintingStatus === "idle" ? "#1456a0" : "#97afcc" }}
-                  disabled={!paymentReady || mintingStatus !== "idle"}
+                  style={{ background: paymentReady && widgetReady && !paymentLoading ? "#1456a0" : "#97afcc" }}
+                  disabled={!paymentReady || !widgetReady || paymentLoading}
                   onClick={() => void handleCompleteBooking()}
                 >
-                  {mintingStatus === "connecting" && <><Loader2 className="h-4 w-4 animate-spin" />지갑 연결 중...</>}
-                  {mintingStatus === "signing" && mintingProgress && mintingProgress.total > 1 && (
-                    <><Loader2 className="h-4 w-4 animate-spin" />MetaMask 서명 중 ({mintingProgress.current}/{mintingProgress.total})...</>
-                  )}
-                  {mintingStatus === "signing" && (!mintingProgress || mintingProgress.total <= 1) && <><Loader2 className="h-4 w-4 animate-spin" />서명 요청 중...</>}
-                  {mintingStatus === "mining" && mintingProgress && mintingProgress.total > 1 && (
-                    <><Loader2 className="h-4 w-4 animate-spin" />블록 처리 중 ({mintingProgress.current}/{mintingProgress.total})...</>
-                  )}
-                  {mintingStatus === "mining" && (!mintingProgress || mintingProgress.total <= 1) && <><Loader2 className="h-4 w-4 animate-spin" />블록체인 처리 중...</>}
-                  {mintingStatus === "saving"     && <><Loader2 className="h-4 w-4 animate-spin" />티켓 저장 중...</>}
-                  {mintingStatus === "idle"       && <>예매 완료<CheckCircle2 className="h-4 w-4" /></>}
+                  {paymentLoading
+                    ? <><Loader2 className="h-4 w-4 animate-spin" />결제 준비 중...</>
+                    : !widgetReady
+                    ? <><Loader2 className="h-4 w-4 animate-spin" />위젯 로딩 중...</>
+                    : <>토스페이로 결제하기<CheckCircle2 className="h-4 w-4" /></>}
                 </Button>
               </div>
 
-              {/* 진행 바 */}
-              {mintingProgress && mintingProgress.total > 1 && (
-                <div className="mt-4 rounded-2xl border p-4" style={{ background: "#f0f5fb", borderColor: "#d0dcea" }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[0.78rem] font-semibold" style={{ color: "#3a5f8a" }}>
-                      티켓 처리 중 {mintingProgress.current} / {mintingProgress.total}
-                    </span>
-                    <span className="text-[0.78rem] font-semibold" style={{ color: "#1456a0" }}>
-                      {Math.round((mintingProgress.current / mintingProgress.total) * 100)}%
-                    </span>
+              {/* 토스 결제 위젯 */}
+              <div className="mt-6 rounded-[24px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
+                <div id="toss-payment-widget" />
+                <div id="toss-agreement-widget" className="mt-4" />
+                {!widgetReady && (
+                  <div className="flex items-center justify-center py-8 gap-3" style={{ color: "#8a9ab0" }}>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-[0.88rem]">결제 위젯 로딩 중...</span>
                   </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ background: "#d0dcea" }}>
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${(mintingProgress.current / mintingProgress.total) * 100}%`,
-                        background: "linear-gradient(90deg, #1456a0, #1e7fd0)",
-                      }}
-                    />
-                  </div>
-                  <p className="mt-2 text-[0.72rem]" style={{ color: "#8a9ab0" }}>
-                    블록체인 처리 특성상 티켓 1장당 약 12~15초 소요됩니다.
-                  </p>
-                </div>
-              )}
+                )}
+              </div>
             </section>
           )}
         </div>
@@ -1410,124 +1341,6 @@ export function TicketBooking() {
         </aside>
       </div>
 
-      {completedTickets.length > 0 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(17,27,39,0.45)] p-4">
-          <div
-            className="w-full max-w-[560px] rounded-[30px] border p-7"
-            style={{ background: "#f8fafc", borderColor: "#d9e1e8", boxShadow: "0 26px 60px rgba(17,40,73,0.18)" }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full"
-                style={{ background: "#e2f3ea", color: "#2d8b57" }}>
-                <CheckCircle2 className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-[0.8rem] font-semibold uppercase tracking-[0.22em]" style={{ color: "#8a9ab0" }}>
-                  Booking Complete
-                </p>
-                <h3 className="mt-1 text-[1.2rem] font-bold tracking-[-0.04em]" style={{ color: "#162840" }}>
-                  예매가 완료되었습니다
-                </h3>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dde5ec" }}>
-              <div className="space-y-3 text-[0.93rem]" style={{ color: "#4f6279" }}>
-                {completedTickets.map((ticket) => (
-                  <div key={ticket.id} className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold" style={{ color: "#162840" }}>
-                        {ticket.seat}
-                      </p>
-                      <p className="mt-1 text-[0.86rem]">{ticket.ticketTypeLabel} · {ticket.gate}</p>
-                    </div>
-                    <div className="text-right font-semibold" style={{ color: "#1456a0" }}>
-                      {formatPrice(ticket.price)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 굿즈 박스 지급 안내 */}
-            <div
-              className="mt-4 rounded-[22px] border p-4"
-              style={{ background: "linear-gradient(135deg, #f5eeff, #fce8ff)", borderColor: "#d4aaee" }}
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">🎁</span>
-                <div>
-                  <p className="text-[0.88rem] font-bold" style={{ color: "#7700bb" }}>
-                    굿즈 박스가 지급되었습니다!
-                  </p>
-                  <p className="mt-1 text-[0.8rem]" style={{ color: "#9b6dbf" }}>
-                    박스를 개봉하면 NFT 굿즈 또는 파편을 획득할 수 있어요.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* 블록체인 확정 상태 */}
-            {confirmingBackground === "pending" && (
-              <div className="mt-4 flex items-center gap-3 rounded-[16px] border px-4 py-3"
-                style={{ background: "#fefbe8", borderColor: "#f0d060", color: "#7a6000" }}>
-                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                <span className="text-[0.82rem] font-medium">블록체인 확정 중... (백그라운드 처리)</span>
-              </div>
-            )}
-            {confirmingBackground === "done" && (
-              <div className="mt-4 flex items-center gap-3 rounded-[16px] border px-4 py-3"
-                style={{ background: "#eaf3f0", borderColor: "#b0d9c8", color: "#1d7a55" }}>
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span className="text-[0.82rem] font-medium">블록체인 확정 완료</span>
-              </div>
-            )}
-            {confirmingBackground === "failed" && (
-              <div className="mt-4 flex items-center gap-3 rounded-[16px] border px-4 py-3"
-                style={{ background: "#fef2f2", borderColor: "#fca5a5", color: "#b91c1c" }}>
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span className="text-[0.82rem] font-medium">블록체인 확정 실패 — 고객센터에 문의해 주세요</span>
-              </div>
-            )}
-
-            {txHash && (
-              <a
-                href={`https://explorer.hoodi.ethpandaops.io/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 flex items-center gap-2 rounded-[16px] border px-4 py-3 text-[0.82rem] font-medium transition hover:opacity-80"
-                style={{ background: "#eaf3f0", borderColor: "#b0d9c8", color: "#1d7a55" }}
-              >
-                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Tx: {txHash}</span>
-              </a>
-            )}
-
-            <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <Button
-                variant="outline"
-                className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                onClick={() => navigate("/tickets")}
-              >
-                경기 목록으로
-              </Button>
-              <Button
-                className="rounded-2xl bg-[#1456a0] text-white"
-                onClick={() => navigate("/my-tickets")}
-              >
-                내 입장권 보기
-              </Button>
-              <Button
-                className="rounded-2xl text-white"
-                style={{ background: "linear-gradient(135deg, #7700bb, #ff10f0)" }}
-                onClick={() => navigate("/combine")}
-              >
-                🎁 박스 받기
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

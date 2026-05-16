@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const nftBridge     = require('../services/nftBridgeAdapter');
+const { cancelPayment } = require('../services/tossPayService');
 
 const router = express.Router();
 let _pool;
@@ -40,7 +41,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     // 티켓 조회 (본인 소유 + game_date 포함)
     const [[ticket]] = await _pool.query(
-      `SELECT t.*, g.game_date
+      `SELECT t.*, t.payment_key, g.game_date
        FROM tickets t
        JOIN games g ON t.game_id = g.id
        WHERE t.id = ? AND t.wallet_address = ?`,
@@ -91,6 +92,18 @@ router.post('/', requireAuth, async (req, res) => {
 
     // NFT 무효화
     await nftBridge.requestNftBurn(ticket.token_id, walletAddress);
+
+    // 토스페이 환불 (결제 키가 있는 경우만)
+    if (ticket.payment_key) {
+      const tossResult = await cancelPayment({
+        paymentKey:   ticket.payment_key,
+        cancelReason: reason || '사용자 환불 요청',
+        cancelAmount: refundAmount,
+      });
+      if (!tossResult.success) {
+        console.error('[refundRoutes] 토스페이 환불 실패:', tossResult);
+      }
+    }
 
     // DB: 자동 완료 처리
     await conn.query(
@@ -199,7 +212,7 @@ router.post('/cancel-game', requireAuth, async (req, res) => {
 
     // confirmed 상태 티켓 전부 조회 (PRIMARY + TRANSFERRED 모두)
     const [tickets] = await conn.query(
-      `SELECT t.*, g.game_date
+      `SELECT t.*, t.payment_key, g.game_date
        FROM tickets t
        JOIN games g ON t.game_id = g.id
        WHERE t.game_id = ? AND t.status = 'confirmed'`,
@@ -228,6 +241,18 @@ router.post('/cancel-game', requireAuth, async (req, res) => {
         "UPDATE tickets SET status = 'refunded' WHERE id = ?",
         [ticket.id]
       );
+
+      // 토스페이 전액 환불
+      if (ticket.payment_key) {
+        const tossResult = await cancelPayment({
+          paymentKey:   ticket.payment_key,
+          cancelReason: '경기 취소로 인한 전액 환불',
+        });
+        if (!tossResult.success) {
+          console.error(`[refundRoutes] 토스페이 환불 실패 (ticket: ${ticket.id}):`, tossResult);
+        }
+      }
+
       completedCount++;
     }
 

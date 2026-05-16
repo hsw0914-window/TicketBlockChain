@@ -1,8 +1,9 @@
 const express = require('express');
 const crypto  = require('crypto');
-const { Interface, JsonRpcProvider, getAddress, verifyMessage } = require('ethers');
+const { getAddress, verifyMessage } = require('ethers');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
+const { confirmPayment, cancelPayment } = require('../services/tossPayService');
 
 const router = express.Router();
 let _pool;
@@ -11,19 +12,6 @@ function setPool(pool) { _pool = pool; }
 
 const MAX_PRICE_RATIO = 1.1;
 const TICKET_RESALE_FEE_RATE = 0.03;
-const HOODI_RPC_URL = process.env.HOODI_RPC_URL || process.env.RPC_URL || 'https://ethereum-hoodi-rpc.publicnode.com';
-const WEI_PER_KRW = 1_000_000_000n;
-const TICKET_MARKETPLACE_ADDRESS = process.env.TICKET_MARKETPLACE_ADDRESS || '0x277124B8AB865AD9b1E0E7c7E6BE3Cc8Db8d5F60';
-const MARKETPLACE_INTERFACE = new Interface([
-  'function buyTicket(uint256 tokenId) payable',
-]);
-
-let _provider;
-
-function getProvider() {
-  if (!_provider) _provider = new JsonRpcProvider(HOODI_RPC_URL);
-  return _provider;
-}
 
 function formatDate(v) {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -82,6 +70,9 @@ async function ensureTradeColumns(conn) {
   if (!existing.has('settlement_amount')) {
     alters.push(`ADD COLUMN settlement_amount INT NOT NULL DEFAULT 0 AFTER platform_fee`);
   }
+  if (!existing.has('toss_payment_key')) {
+    alters.push(`ADD COLUMN toss_payment_key VARCHAR(200) DEFAULT NULL`);
+  }
   if (alters.length > 0) {
     await conn.query(`ALTER TABLE ticket_trades ${alters.join(', ')}`);
   }
@@ -89,104 +80,6 @@ async function ensureTradeColumns(conn) {
 
 function normalizeAddress(address) {
   return String(address || '').trim().toLowerCase();
-}
-
-function krwToWei(price) {
-  return BigInt(Math.round(Number(price) || 0)) * WEI_PER_KRW;
-}
-
-function sameAddress(a, b) {
-  try {
-    return getAddress(String(a)) === getAddress(String(b));
-  } catch {
-    return false;
-  }
-}
-
-async function verifyDirectPaymentTx({ txHash, buyerWalletAddress, sellerWalletAddress, expectedWei }) {
-  if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
-    const error = new Error('MetaMask 결제 트랜잭션 해시가 필요합니다');
-    error.statusCode = 400;
-    throw error;
-  }
-  const provider = getProvider();
-  const tx = await provider.getTransaction(txHash);
-  if (!tx) {
-    const error = new Error('결제 트랜잭션을 아직 찾을 수 없습니다. 잠시 후 다시 시도해주세요.');
-    error.statusCode = 400;
-    throw error;
-  }
-  const receipt = await provider.getTransactionReceipt(txHash);
-  if (!receipt || receipt.status !== 1) {
-    const error = new Error('결제 트랜잭션이 아직 확정되지 않았거나 실패했습니다.');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!sameAddress(tx.from, buyerWalletAddress)) {
-    const error = new Error('결제한 지갑이 현재 구매자 지갑과 일치하지 않습니다');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!sameAddress(tx.to, sellerWalletAddress)) {
-    const error = new Error('결제 수신 지갑이 판매자 지갑과 일치하지 않습니다');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (BigInt(tx.value.toString()) < expectedWei) {
-    const error = new Error('결제 금액이 매물 가격보다 적습니다');
-    error.statusCode = 400;
-    throw error;
-  }
-}
-
-async function verifyMarketplacePurchaseTx({ txHash, buyerWalletAddress, expectedWei, tokenId }) {
-  if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
-    const error = new Error('MetaMask 구매 컨펌 거래 해시가 필요합니다');
-    error.statusCode = 400;
-    throw error;
-  }
-  const provider = getProvider();
-  const tx = await provider.getTransaction(txHash);
-  if (!tx) {
-    const error = new Error('구매 트랜잭션을 아직 찾을 수 없습니다. 잠시 후 다시 시도해주세요.');
-    error.statusCode = 400;
-    throw error;
-  }
-  const receipt = await provider.getTransactionReceipt(txHash);
-  if (!receipt || receipt.status !== 1) {
-    const error = new Error('구매 트랜잭션이 아직 확정되지 않았거나 실패했습니다.');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!sameAddress(tx.from, buyerWalletAddress)) {
-    const error = new Error('구매한 지갑이 현재 구매자 지갑과 일치하지 않습니다');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!sameAddress(tx.to, TICKET_MARKETPLACE_ADDRESS)) {
-    const error = new Error('구매 트랜잭션 대상이 장터 컨트랙트가 아닙니다');
-    error.statusCode = 400;
-    throw error;
-  }
-  try {
-    const parsed = MARKETPLACE_INTERFACE.parseTransaction({ data: tx.data, value: tx.value });
-    const purchasedTokenId = parsed?.args?.[0]?.toString();
-    if (parsed?.name !== 'buyTicket' || purchasedTokenId !== String(tokenId)) {
-      const error = new Error('구매 트랜잭션의 NFT 티켓 정보가 매물과 일치하지 않습니다');
-      error.statusCode = 400;
-      throw error;
-    }
-  } catch (err) {
-    if (err.statusCode) throw err;
-    const error = new Error('구매 트랜잭션 데이터를 검증할 수 없습니다');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (BigInt(tx.value.toString()) < expectedWei) {
-    const error = new Error('구매 결제 금액이 매물 가격보다 적습니다');
-    error.statusCode = 400;
-    throw error;
-  }
 }
 
 async function getBuyerWalletOrThrow(conn, userId) {
@@ -461,11 +354,6 @@ router.post('/listings', requireAuth, async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ error: '판매 등록 서명 메시지와 티켓 정보가 일치하지 않습니다' });
     }
-    if (!nftTokenId || !priceWei || !listTxHash) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'NFT 티켓은 MetaMask approve/listTicket 컨펌 후에만 장터에 등록할 수 있습니다' });
-    }
-
     const listingId = crypto.randomUUID();
     await conn.query(
       `INSERT INTO ticket_listings
@@ -494,19 +382,21 @@ router.post('/listings', requireAuth, async (req, res) => {
   }
 });
 
-// 구매
-router.post('/buy/:id', requireAuth, async (req, res) => {
+// 구매 (토스페이)
+// Body: { paymentKey, orderId, amount }
+router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
   const userId = req.user.user_id;
-  const {
-    buyTxHash,
-    buyerWalletAddress: signedBuyerWalletAddress,
-    legacyBuyMessage,
-    legacyBuySignature,
-  } = req.body;
+  const { paymentKey, orderId, amount } = req.body;
+
+  if (!paymentKey || !orderId || !amount) {
+    return res.status(400).json({ error: '필수 항목 누락 (paymentKey, orderId, amount)' });
+  }
+
   const conn = await _pool.getConnection();
   try {
     await ensureTradeColumns(conn);
     await conn.beginTransaction();
+
     const buyerWalletAddress = await getBuyerWalletOrThrow(conn, userId);
     const [[listing]] = await conn.query(
       `SELECT tl.*, u.nickname AS seller_name,
@@ -526,117 +416,97 @@ router.post('/buy/:id', requireAuth, async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ error: '본인이 올린 티켓은 구매할 수 없습니다' });
     }
-
-    if (buyTxHash) {
-      const [[usedTrade]] = await conn.query(
-        `SELECT id FROM ticket_trades WHERE buy_tx_hash = ? LIMIT 1`,
-        [buyTxHash],
-      );
-      if (usedTrade) {
-        await conn.rollback();
-        return res.status(400).json({ error: '이미 사용된 구매 트랜잭션입니다' });
-      }
+    if (Number(amount) !== Number(listing.listed_price)) {
+      await conn.rollback();
+      return res.status(400).json({ error: '결제 금액이 매물 가격과 일치하지 않습니다' });
     }
 
-    const isNftListing = Boolean(listing.nft_token_id && listing.price_wei);
-    if (isNftListing) {
-      await verifyMarketplacePurchaseTx({
-        txHash: buyTxHash,
-        buyerWalletAddress,
-        expectedWei: BigInt(listing.price_wei),
-        tokenId: listing.nft_token_id,
-      });
-    } else {
-      if (listing.resolved_seller_wallet_address) {
-        await verifyDirectPaymentTx({
-          txHash: buyTxHash,
-          buyerWalletAddress,
-          sellerWalletAddress: listing.resolved_seller_wallet_address,
-          expectedWei: krwToWei(listing.listed_price),
-        });
-      } else if (!signedBuyerWalletAddress || !legacyBuyMessage || !legacyBuySignature) {
-        await conn.rollback();
-        return res.status(400).json({ error: '판매자 지갑이 없는 매물은 실제 지갑 결제가 불가능합니다' });
-      } else {
-        if (normalizeAddress(signedBuyerWalletAddress) !== normalizeAddress(buyerWalletAddress)) {
-          await conn.rollback();
-          return res.status(400).json({ error: '서명한 지갑이 현재 계정에 연결된 지갑과 일치하지 않습니다' });
-        }
-        let recoveredAddress = '';
-        try {
-          recoveredAddress = verifyMessage(String(legacyBuyMessage), String(legacyBuySignature));
-        } catch {
-          await conn.rollback();
-          return res.status(400).json({ error: 'MetaMask 구매 서명을 검증할 수 없습니다' });
-        }
-        if (normalizeAddress(recoveredAddress) !== normalizeAddress(signedBuyerWalletAddress)) {
-          await conn.rollback();
-          return res.status(400).json({ error: 'MetaMask 서명자와 구매자 지갑이 일치하지 않습니다' });
-        }
-        if (
-          !String(legacyBuyMessage).includes(String(req.params.id)) ||
-          !String(legacyBuyMessage).includes(String(listing.seat_section))
-        ) {
-          await conn.rollback();
-          return res.status(400).json({ error: '구매 서명 메시지와 티켓 정보가 일치하지 않습니다' });
-        }
-      }
+    // 토스페이 결제 승인
+    const tossResult = await confirmPayment({ paymentKey, orderId, amount: Number(amount) });
+    if (!tossResult.success) {
+      await conn.rollback();
+      return res.status(400).json({ error: `결제 승인 실패: ${tossResult.message}` });
     }
 
-    const { grossAmount, platformFee, settlementAmount } = calculateTicketSettlement(listing.listed_price);
-    await conn.query(`UPDATE ticket_listings SET status = 'completed' WHERE id = ?`, [req.params.id]);
-    await conn.query(
-      `INSERT INTO ticket_trades (id, listing_id, buyer_id, seller_id, price, platform_fee, settlement_amount, buy_tx_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [crypto.randomUUID(), req.params.id, userId, listing.seller_id, grossAmount, platformFee, settlementAmount, buyTxHash ?? null],
-    );
-    await ensureTransferredTicket(conn, listing, buyerWalletAddress);
-    await conn.commit();
-
-    // 판매자 포인트 적립 (거래금액 0.3%, 하루 3건 한도)
-    let earnedPoint = 0;
+    // 결제 승인 완료 — 이후 실패 시 보상 환불 필요
+    let newTicketId;
     try {
-      const [[sellerWalletRow]] = await _pool.query(
-        'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
-        [listing.seller_id]
+      const { grossAmount, platformFee, settlementAmount } = calculateTicketSettlement(listing.listed_price);
+      await conn.query(`UPDATE ticket_listings SET status = 'completed' WHERE id = ?`, [req.params.id]);
+      await conn.query(
+        `INSERT INTO ticket_trades (id, listing_id, buyer_id, seller_id, price, platform_fee, settlement_amount, buy_tx_hash, toss_payment_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+        [crypto.randomUUID(), req.params.id, userId, listing.seller_id, grossAmount, platformFee, settlementAmount, paymentKey],
       );
-      if (sellerWalletRow?.wallet_address) {
-        const [[{ cnt }]] = await _pool.query(
-          'SELECT COUNT(*) AS cnt FROM ticket_trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
-          [listing.seller_id]
-        );
-        if (Number(cnt) < 3) {
-          const result = await fabricService.earnPointFromTrade({
-            userDidHash: fabricService.hashDid(sellerWalletRow.wallet_address),
-            amount: listing.listed_price,
-            rate:   0.003,
-          });
-          earnedPoint = result.earnedPoint;
-        }
-      }
-    } catch (pointErr) {
-      console.error('[ticketResale] 포인트 적립 실패:', pointErr.message);
-    }
+      newTicketId = await ensureTransferredTicket(conn, listing, buyerWalletAddress);
+      await conn.commit();
 
-    res.json({
-      success: true,
-      earnedPoint,
-      receipt: {
-        homeTeam:         listing.home_team,
-        awayTeam:         listing.away_team,
-        gameDate:         listing.game_date instanceof Date ? formatDate(listing.game_date) : String(listing.game_date).slice(0, 10),
-        seatSection:      listing.seat_section,
-        price:            grossAmount,
-        platformFee,
-        settlementAmount,
-        sellerName:       listing.seller_name,
-        buyTxHash:        buyTxHash ?? null,
-      },
-    });
+      // Fabric TransferTicket 기록
+      try {
+        await fabricService.transferTicket({
+          ticketId:          newTicketId,
+          fromWalletAddress: listing.resolved_seller_wallet_address || '',
+          toWalletAddress:   buyerWalletAddress,
+          transferPrice:     listing.listed_price,
+        });
+      } catch (fabricErr) {
+        console.error('[ticketResale] Fabric TransferTicket 실패:', fabricErr.message);
+      }
+
+      // 판매자 포인트 적립 (거래금액 0.3%, 하루 3건 한도)
+      let earnedPoint = 0;
+      try {
+        const [[sellerWalletRow]] = await _pool.query(
+          'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
+          [listing.seller_id],
+        );
+        if (sellerWalletRow?.wallet_address) {
+          const [[{ cnt }]] = await _pool.query(
+            'SELECT COUNT(*) AS cnt FROM ticket_trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
+            [listing.seller_id],
+          );
+          if (Number(cnt) < 3) {
+            const result = await fabricService.earnPointFromTrade({
+              userDidHash: fabricService.hashDid(sellerWalletRow.wallet_address),
+              amount:      listing.listed_price,
+              rate:        0.003,
+            });
+            earnedPoint = result.earnedPoint;
+          }
+        }
+      } catch (pointErr) {
+        console.error('[ticketResale] 포인트 적립 실패:', pointErr.message);
+      }
+
+      res.json({
+        success: true,
+        earnedPoint,
+        receipt: {
+          homeTeam:        listing.home_team,
+          awayTeam:        listing.away_team,
+          gameDate:        listing.game_date instanceof Date ? formatDate(listing.game_date) : String(listing.game_date).slice(0, 10),
+          seatSection:     listing.seat_section,
+          price:           grossAmount,
+          platformFee,
+          settlementAmount,
+          sellerName:      listing.seller_name,
+          paymentKey,
+        },
+      });
+    } catch (dbErr) {
+      await conn.rollback();
+      // 보상 트랜잭션: DB 실패 → 결제 취소
+      try {
+        await cancelPayment({ paymentKey, cancelReason: '구매 처리 중 오류', cancelAmount: Number(amount) });
+      } catch (cancelErr) {
+        console.error('[ticketResale] 보상 환불 실패:', cancelErr.message);
+      }
+      throw dbErr;
+    }
   } catch (err) {
-    await conn.rollback();
-    console.error(err);
-    res.status(err.statusCode || 500).json({ error: err.message || '구매 처리 중 오류가 발생했습니다' });
+    if (!res.headersSent) {
+      res.status(err.statusCode || 500).json({ error: err.message || '구매 처리 중 오류가 발생했습니다' });
+    }
   } finally {
     conn.release();
   }

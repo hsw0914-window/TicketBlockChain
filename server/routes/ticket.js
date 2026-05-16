@@ -1,8 +1,9 @@
 const express = require("express");
 const crypto  = require("crypto");
 const { purchaseTicket } = require("../services/ticketService");
-const { mintBoxOnChain } = require("../services/nftService");
+const { mintBoxOnChain, mintTicketOnChain } = require("../services/nftService");
 const fabricService = require("../services/fabricBridge");
+const { confirmPayment, cancelPayment } = require("../services/tossPayService");
 const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
@@ -319,6 +320,146 @@ router.get("/:ticketId/qr", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ available: false, message: "QR 조회 실패" });
+  }
+});
+
+// ─── 토스페이 결제 확인 + 티켓 발급 ──────────────────────────
+router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (req, res) => {
+  const {
+    paymentKey, orderId, amount,
+    walletAddress, gameId, stadium, grade, block, row, seatNumber, price,
+  } = req.body;
+
+  if (!paymentKey || !orderId || !amount) {
+    return res.status(400).json({ success: false, message: "paymentKey, orderId, amount는 필수입니다" });
+  }
+  if (!walletAddress || !gameId || !grade || !block || !row || !seatNumber) {
+    return res.status(400).json({ success: false, message: "티켓 정보가 누락되었습니다" });
+  }
+
+  const verifiedWalletAddress = req.verifiedWalletAddress || String(walletAddress).toLowerCase();
+
+  // 1. 토스페이 결제 승인
+  const tossResult = await confirmPayment({ paymentKey, orderId, amount });
+  if (!tossResult.success) {
+    return res.status(400).json({ success: false, message: `결제 승인 실패: ${tossResult.message}` });
+  }
+
+  let ticketId = null;
+  let tokenId = null;
+  let txHash = null;
+
+  try {
+    // 2. DB 티켓 저장
+    const ticketResult = await purchaseTicket(_pool, {
+      walletAddress: verifiedWalletAddress,
+      gameId, stadium, grade, block, row, seatNumber, price,
+    });
+    ticketId = ticketResult.id;
+
+    // 3. payment_key DB 저장 (환불 시 필요)
+    await _pool.query(
+      "UPDATE tickets SET payment_key = ? WHERE id = ?",
+      [paymentKey, ticketId]
+    );
+
+    // 4. 서버 지갑으로 티켓 NFT 민팅 후 유저 지갑으로 전송
+    try {
+      const [[gameRow]] = await _pool.query(
+        `SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date,
+                home_team, away_team FROM games WHERE id = ?`,
+        [gameId]
+      );
+      const mintResult = await mintTicketOnChain(verifiedWalletAddress, {
+        gameId: String(gameId),
+        gameDate: gameRow?.game_date || '',
+        homeTeam: gameRow?.home_team || '',
+        awayTeam: gameRow?.away_team || '',
+        seatSection: `${block}-${row}-${seatNumber}`,
+        originalPrice: Number(price),
+      });
+      tokenId = mintResult.tokenId;
+      txHash = mintResult.txHash;
+
+      await _pool.query(
+        "UPDATE tickets SET token_id = ?, ticket_tx_hash = ? WHERE id = ?",
+        [tokenId, txHash, ticketId]
+      );
+    } catch (mintErr) {
+      console.error('[toss] NFT 민팅 실패:', mintErr.message);
+      // NFT 민팅 실패 시 토스페이 자동 환불 (보상 트랜잭션)
+      await cancelPayment({ paymentKey, cancelReason: 'NFT 발급 실패로 인한 자동 환불', cancelAmount: amount });
+      await _pool.query("UPDATE tickets SET status = 'cancelled' WHERE id = ?", [ticketId]);
+      return res.status(500).json({ success: false, message: 'NFT 발급 실패로 자동 환불되었습니다' });
+    }
+
+    // 5. 박스 NFT 지급
+    let boxTxHash = null;
+    try {
+      const [[walletRow]] = await _pool.query(
+        'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
+        [verifiedWalletAddress]
+      );
+      if (walletRow) {
+        await _pool.query(
+          `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 1)
+           ON DUPLICATE KEY UPDATE season_count = season_count + 1`,
+          [walletRow.user_id]
+        );
+        if (process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS) {
+          boxTxHash = await mintBoxOnChain(verifiedWalletAddress);
+        }
+      }
+    } catch (boxErr) {
+      console.error('[toss] 박스 지급 실패 (무시):', boxErr.message);
+    }
+
+    // 6. Fabric 티켓 등록
+    try {
+      const [[gameRow]] = await _pool.query(
+        "SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date FROM games WHERE id = ?",
+        [gameId]
+      );
+      const { v4: uuidv4 } = require('uuid');
+      await fabricService.registerTicket({
+        ticketId,
+        tokenId: String(tokenId || '0'),
+        gameId: String(gameId),
+        seatId: `${block}-${row}-${seatNumber}`,
+        walletAddress: verifiedWalletAddress,
+        price: Number(price),
+        purchaseType: 'PRIMARY',
+        gameDate: gameRow?.game_date || '',
+      });
+
+      const userDidHash = fabricService.hashDid ? fabricService.hashDid(verifiedWalletAddress) : '';
+      if (userDidHash) {
+        const reservationId = uuidv4();
+        await fabricService.createReservation({
+          reservationId,
+          userDidHash,
+          gameId: String(gameId),
+          raffleNftId: '',
+          isPriority: false,
+        });
+        await fabricService.confirmReservation({ reservationId, ticketId });
+      }
+    } catch (fabErr) {
+      console.error('[toss] Fabric 등록 실패 (무시):', fabErr.message);
+    }
+
+    res.json({
+      success: true,
+      data: { ticketId, tokenId, txHash, boxTxHash, paymentKey },
+    });
+
+  } catch (err) {
+    console.error('[toss/confirm]', err);
+    // DB 저장 실패 시 토스페이 환불
+    if (!ticketId) {
+      await cancelPayment({ paymentKey, cancelReason: '티켓 저장 실패로 인한 자동 환불', cancelAmount: amount }).catch(() => {});
+    }
+    res.status(500).json({ success: false, message: err.message || '티켓 발급 실패' });
   }
 });
 

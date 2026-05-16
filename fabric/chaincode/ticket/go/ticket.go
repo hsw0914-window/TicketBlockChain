@@ -40,13 +40,13 @@ type PointRecord struct {
 }
 
 type MembershipRecord struct {
-	UserDidHash                 string `json:"userDidHash"`
-	Grade                       string `json:"grade"` // BASIC, BRONZE, SILVER, GOLD
-	EntryCount                  int    `json:"entryCount"`
-	MonthlyRaffleExchangeCount  int    `json:"monthlyRaffleExchangeCount"`
-	MonthlyCardExchangeCount    int    `json:"monthlyCardExchangeCount"`
-	LastResetMonth              string `json:"lastResetMonth"`
-	UpdatedAt                   string `json:"updatedAt"`
+	UserDidHash                string `json:"userDidHash"`
+	Grade                      string `json:"grade"` // BASIC, BRONZE, SILVER, GOLD
+	EntryCount                 int    `json:"entryCount"`
+	MonthlyRaffleExchangeCount int    `json:"monthlyRaffleExchangeCount"`
+	MonthlyCardExchangeCount   int    `json:"monthlyCardExchangeCount"`
+	LastResetMonth             string `json:"lastResetMonth"`
+	UpdatedAt                  string `json:"updatedAt"`
 }
 
 type RefundRecord struct {
@@ -55,6 +55,7 @@ type RefundRecord struct {
 	PurchaseType  string  `json:"purchaseType"`
 	RefundRate    float64 `json:"refundRate"`
 	OriginalPrice float64 `json:"originalPrice"`
+	PointRestored float64 `json:"pointRestored"`
 	RefundReason  string  `json:"refundReason"`
 	RefundAmount  float64 `json:"refundAmount"`
 	RefundStatus  string  `json:"refundStatus"` // PROCESSING, COMPLETED, REJECTED
@@ -115,13 +116,20 @@ type ReservationRecord struct {
 	UpdatedAt     string `json:"updatedAt"`
 }
 
+type HistoryRecord struct {
+	TxId      string          `json:"txId"`
+	Value     json.RawMessage `json:"value"`
+	Timestamp string          `json:"timestamp"`
+	IsDelete  bool            `json:"isDelete"`
+}
+
 // ─── 체인코드 구조체 ───────────────────────────────────────
 
 type TicketChaincode struct {
 	contractapi.Contract
 }
 
-// ─── 키 헬퍼 ──────────────────────────────────────────────
+// ─── 키 상수 ──────────────────────────────────────────────
 
 const (
 	keyPrefixTicket      = "TICKET:"
@@ -133,7 +141,10 @@ const (
 	keyPrefixRaffleNFT   = "RAFFLE_NFT:"
 	keyPrefixDraw        = "DRAW:"
 	keyPrefixReservation = "RESERVATION:"
+	keyPrefixSeat        = "SEAT:"
 )
+
+// ─── 유틸 함수 ────────────────────────────────────────────
 
 func nowISO() string {
 	return time.Now().UTC().Format(time.RFC3339)
@@ -149,21 +160,31 @@ func hashDid(walletAddress string) string {
 }
 
 func calcGrade(entryCount int) string {
-	if entryCount >= 10 { return "GOLD" }
-	if entryCount >= 6  { return "SILVER" }
-	if entryCount >= 3  { return "BRONZE" }
+	if entryCount >= 10 {
+		return "GOLD"
+	}
+	if entryCount >= 6 {
+		return "SILVER"
+	}
+	if entryCount >= 3 {
+		return "BRONZE"
+	}
 	return "BASIC"
 }
 
 func getEarnRate(grade string) float64 {
 	rates := map[string]float64{"BASIC": 0.005, "BRONZE": 0.007, "SILVER": 0.010, "GOLD": 0.015}
-	if r, ok := rates[grade]; ok { return r }
+	if r, ok := rates[grade]; ok {
+		return r
+	}
 	return 0.005
 }
 
 func exchangeCost(itemType string) (float64, error) {
 	costs := map[string]float64{"RAFFLE_NFT": 1500, "CARD_NFT": 5000}
-	if c, ok := costs[itemType]; ok { return c, nil }
+	if c, ok := costs[itemType]; ok {
+		return c, nil
+	}
 	return 0, fmt.Errorf("INVALID_ITEM_TYPE: %s", itemType)
 }
 
@@ -175,50 +196,83 @@ func exchangeMonthlyLimit(grade, itemType string) int {
 		"GOLD":   {"RAFFLE_NFT": 2, "CARD_NFT": 2},
 	}
 	if m, ok := limits[grade]; ok {
-		if v, ok2 := m[itemType]; ok2 { return v }
+		if v, ok2 := m[itemType]; ok2 {
+			return v
+		}
 	}
 	return 1
+}
+
+// ─── 호출자 권한 검증 ─────────────────────────────────────
+
+func requireMSP(ctx contractapi.TransactionContextInterface, allowedMSPs ...string) error {
+	mspId, err := ctx.GetClientIdentity().GetMSPID()
+	if err != nil {
+		return fmt.Errorf("MSP 조회 실패: %s", err)
+	}
+	for _, allowed := range allowedMSPs {
+		if mspId == allowed {
+			return nil
+		}
+	}
+	return fmt.Errorf("ACCESS_DENIED: %s 조직은 이 함수를 호출할 수 없습니다", mspId)
 }
 
 // ─── 원장 조회/저장 헬퍼 ─────────────────────────────────
 
 func getTicketRecord(ctx contractapi.TransactionContextInterface, ticketId string) (*TicketRecord, error) {
 	b, err := ctx.GetStub().GetState(keyPrefixTicket + ticketId)
-	if err != nil { return nil, err }
-	if b == nil   { return nil, nil }
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
 	var r TicketRecord
-	if err = json.Unmarshal(b, &r); err != nil { return nil, err }
+	if err = json.Unmarshal(b, &r); err != nil {
+		return nil, err
+	}
 	return &r, nil
 }
 
 func putTicketRecord(ctx contractapi.TransactionContextInterface, r *TicketRecord) error {
 	r.UpdatedAt = nowISO()
 	b, err := json.Marshal(r)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixTicket+r.TicketId, b)
 }
 
 func getOrCreatePoint(ctx contractapi.TransactionContextInterface, userDidHash string) (*PointRecord, error) {
 	b, err := ctx.GetStub().GetState(keyPrefixPoint + userDidHash)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	if b == nil {
 		return &PointRecord{UserDidHash: userDidHash, LastUpdatedAt: nowISO()}, nil
 	}
 	var r PointRecord
-	if err = json.Unmarshal(b, &r); err != nil { return nil, err }
+	if err = json.Unmarshal(b, &r); err != nil {
+		return nil, err
+	}
 	return &r, nil
 }
 
 func putPoint(ctx contractapi.TransactionContextInterface, r *PointRecord) error {
 	r.LastUpdatedAt = nowISO()
 	b, err := json.Marshal(r)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixPoint+r.UserDidHash, b)
 }
 
 func getOrCreateMembership(ctx contractapi.TransactionContextInterface, userDidHash string) (*MembershipRecord, error) {
 	b, err := ctx.GetStub().GetState(keyPrefixMembership + userDidHash)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	if b == nil {
 		return &MembershipRecord{
 			UserDidHash:    userDidHash,
@@ -228,14 +282,18 @@ func getOrCreateMembership(ctx contractapi.TransactionContextInterface, userDidH
 		}, nil
 	}
 	var r MembershipRecord
-	if err = json.Unmarshal(b, &r); err != nil { return nil, err }
+	if err = json.Unmarshal(b, &r); err != nil {
+		return nil, err
+	}
 	return &r, nil
 }
 
 func putMembership(ctx contractapi.TransactionContextInterface, r *MembershipRecord) error {
 	r.UpdatedAt = nowISO()
 	b, err := json.Marshal(r)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixMembership+r.UserDidHash, b)
 }
 
@@ -246,11 +304,45 @@ func (t *TicketChaincode) RegisterTicket(
 	ticketId, tokenId, gameId, seatId, walletAddress, purchaseType, gameDate string,
 	price float64,
 ) error {
-	existing, err := getTicketRecord(ctx, ticketId)
-	if err != nil { return err }
-	if existing != nil { return fmt.Errorf("TICKET_ALREADY_EXISTS: %s", ticketId) }
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
+	if ticketId == "" || gameId == "" || walletAddress == "" {
+		return fmt.Errorf("INVALID_PARAM: ticketId, gameId, walletAddress는 필수입니다")
+	}
+	if price <= 0 {
+		return fmt.Errorf("INVALID_PARAM: price는 0보다 커야 합니다")
+	}
 
-	if purchaseType == "" { purchaseType = "PRIMARY" }
+	existing, err := getTicketRecord(ctx, ticketId)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return fmt.Errorf("TICKET_ALREADY_EXISTS: %s", ticketId)
+	}
+
+	// 좌석 중복 등록 방지
+	if seatId != "" {
+		seatKey, err := ctx.GetStub().CreateCompositeKey(keyPrefixSeat, []string{gameId, seatId})
+		if err != nil {
+			return err
+		}
+		seatData, err := ctx.GetStub().GetState(seatKey)
+		if err != nil {
+			return err
+		}
+		if seatData != nil {
+			return fmt.Errorf("SEAT_ALREADY_TAKEN: 경기 %s 좌석 %s는 이미 등록되었습니다", gameId, seatId)
+		}
+		if err = ctx.GetStub().PutState(seatKey, []byte(ticketId)); err != nil {
+			return err
+		}
+	}
+
+	if purchaseType == "" {
+		purchaseType = "PRIMARY"
+	}
 
 	r := &TicketRecord{
 		TicketId:      ticketId,
@@ -284,7 +376,9 @@ func (t *TicketChaincode) VerifyEntry(
 	ticketId, gateId string,
 ) (string, error) {
 	ticket, err := getTicketRecord(ctx, ticketId)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	if ticket == nil {
 		r, _ := json.Marshal(VerifyEntryResult{Allowed: false, Reason: "TICKET_NOT_FOUND"})
 		return string(r), nil
@@ -298,25 +392,39 @@ func (t *TicketChaincode) VerifyEntry(
 		return string(r), nil
 	}
 
-	// 상태 변경
 	ticket.Status = "USED"
-	if err = putTicketRecord(ctx, ticket); err != nil { return "", err }
+	if err = putTicketRecord(ctx, ticket); err != nil {
+		return "", err
+	}
 
-	// 포인트 적립
 	point, err := getOrCreatePoint(ctx, ticket.UserDidHash)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	membership, err := getOrCreateMembership(ctx, ticket.UserDidHash)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
+
+	// 월 초기화
+	if membership.LastResetMonth != currentMonth() {
+		membership.MonthlyRaffleExchangeCount = 0
+		membership.MonthlyCardExchangeCount = 0
+		membership.LastResetMonth = currentMonth()
+	}
 
 	earnedPoint := math.Floor(ticket.Price * getEarnRate(membership.Grade))
-	point.Balance      += earnedPoint
-	point.TotalEarned  += earnedPoint
-	if err = putPoint(ctx, point); err != nil { return "", err }
+	point.Balance += earnedPoint
+	point.TotalEarned += earnedPoint
+	if err = putPoint(ctx, point); err != nil {
+		return "", err
+	}
 
-	// 멤버십 갱신
-	membership.EntryCount += 1
-	membership.Grade       = calcGrade(membership.EntryCount)
-	if err = putMembership(ctx, membership); err != nil { return "", err }
+	membership.EntryCount++
+	membership.Grade = calcGrade(membership.EntryCount)
+	if err = putMembership(ctx, membership); err != nil {
+		return "", err
+	}
 
 	txId := ctx.GetStub().GetTxID()
 	res := VerifyEntryResult{
@@ -340,20 +448,29 @@ func (t *TicketChaincode) UsePointForTicket(
 		return fmt.Errorf("MIN_POINT_1000: 최소 1,000P 이상 사용 가능")
 	}
 	point, err := getOrCreatePoint(ctx, userDidHash)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if point.Balance < pointAmount {
 		return fmt.Errorf("INSUFFICIENT_POINT: 잔액 %.0f P, 요청 %.0f P", point.Balance, pointAmount)
 	}
 
-	point.Balance   -= pointAmount
+	point.Balance -= pointAmount
 	point.TotalUsed += pointAmount
-	if err = putPoint(ctx, point); err != nil { return err }
+	if err = putPoint(ctx, point); err != nil {
+		return err
+	}
 
 	if ticketId != "" {
 		ticket, err2 := getTicketRecord(ctx, ticketId)
-		if err2 == nil && ticket != nil {
+		if err2 != nil {
+			return err2
+		}
+		if ticket != nil {
 			ticket.PointUsed = pointAmount
-			_ = putTicketRecord(ctx, ticket)
+			if err2 = putTicketRecord(ctx, ticket); err2 != nil {
+				return err2
+			}
 		}
 	}
 	return nil
@@ -366,22 +483,27 @@ func (t *TicketChaincode) ExchangePointItem(
 	userDidHash, itemType string,
 ) (string, error) {
 	cost, err := exchangeCost(itemType)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
 	point, err := getOrCreatePoint(ctx, userDidHash)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	if point.Balance < cost {
 		return "", fmt.Errorf("INSUFFICIENT_POINT: 잔액 %.0f P, 필요 %.0f P", point.Balance, cost)
 	}
 
 	membership, err := getOrCreateMembership(ctx, userDidHash)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
-	// 월 초기화
 	if membership.LastResetMonth != currentMonth() {
 		membership.MonthlyRaffleExchangeCount = 0
-		membership.MonthlyCardExchangeCount   = 0
-		membership.LastResetMonth             = currentMonth()
+		membership.MonthlyCardExchangeCount = 0
+		membership.LastResetMonth = currentMonth()
 	}
 
 	limit := exchangeMonthlyLimit(membership.Grade, itemType)
@@ -392,13 +514,21 @@ func (t *TicketChaincode) ExchangePointItem(
 		return "", fmt.Errorf("EXCHANGE_LIMIT_EXCEEDED: 이번 달 실물 NFT 카드 교환 횟수 초과")
 	}
 
-	point.Balance   -= cost
+	point.Balance -= cost
 	point.TotalUsed += cost
-	if err = putPoint(ctx, point); err != nil { return "", err }
+	if err = putPoint(ctx, point); err != nil {
+		return "", err
+	}
 
-	if itemType == "RAFFLE_NFT" { membership.MonthlyRaffleExchangeCount++ }
-	if itemType == "CARD_NFT"   { membership.MonthlyCardExchangeCount++ }
-	if err = putMembership(ctx, membership); err != nil { return "", err }
+	if itemType == "RAFFLE_NFT" {
+		membership.MonthlyRaffleExchangeCount++
+	}
+	if itemType == "CARD_NFT" {
+		membership.MonthlyCardExchangeCount++
+	}
+	if err = putMembership(ctx, membership); err != nil {
+		return "", err
+	}
 
 	exchangeId := "exchange-" + ctx.GetStub().GetTxID()[:12]
 	rec := ExchangeRecord{
@@ -409,8 +539,13 @@ func (t *TicketChaincode) ExchangePointItem(
 		Status:      "MINT_REQUESTED",
 		RequestedAt: nowISO(),
 	}
-	b, _ := json.Marshal(rec)
-	if err = ctx.GetStub().PutState(keyPrefixExchange+exchangeId, b); err != nil { return "", err }
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixExchange+exchangeId, b); err != nil {
+		return "", err
+	}
 
 	out, _ := json.Marshal(map[string]interface{}{
 		"exchangeId":       exchangeId,
@@ -422,22 +557,34 @@ func (t *TicketChaincode) ExchangePointItem(
 	return string(out), nil
 }
 
-// ─── 환불율 계산 (날짜 기준) ─────────────────────────────
+// ─── 환불율 계산 ──────────────────────────────────────────
 // TRANSFERRED: 항상 0%
 // PRIMARY: 7일 이상=100%, 3일 이상=90%, 1일 이상=80%, 당일/이후=0%
 
 func calcRefundRate(gameDateStr, purchaseType string) float64 {
-	if purchaseType == "TRANSFERRED" { return 0 }
-	if gameDateStr == "" { return 100 }
-	now  := time.Now().UTC().Truncate(24 * time.Hour)
+	if purchaseType == "TRANSFERRED" {
+		return 0
+	}
+	if gameDateStr == "" {
+		return 100
+	}
+	now := time.Now().UTC().Truncate(24 * time.Hour)
 	game, err := time.Parse("2006-01-02", gameDateStr)
-	if err != nil { return 100 }
+	if err != nil {
+		return 100
+	}
 	game = game.UTC().Truncate(24 * time.Hour)
 	days := int(game.Sub(now).Hours() / 24)
 
-	if days >= 7 { return 100 }
-	if days >= 3 { return 90 }
-	if days >= 1 { return 80 }
+	if days >= 7 {
+		return 100
+	}
+	if days >= 3 {
+		return 90
+	}
+	if days >= 1 {
+		return 80
+	}
 	return 0
 }
 
@@ -448,20 +595,51 @@ func (t *TicketChaincode) RequestRefund(
 	ticketId, refundReason string,
 ) (string, error) {
 	ticket, err := getTicketRecord(ctx, ticketId)
-	if err != nil { return "", err }
-	if ticket == nil { return "", fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId) }
-	if ticket.Status == "USED"              { return "", fmt.Errorf("REFUND_DENIED: 입장 완료된 티켓 환불 불가") }
-	if ticket.Status == "REFUNDED"          { return "", fmt.Errorf("ALREADY_REFUNDED") }
-	if ticket.Status == "REFUND_PROCESSING" { return "", fmt.Errorf("REFUND_ALREADY_PROCESSING") }
+	if err != nil {
+		return "", err
+	}
+	if ticket == nil {
+		return "", fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId)
+	}
+	if ticket.Status == "USED" {
+		return "", fmt.Errorf("REFUND_DENIED: 입장 완료된 티켓 환불 불가")
+	}
+	if ticket.Status == "REFUNDED" {
+		return "", fmt.Errorf("ALREADY_REFUNDED")
+	}
+	if ticket.Status == "REFUND_PROCESSING" {
+		return "", fmt.Errorf("REFUND_ALREADY_PROCESSING")
+	}
 
 	rate := calcRefundRate(ticket.GameDate, ticket.PurchaseType)
-	if rate == 0 { return "", fmt.Errorf("REFUND_DENIED: 환불 불가 기간입니다") }
+	if rate == 0 {
+		return "", fmt.Errorf("REFUND_DENIED: 환불 불가 기간입니다")
+	}
 
-	baseAmount   := ticket.Price - ticket.PointUsed
+	baseAmount := ticket.Price - ticket.PointUsed
 	refundAmount := math.Floor(baseAmount * rate / 100)
 
-	ticket.Status = "REFUND_PROCESSING"
-	if err = putTicketRecord(ctx, ticket); err != nil { return "", err }
+	// 사용한 포인트 복구
+	pointRestored := ticket.PointUsed
+	if pointRestored > 0 {
+		point, err := getOrCreatePoint(ctx, ticket.UserDidHash)
+		if err != nil {
+			return "", err
+		}
+		point.Balance += pointRestored
+		point.TotalUsed -= pointRestored
+		if point.TotalUsed < 0 {
+			point.TotalUsed = 0
+		}
+		if err = putPoint(ctx, point); err != nil {
+			return "", err
+		}
+	}
+
+	ticket.Status = "REFUNDED"
+	if err = putTicketRecord(ctx, ticket); err != nil {
+		return "", err
+	}
 
 	refundId := "refund-" + ctx.GetStub().GetTxID()[:12]
 	rec := RefundRecord{
@@ -470,28 +648,30 @@ func (t *TicketChaincode) RequestRefund(
 		PurchaseType:  ticket.PurchaseType,
 		RefundRate:    rate,
 		OriginalPrice: ticket.Price,
+		PointRestored: pointRestored,
 		RefundReason:  refundReason,
 		RefundAmount:  refundAmount,
-		RefundStatus:  "PROCESSING",
+		RefundStatus:  "COMPLETED",
 		RequestedAt:   nowISO(),
+		CompletedAt:   nowISO(),
 	}
 
-	// 자동 완료 처리
-	ticket.Status    = "REFUNDED"
-	if err = putTicketRecord(ctx, ticket); err != nil { return "", err }
-	rec.RefundStatus = "COMPLETED"
-	rec.CompletedAt  = nowISO()
-
-	b, _ := json.Marshal(rec)
-	if err = ctx.GetStub().PutState(keyPrefixRefund+refundId, b); err != nil { return "", err }
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixRefund+refundId, b); err != nil {
+		return "", err
+	}
 
 	out, _ := json.Marshal(map[string]interface{}{
-		"refundId":      refundId,
-		"ticketId":      ticketId,
-		"refundRate":    rate,
-		"refundAmount":  refundAmount,
-		"purchaseType":  ticket.PurchaseType,
-		"status":        "COMPLETED",
+		"refundId":       refundId,
+		"ticketId":       ticketId,
+		"refundRate":     rate,
+		"refundAmount":   refundAmount,
+		"pointRestored":  pointRestored,
+		"purchaseType":   ticket.PurchaseType,
+		"status":         "COMPLETED",
 	})
 	return string(out), nil
 }
@@ -500,14 +680,96 @@ func (t *TicketChaincode) RequestRefund(
 
 func (t *TicketChaincode) CancelGameRefundAll(
 	ctx contractapi.TransactionContextInterface,
-	gameId string,
+	gameId, ticketIdsJSON string,
 ) (string, error) {
-	// 경기 취소: 해당 gameId의 ACTIVE 티켓 전부 100% 환불
-	// Rich Query가 필요하므로 CouchDB 환경에서는 GetQueryResult 사용 권장
-	// 여기서는 ticketId 목록을 인자로 받는 방식 대신 이벤트 기반으로 처리
-	// Phase 2에서 CouchDB 연동 시 selector query로 교체 예정
-	_ = gameId
-	return `{"message":"CancelGameRefundAll: use individual RequestRefund per ticket"}`, nil
+	if err := requireMSP(ctx, "Org1MSP", "Org2MSP"); err != nil {
+		return "", err
+	}
+	if gameId == "" {
+		return "", fmt.Errorf("INVALID_PARAM: gameId는 필수입니다")
+	}
+
+	var ticketIds []string
+	if err := json.Unmarshal([]byte(ticketIdsJSON), &ticketIds); err != nil {
+		return "", fmt.Errorf("INVALID_PARAM: ticketIdsJSON 파싱 실패: %s", err)
+	}
+
+	successCount := 0
+	skippedCount := 0
+	failedIds := make([]string, 0)
+
+	for _, ticketId := range ticketIds {
+		ticket, err := getTicketRecord(ctx, ticketId)
+		if err != nil || ticket == nil {
+			failedIds = append(failedIds, ticketId)
+			continue
+		}
+		if ticket.GameId != gameId {
+			skippedCount++
+			continue
+		}
+		if ticket.Status != "ACTIVE" {
+			skippedCount++
+			continue
+		}
+
+		// 포인트 복구
+		if ticket.PointUsed > 0 {
+			point, err := getOrCreatePoint(ctx, ticket.UserDidHash)
+			if err != nil {
+				failedIds = append(failedIds, ticketId)
+				continue
+			}
+			point.Balance += ticket.PointUsed
+			point.TotalUsed -= ticket.PointUsed
+			if point.TotalUsed < 0 {
+				point.TotalUsed = 0
+			}
+			if err = putPoint(ctx, point); err != nil {
+				failedIds = append(failedIds, ticketId)
+				continue
+			}
+		}
+
+		ticket.Status = "REFUNDED"
+		if err = putTicketRecord(ctx, ticket); err != nil {
+			failedIds = append(failedIds, ticketId)
+			continue
+		}
+
+		refundId := "refund-cancel-" + ctx.GetStub().GetTxID()[:8] + fmt.Sprintf("-%d", successCount)
+		rec := RefundRecord{
+			RefundId:      refundId,
+			TicketId:      ticketId,
+			PurchaseType:  ticket.PurchaseType,
+			RefundRate:    100,
+			OriginalPrice: ticket.Price,
+			PointRestored: ticket.PointUsed,
+			RefundReason:  "경기 취소",
+			RefundAmount:  ticket.Price - ticket.PointUsed,
+			RefundStatus:  "COMPLETED",
+			RequestedAt:   nowISO(),
+			CompletedAt:   nowISO(),
+		}
+		rb, err := json.Marshal(rec)
+		if err != nil {
+			failedIds = append(failedIds, ticketId)
+			continue
+		}
+		if err = ctx.GetStub().PutState(keyPrefixRefund+refundId, rb); err != nil {
+			failedIds = append(failedIds, ticketId)
+			continue
+		}
+		successCount++
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"gameId":       gameId,
+		"successCount": successCount,
+		"skippedCount": skippedCount,
+		"failedIds":    failedIds,
+	})
+	return string(out), nil
 }
 
 // ─── 7. EarnPointFromTrade ───────────────────────────────
@@ -519,21 +781,88 @@ func (t *TicketChaincode) EarnPointFromTrade(
 	amount, rate float64,
 ) (string, error) {
 	earnedPoint := math.Floor(amount * rate)
-	if earnedPoint <= 0 {
-		point, _ := getOrCreatePoint(ctx, userDidHash)
-		out, _ := json.Marshal(map[string]interface{}{"earnedPoint": 0, "balance": point.Balance})
-		return string(out), nil
-	}
 
 	point, err := getOrCreatePoint(ctx, userDidHash)
-	if err != nil { return "", err }
-	point.Balance     += earnedPoint
-	point.TotalEarned += earnedPoint
-	if err = putPoint(ctx, point); err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
+
+	if earnedPoint > 0 {
+		point.Balance += earnedPoint
+		point.TotalEarned += earnedPoint
+		if err = putPoint(ctx, point); err != nil {
+			return "", err
+		}
+	}
 
 	out, _ := json.Marshal(map[string]interface{}{
 		"earnedPoint": earnedPoint,
 		"balance":     point.Balance,
+	})
+	return string(out), nil
+}
+
+// ─── 8. TransferTicket ───────────────────────────────────
+
+func (t *TicketChaincode) TransferTicket(
+	ctx contractapi.TransactionContextInterface,
+	ticketId, fromWalletAddress, toWalletAddress string,
+	transferPrice float64,
+) (string, error) {
+	if ticketId == "" || fromWalletAddress == "" || toWalletAddress == "" {
+		return "", fmt.Errorf("INVALID_PARAM: ticketId, fromWalletAddress, toWalletAddress는 필수입니다")
+	}
+	if transferPrice <= 0 {
+		return "", fmt.Errorf("INVALID_PARAM: transferPrice는 0보다 커야 합니다")
+	}
+
+	ticket, err := getTicketRecord(ctx, ticketId)
+	if err != nil {
+		return "", err
+	}
+	if ticket == nil {
+		return "", fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId)
+	}
+	if ticket.Status != "ACTIVE" {
+		return "", fmt.Errorf("TRANSFER_DENIED: 티켓 상태가 ACTIVE가 아닙니다 (%s)", ticket.Status)
+	}
+	if strings.ToLower(ticket.WalletAddress) != strings.ToLower(fromWalletAddress) {
+		return "", fmt.Errorf("NOT_OWNER: 티켓 소유자가 아닙니다")
+	}
+
+	fromDidHash := hashDid(fromWalletAddress)
+	toDidHash := hashDid(toWalletAddress)
+
+	ticket.WalletAddress = strings.ToLower(toWalletAddress)
+	ticket.UserDidHash = toDidHash
+	ticket.PurchaseType = "TRANSFERRED"
+	ticket.PointUsed = 0
+	if err = putTicketRecord(ctx, ticket); err != nil {
+		return "", err
+	}
+
+	// 판매자 포인트 0.3% 적립
+	earnedPoint := math.Floor(transferPrice * 0.003)
+	if earnedPoint > 0 {
+		point, err := getOrCreatePoint(ctx, fromDidHash)
+		if err != nil {
+			return "", err
+		}
+		point.Balance += earnedPoint
+		point.TotalEarned += earnedPoint
+		if err = putPoint(ctx, point); err != nil {
+			return "", err
+		}
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"ticketId":        ticketId,
+		"fromWallet":      strings.ToLower(fromWalletAddress),
+		"toWallet":        strings.ToLower(toWalletAddress),
+		"toDidHash":       toDidHash,
+		"transferPrice":   transferPrice,
+		"sellerEarnedPoint": earnedPoint,
+		"status":          "TRANSFERRED",
 	})
 	return string(out), nil
 }
@@ -545,8 +874,15 @@ func (t *TicketChaincode) CreateSettlement(
 	gameId string,
 	totalSales, refundAmount, pointUsedAmount float64,
 ) (string, error) {
-	platformFee  := math.Floor(totalSales * 0.03)
-	clubRevenue  := totalSales - refundAmount - pointUsedAmount - platformFee
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
+	if gameId == "" {
+		return "", fmt.Errorf("INVALID_PARAM: gameId는 필수입니다")
+	}
+
+	platformFee := math.Floor(totalSales * 0.03)
+	clubRevenue := totalSales - refundAmount - pointUsedAmount - platformFee
 	settlementId := "settlement-" + ctx.GetStub().GetTxID()[:12]
 
 	rec := SettlementRecord{
@@ -560,8 +896,13 @@ func (t *TicketChaincode) CreateSettlement(
 		SettlementStatus: "DRAFT",
 		CreatedAt:        nowISO(),
 	}
-	b, _ := json.Marshal(rec)
-	if err := ctx.GetStub().PutState(keyPrefixSettlement+settlementId, b); err != nil { return "", err }
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixSettlement+settlementId, b); err != nil {
+		return "", err
+	}
 
 	out, _ := json.Marshal(rec)
 	return string(out), nil
@@ -574,8 +915,12 @@ func (t *TicketChaincode) GetTicket(
 	ticketId string,
 ) (string, error) {
 	ticket, err := getTicketRecord(ctx, ticketId)
-	if err != nil { return "", err }
-	if ticket == nil { return "", fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId) }
+	if err != nil {
+		return "", err
+	}
+	if ticket == nil {
+		return "", fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId)
+	}
 	out, _ := json.Marshal(ticket)
 	return string(out), nil
 }
@@ -585,7 +930,9 @@ func (t *TicketChaincode) GetPointBalance(
 	userDidHash string,
 ) (string, error) {
 	point, err := getOrCreatePoint(ctx, userDidHash)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	out, _ := json.Marshal(point)
 	return string(out), nil
 }
@@ -595,7 +942,9 @@ func (t *TicketChaincode) GetMembership(
 	userDidHash string,
 ) (string, error) {
 	membership, err := getOrCreateMembership(ctx, userDidHash)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	out, _ := json.Marshal(membership)
 	return string(out), nil
 }
@@ -607,8 +956,12 @@ func (t *TicketChaincode) RegisterRaffleNFT(
 	raffleNftId, userDidHash, gameId string,
 ) error {
 	b, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
-	if err != nil { return err }
-	if b != nil { return fmt.Errorf("RAFFLE_NFT_ALREADY_EXISTS: %s", raffleNftId) }
+	if err != nil {
+		return err
+	}
+	if b != nil {
+		return fmt.Errorf("RAFFLE_NFT_ALREADY_EXISTS: %s", raffleNftId)
+	}
 
 	rec := RaffleNFTRecord{
 		RaffleNftId: raffleNftId,
@@ -618,12 +971,18 @@ func (t *TicketChaincode) RegisterRaffleNFT(
 		IssuedAt:    nowISO(),
 		UpdatedAt:   nowISO(),
 	}
-	rb, _ := json.Marshal(rec)
-	if err = ctx.GetStub().PutState(keyPrefixRaffleNFT+raffleNftId, rb); err != nil { return err }
+	rb, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixRaffleNFT+raffleNftId, rb); err != nil {
+		return err
+	}
 
-	// composite key for user index
 	ck, err := ctx.GetStub().CreateCompositeKey("RAFFLE_NFT_USER", []string{userDidHash, raffleNftId})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(ck, []byte{0x00})
 }
 
@@ -634,29 +993,52 @@ func (t *TicketChaincode) EnterDraw(
 	raffleNftId, userDidHash, drawId string,
 ) error {
 	rb, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
-	if err != nil { return err }
-	if rb == nil { return fmt.Errorf("RAFFLE_NFT_NOT_FOUND: %s", raffleNftId) }
+	if err != nil {
+		return err
+	}
+	if rb == nil {
+		return fmt.Errorf("RAFFLE_NFT_NOT_FOUND: %s", raffleNftId)
+	}
 
 	var raffle RaffleNFTRecord
-	if err = json.Unmarshal(rb, &raffle); err != nil { return err }
-	if raffle.UserDidHash != userDidHash { return fmt.Errorf("NOT_OWNER") }
-	if raffle.Status != "ISSUED" { return fmt.Errorf("RAFFLE_NFT_ALREADY_USED: %s", raffle.Status) }
+	if err = json.Unmarshal(rb, &raffle); err != nil {
+		return err
+	}
+	if raffle.UserDidHash != userDidHash {
+		return fmt.Errorf("NOT_OWNER")
+	}
+	if raffle.Status != "ISSUED" {
+		return fmt.Errorf("RAFFLE_NFT_ALREADY_USED: %s", raffle.Status)
+	}
 
-	raffle.Status    = "ENTERED"
-	raffle.DrawId    = drawId
+	raffle.Status = "ENTERED"
+	raffle.DrawId = drawId
 	raffle.UpdatedAt = nowISO()
-	rb2, _ := json.Marshal(raffle)
-	if err = ctx.GetStub().PutState(keyPrefixRaffleNFT+raffleNftId, rb2); err != nil { return err }
+	rb2, err := json.Marshal(raffle)
+	if err != nil {
+		return err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixRaffleNFT+raffleNftId, rb2); err != nil {
+		return err
+	}
 
-	// update draw entry count
 	db, err := ctx.GetStub().GetState(keyPrefixDraw + drawId)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if db != nil {
 		var draw DrawRecord
-		if err = json.Unmarshal(db, &draw); err != nil { return err }
+		if err = json.Unmarshal(db, &draw); err != nil {
+			return err
+		}
 		draw.TotalEntries++
-		db2, _ := json.Marshal(draw)
-		_ = ctx.GetStub().PutState(keyPrefixDraw+drawId, db2)
+		db2, err := json.Marshal(draw)
+		if err != nil {
+			return err
+		}
+		if err = ctx.GetStub().PutState(keyPrefixDraw+drawId, db2); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -675,12 +1057,14 @@ func (t *TicketChaincode) CreateDraw(
 		WinnerCount: winnerCount,
 		CreatedAt:   nowISO(),
 	}
-	b, _ := json.Marshal(rec)
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixDraw+drawId, b)
 }
 
 // ─── 14. ExecuteDraw ─────────────────────────────────────
-// 결정론적 추첨: TxID 해시 기반으로 당첨자 선발
 
 func (t *TicketChaincode) ExecuteDraw(
 	ctx contractapi.TransactionContextInterface,
@@ -688,52 +1072,89 @@ func (t *TicketChaincode) ExecuteDraw(
 	entryIdsJSON string,
 ) (string, error) {
 	db, err := ctx.GetStub().GetState(keyPrefixDraw + drawId)
-	if err != nil { return "", err }
-	if db == nil { return "", fmt.Errorf("DRAW_NOT_FOUND: %s", drawId) }
+	if err != nil {
+		return "", err
+	}
+	if db == nil {
+		return "", fmt.Errorf("DRAW_NOT_FOUND: %s", drawId)
+	}
 
 	var draw DrawRecord
-	if err = json.Unmarshal(db, &draw); err != nil { return "", err }
-	if draw.Status == "COMPLETED" { return "", fmt.Errorf("DRAW_ALREADY_COMPLETED") }
+	if err = json.Unmarshal(db, &draw); err != nil {
+		return "", err
+	}
+	if draw.Status == "COMPLETED" {
+		return "", fmt.Errorf("DRAW_ALREADY_COMPLETED")
+	}
 
 	var entryIds []string
-	if err = json.Unmarshal([]byte(entryIdsJSON), &entryIds); err != nil { return "", err }
+	if err = json.Unmarshal([]byte(entryIdsJSON), &entryIds); err != nil {
+		return "", err
+	}
+	if len(entryIds) == 0 {
+		return "", fmt.Errorf("INVALID_PARAM: 참가자가 없습니다")
+	}
 
-	// 결정론적 선발: txId 해시 기반 인덱스
 	txId := ctx.GetStub().GetTxID()
-	h    := sha256.Sum256([]byte(txId))
+	h := sha256.Sum256([]byte(txId))
 	seed := int(h[0]) + int(h[1])<<8
 
 	winnerCount := draw.WinnerCount
-	if winnerCount > len(entryIds) { winnerCount = len(entryIds) }
+	if winnerCount > len(entryIds) {
+		winnerCount = len(entryIds)
+	}
 
 	winners := make([]string, 0, winnerCount)
-	used    := make(map[int]bool)
+	used := make(map[int]bool)
 	for i := 0; i < winnerCount; i++ {
 		idx := (seed + i*37) % len(entryIds)
-		for used[idx] { idx = (idx + 1) % len(entryIds) }
+		for used[idx] {
+			idx = (idx + 1) % len(entryIds)
+		}
 		used[idx] = true
 		winners = append(winners, entryIds[idx])
 	}
 
 	for _, raffleNftId := range entryIds {
 		rb, err2 := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
-		if err2 != nil || rb == nil { continue }
+		if err2 != nil || rb == nil {
+			continue
+		}
 		var raffle RaffleNFTRecord
-		if err2 = json.Unmarshal(rb, &raffle); err2 != nil { continue }
+		if err2 = json.Unmarshal(rb, &raffle); err2 != nil {
+			continue
+		}
 		isWinner := false
 		for _, w := range winners {
-			if w == raffleNftId { isWinner = true; break }
+			if w == raffleNftId {
+				isWinner = true
+				break
+			}
 		}
-		if isWinner { raffle.Status = "WINNER" } else { raffle.Status = "LOST" }
+		if isWinner {
+			raffle.Status = "WINNER"
+		} else {
+			raffle.Status = "LOST"
+		}
 		raffle.UpdatedAt = nowISO()
-		rb2, _ := json.Marshal(raffle)
-		_ = ctx.GetStub().PutState(keyPrefixRaffleNFT+raffleNftId, rb2)
+		rb2, err2 := json.Marshal(raffle)
+		if err2 != nil {
+			continue
+		}
+		if err2 = ctx.GetStub().PutState(keyPrefixRaffleNFT+raffleNftId, rb2); err2 != nil {
+			continue
+		}
 	}
 
-	draw.Status     = "COMPLETED"
+	draw.Status = "COMPLETED"
 	draw.ExecutedAt = nowISO()
-	db2, _ := json.Marshal(draw)
-	if err = ctx.GetStub().PutState(keyPrefixDraw+drawId, db2); err != nil { return "", err }
+	db2, err := json.Marshal(draw)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixDraw+drawId, db2); err != nil {
+		return "", err
+	}
 
 	out, _ := json.Marshal(map[string]interface{}{"drawId": drawId, "winners": winners})
 	return string(out), nil
@@ -746,17 +1167,30 @@ func (t *TicketChaincode) UseRaffleNFT(
 	raffleNftId, userDidHash, ticketId string,
 ) error {
 	rb, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
-	if err != nil { return err }
-	if rb == nil { return fmt.Errorf("RAFFLE_NFT_NOT_FOUND") }
+	if err != nil {
+		return err
+	}
+	if rb == nil {
+		return fmt.Errorf("RAFFLE_NFT_NOT_FOUND")
+	}
 
 	var raffle RaffleNFTRecord
-	if err = json.Unmarshal(rb, &raffle); err != nil { return err }
-	if raffle.UserDidHash != userDidHash { return fmt.Errorf("NOT_OWNER") }
-	if raffle.Status != "WINNER" { return fmt.Errorf("NOT_WINNER: %s", raffle.Status) }
+	if err = json.Unmarshal(rb, &raffle); err != nil {
+		return err
+	}
+	if raffle.UserDidHash != userDidHash {
+		return fmt.Errorf("NOT_OWNER")
+	}
+	if raffle.Status != "WINNER" {
+		return fmt.Errorf("NOT_WINNER: %s", raffle.Status)
+	}
 
-	raffle.Status    = "USED"
+	raffle.Status = "USED"
 	raffle.UpdatedAt = nowISO()
-	rb2, _ := json.Marshal(raffle)
+	rb2, err := json.Marshal(raffle)
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixRaffleNFT+raffleNftId, rb2)
 }
 
@@ -777,7 +1211,10 @@ func (t *TicketChaincode) CreateReservation(
 		CreatedAt:     nowISO(),
 		UpdatedAt:     nowISO(),
 	}
-	b, _ := json.Marshal(rec)
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixReservation+reservationId, b)
 }
 
@@ -788,15 +1225,24 @@ func (t *TicketChaincode) ConfirmReservation(
 	reservationId, ticketId string,
 ) error {
 	rb, err := ctx.GetStub().GetState(keyPrefixReservation + reservationId)
-	if err != nil { return err }
-	if rb == nil { return fmt.Errorf("RESERVATION_NOT_FOUND: %s", reservationId) }
+	if err != nil {
+		return err
+	}
+	if rb == nil {
+		return fmt.Errorf("RESERVATION_NOT_FOUND: %s", reservationId)
+	}
 
 	var rec ReservationRecord
-	if err = json.Unmarshal(rb, &rec); err != nil { return err }
-	rec.TicketId   = ticketId
-	rec.Status     = "CONFIRMED"
-	rec.UpdatedAt  = nowISO()
-	b, _ := json.Marshal(rec)
+	if err = json.Unmarshal(rb, &rec); err != nil {
+		return err
+	}
+	rec.TicketId = ticketId
+	rec.Status = "CONFIRMED"
+	rec.UpdatedAt = nowISO()
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixReservation+reservationId, b)
 }
 
@@ -807,14 +1253,23 @@ func (t *TicketChaincode) CancelReservation(
 	reservationId string,
 ) error {
 	rb, err := ctx.GetStub().GetState(keyPrefixReservation + reservationId)
-	if err != nil { return err }
-	if rb == nil { return fmt.Errorf("RESERVATION_NOT_FOUND: %s", reservationId) }
+	if err != nil {
+		return err
+	}
+	if rb == nil {
+		return fmt.Errorf("RESERVATION_NOT_FOUND: %s", reservationId)
+	}
 
 	var rec ReservationRecord
-	if err = json.Unmarshal(rb, &rec); err != nil { return err }
-	rec.Status    = "CANCELLED"
+	if err = json.Unmarshal(rb, &rec); err != nil {
+		return err
+	}
+	rec.Status = "CANCELLED"
 	rec.UpdatedAt = nowISO()
-	b, _ := json.Marshal(rec)
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
 	return ctx.GetStub().PutState(keyPrefixReservation+reservationId, b)
 }
 
@@ -824,10 +1279,17 @@ func (t *TicketChaincode) MapTicketNFT(
 	ctx contractapi.TransactionContextInterface,
 	ticketId, tokenId, walletAddress string,
 ) error {
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	ticket, err := getTicketRecord(ctx, ticketId)
-	if err != nil { return err }
-	if ticket == nil { return fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId) }
-	ticket.TokenId       = tokenId
+	if err != nil {
+		return err
+	}
+	if ticket == nil {
+		return fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId)
+	}
+	ticket.TokenId = tokenId
 	ticket.WalletAddress = strings.ToLower(walletAddress)
 	return putTicketRecord(ctx, ticket)
 }
@@ -839,8 +1301,12 @@ func (t *TicketChaincode) GetRaffleNFT(
 	raffleNftId string,
 ) (string, error) {
 	b, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
-	if err != nil { return "", err }
-	if b == nil { return "", fmt.Errorf("RAFFLE_NFT_NOT_FOUND: %s", raffleNftId) }
+	if err != nil {
+		return "", err
+	}
+	if b == nil {
+		return "", fmt.Errorf("RAFFLE_NFT_NOT_FOUND: %s", raffleNftId)
+	}
 	return string(b), nil
 }
 
@@ -849,8 +1315,12 @@ func (t *TicketChaincode) GetDraw(
 	drawId string,
 ) (string, error) {
 	b, err := ctx.GetStub().GetState(keyPrefixDraw + drawId)
-	if err != nil { return "", err }
-	if b == nil { return "", fmt.Errorf("DRAW_NOT_FOUND: %s", drawId) }
+	if err != nil {
+		return "", err
+	}
+	if b == nil {
+		return "", fmt.Errorf("DRAW_NOT_FOUND: %s", drawId)
+	}
 	return string(b), nil
 }
 
@@ -859,32 +1329,45 @@ func (t *TicketChaincode) GetReservation(
 	reservationId string,
 ) (string, error) {
 	b, err := ctx.GetStub().GetState(keyPrefixReservation + reservationId)
-	if err != nil { return "", err }
-	if b == nil { return "", fmt.Errorf("RESERVATION_NOT_FOUND: %s", reservationId) }
+	if err != nil {
+		return "", err
+	}
+	if b == nil {
+		return "", fmt.Errorf("RESERVATION_NOT_FOUND: %s", reservationId)
+	}
 	return string(b), nil
 }
 
-// GetUserRaffleNFTs: composite key 인덱스로 사용자의 응모권 NFT 목록 조회
 func (t *TicketChaincode) GetUserRaffleNFTs(
 	ctx contractapi.TransactionContextInterface,
 	userDidHash string,
 ) (string, error) {
 	iter, err := ctx.GetStub().GetStateByPartialCompositeKey("RAFFLE_NFT_USER", []string{userDidHash})
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer iter.Close()
 
 	records := make([]RaffleNFTRecord, 0)
 	for iter.HasNext() {
 		kv, err := iter.Next()
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		_, parts, err := ctx.GetStub().SplitCompositeKey(kv.Key)
-		if err != nil || len(parts) < 2 { continue }
+		if err != nil || len(parts) < 2 {
+			continue
+		}
 		raffleNftId := parts[1]
 
 		rb, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
-		if err != nil || rb == nil { continue }
+		if err != nil || rb == nil {
+			continue
+		}
 		var rec RaffleNFTRecord
-		if err = json.Unmarshal(rb, &rec); err != nil { continue }
+		if err = json.Unmarshal(rb, &rec); err != nil {
+			continue
+		}
 		records = append(records, rec)
 	}
 	out, _ := json.Marshal(records)
@@ -900,78 +1383,95 @@ func (t *TicketChaincode) HashDid(
 	return hashDid(walletAddress), nil
 }
 
-// ─── 22. EarnPointByEntry ────────────────────────────────
-// 입장 검증 후 포인트 적립 (VerifyEntry 내부에서 자동 호출되지만 외부 호출도 허용)
+// ─── 22. GetTicketHistory ────────────────────────────────
 
-func (t *TicketChaincode) EarnPointByEntry(
+func (t *TicketChaincode) GetTicketHistory(
 	ctx contractapi.TransactionContextInterface,
-	userDidHash string,
-	price float64,
+	ticketId string,
 ) (string, error) {
-	membership, err := getOrCreateMembership(ctx, userDidHash)
-	if err != nil { return "", err }
-
-	rate        := getEarnRate(membership.Grade)
-	earnedPoint := math.Floor(price * rate)
-
-	point, err := getOrCreatePoint(ctx, userDidHash)
-	if err != nil { return "", err }
-
-	point.Balance     += earnedPoint
-	point.TotalEarned += earnedPoint
-	if err = putPoint(ctx, point); err != nil { return "", err }
-
-	out, _ := json.Marshal(map[string]interface{}{
-		"earnedPoint": earnedPoint,
-		"balance":     point.Balance,
-	})
-	return string(out), nil
-}
-
-// ─── 24. UpdateMembershipGrade ───────────────────────────
-// 입장 횟수 +1 후 등급 재계산
-
-func (t *TicketChaincode) UpdateMembershipGrade(
-	ctx contractapi.TransactionContextInterface,
-	userDidHash string,
-) (string, error) {
-	membership, err := getOrCreateMembership(ctx, userDidHash)
-	if err != nil { return "", err }
-
-	// 월 초기화
-	if membership.LastResetMonth != currentMonth() {
-		membership.MonthlyRaffleExchangeCount = 0
-		membership.MonthlyCardExchangeCount   = 0
-		membership.LastResetMonth             = currentMonth()
+	iter, err := ctx.GetStub().GetHistoryForKey(keyPrefixTicket + ticketId)
+	if err != nil {
+		return "", err
 	}
+	defer iter.Close()
 
-	membership.EntryCount++
-	membership.Grade = calcGrade(membership.EntryCount)
-	if err = putMembership(ctx, membership); err != nil { return "", err }
-
-	out, _ := json.Marshal(map[string]interface{}{
-		"grade":      membership.Grade,
-		"entryCount": membership.EntryCount,
-	})
+	records := make([]HistoryRecord, 0)
+	for iter.HasNext() {
+		mod, err := iter.Next()
+		if err != nil {
+			continue
+		}
+		ts := ""
+		if mod.Timestamp != nil {
+			ts = time.Unix(mod.Timestamp.Seconds, 0).UTC().Format(time.RFC3339)
+		}
+		rec := HistoryRecord{
+			TxId:      mod.TxId,
+			Value:     json.RawMessage(mod.Value),
+			Timestamp: ts,
+			IsDelete:  mod.IsDelete,
+		}
+		records = append(records, rec)
+	}
+	out, _ := json.Marshal(records)
 	return string(out), nil
 }
 
-// ─── 25. GetAllDraws ─────────────────────────────────────
-// 전체 추첨 목록 조회 (범위 쿼리: DRAW: 프리픽스)
+// ─── 23. GetPointHistory ─────────────────────────────────
+
+func (t *TicketChaincode) GetPointHistory(
+	ctx contractapi.TransactionContextInterface,
+	userDidHash string,
+) (string, error) {
+	iter, err := ctx.GetStub().GetHistoryForKey(keyPrefixPoint + userDidHash)
+	if err != nil {
+		return "", err
+	}
+	defer iter.Close()
+
+	records := make([]HistoryRecord, 0)
+	for iter.HasNext() {
+		mod, err := iter.Next()
+		if err != nil {
+			continue
+		}
+		ts := ""
+		if mod.Timestamp != nil {
+			ts = time.Unix(mod.Timestamp.Seconds, 0).UTC().Format(time.RFC3339)
+		}
+		rec := HistoryRecord{
+			TxId:      mod.TxId,
+			Value:     json.RawMessage(mod.Value),
+			Timestamp: ts,
+			IsDelete:  mod.IsDelete,
+		}
+		records = append(records, rec)
+	}
+	out, _ := json.Marshal(records)
+	return string(out), nil
+}
+
+// ─── 24. GetAllDraws ─────────────────────────────────────
 
 func (t *TicketChaincode) GetAllDraws(
 	ctx contractapi.TransactionContextInterface,
 ) (string, error) {
 	iter, err := ctx.GetStub().GetStateByRange(keyPrefixDraw, keyPrefixDraw+"~")
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer iter.Close()
 
 	draws := make([]DrawRecord, 0)
 	for iter.HasNext() {
 		kv, err := iter.Next()
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		var rec DrawRecord
-		if err = json.Unmarshal(kv.Value, &rec); err != nil { continue }
+		if err = json.Unmarshal(kv.Value, &rec); err != nil {
+			continue
+		}
 		draws = append(draws, rec)
 	}
 	out, _ := json.Marshal(draws)

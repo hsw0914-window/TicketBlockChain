@@ -7,7 +7,8 @@ import { NotFound } from "./pages/NotFound";
 const Login          = lazy(() => import("./pages/Login").then((m) => ({ default: m.Login })));
 const Register       = lazy(() => import("./pages/Register").then((m) => ({ default: m.Register })));
 const Tickets        = lazy(() => import("./pages/Tickets").then((m) => ({ default: m.Tickets })));
-const TicketBooking  = lazy(() => import("./pages/TicketBooking").then((m) => ({ default: m.TicketBooking })));
+const TicketBooking        = lazy(() => import("./pages/TicketBooking").then((m) => ({ default: m.TicketBooking })));
+const TicketBookingSuccess = lazy(() => import("./pages/TicketBookingSuccess").then((m) => ({ default: m.TicketBookingSuccess })));
 const MyTickets      = lazy(() => import("./pages/MyTickets").then((m) => ({ default: m.MyTickets })));
 const Combine        = lazy(() => import("./pages/Combine").then((m) => ({ default: m.Combine })));
 const Market         = lazy(() => import("./pages/Market").then((m) => ({ default: m.Market })));
@@ -15,7 +16,8 @@ const Community      = lazy(() => import("./pages/Community").then((m) => ({ def
 const Notice         = lazy(() => import("./pages/Notice").then((m) => ({ default: m.Notice })));
 const NoticeWrite    = lazy(() => import("./pages/NoticeWrite").then((m) => ({ default: m.NoticeWrite })));
 const MyPage         = lazy(() => import("./pages/MyPage").then((m) => ({ default: m.MyPage })));
-const TicketResale   = lazy(() => import("./pages/TicketResale").then((m) => ({ default: m.TicketResale })));
+const TicketResale        = lazy(() => import("./pages/TicketResale").then((m) => ({ default: m.TicketResale })));
+const TicketResaleSuccess = lazy(() => import("./pages/TicketResaleSuccess").then((m) => ({ default: m.TicketResaleSuccess })));
 const Collection     = lazy(() => import("./pages/Collection").then((m) => ({ default: m.Collection })));
 const MemeInfo       = lazy(() => import("./pages/MemeInfo").then((m) => ({ default: m.MemeInfo })));
 const Attendance     = lazy(() => import("./pages/Attendance").then((m) => ({ default: m.Attendance })));
@@ -53,6 +55,7 @@ export const router = createBrowserRouter([
       { index: true, Component: Home },
       { path: "tickets",                  Component: withSuspense(Tickets) },
       { path: "tickets/:eventId/booking", Component: withSuspense(TicketBooking) },
+      { path: "tickets/booking/success",  Component: withSuspense(TicketBookingSuccess) },
       { path: "my-tickets",               Component: withSuspense(MyTickets) },
       { path: "combine",                  Component: withSuspense(Combine) },
       { path: "market",                   Component: withSuspense(Market) },
@@ -62,6 +65,7 @@ export const router = createBrowserRouter([
       { path: "notice/write/:id",         Component: withSuspense(NoticeWrite) },
       { path: "mypage",                   Component: withSuspense(MyPage) },
       { path: "ticket-resale",            Component: withSuspense(TicketResale) },
+      { path: "market/buy/success",       Component: withSuspense(TicketResaleSuccess) },
       { path: "collection",               Component: withSuspense(Collection) },
       { path: "meme-info",                Component: withSuspense(MemeInfo) },
       { path: "attendance",               Component: withSuspense(Attendance) },

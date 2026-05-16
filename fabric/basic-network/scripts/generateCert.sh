@@ -15,6 +15,11 @@ echo "▶ Org1 인증서 생성..."
   --config=./organizations/cryptogen/crypto-config-org1.yaml \
   --output=organizations
 
+echo "▶ Org2 인증서 생성..."
+"$BIN_PATH/cryptogen" generate \
+  --config=./organizations/cryptogen/crypto-config-org2.yaml \
+  --output=organizations
+
 echo "▶ Orderer 인증서 생성..."
 "$BIN_PATH/cryptogen" generate \
   --config=./organizations/cryptogen/crypto-config-orderer.yaml \
