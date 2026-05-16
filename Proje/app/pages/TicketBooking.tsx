@@ -463,6 +463,14 @@ export function TicketBooking() {
     );
   }
 
+  if (eventLoading || !event) {
+    return (
+      <div className="page-shell flex items-center justify-center min-h-[40vh]">
+        <p className="text-[0.95rem]" style={{ color: "#8a9ab0" }}>경기 정보를 불러오는 중...</p>
+      </div>
+    );
+  }
+
   if (accessStatus !== "ok") {
     const msg = ACCESS_MESSAGES[accessStatus];
     return (
