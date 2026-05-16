@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag } from "lucide-react";
+import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, ArrowLeftRight } from "lucide-react";
 import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
@@ -47,14 +47,14 @@ export function Layout() {
   const gridColor = theme === "dark" ? "rgba(126, 156, 184, 0.06)" : "rgba(57, 84, 114, 0.035)";
   const headerBackground = theme === "dark"
     ? scrolled ? "rgba(16,24,33,0.94)" : "rgba(20,30,40,0.86)"
-    : scrolled ? "rgba(245,248,250,0.94)" : "rgba(239,243,246,0.84)";
+    : "#ffffff";
   const headerBorder = theme === "dark"
     ? "1px solid rgba(123,144,166,0.16)"
-    : scrolled ? "1px solid rgba(70,97,124,0.16)" : "1px solid rgba(70,97,124,0.09)";
+    : "1px solid rgba(70,97,124,0.12)";
   const headerShadow = scrolled
     ? theme === "dark"
       ? "0 8px 24px rgba(0, 0, 0, 0.24)"
-      : "0 8px 24px rgba(17, 40, 73, 0.05)"
+      : "0 8px 24px rgba(17, 40, 73, 0.06)"
     : "none";
   const panelBackground = theme === "dark" ? "rgba(28, 40, 53, 0.92)" : "rgba(244,247,249,0.78)";
   const activeBackground = theme === "dark" ? "rgba(86,112,139,0.22)" : "rgba(90,116,146,0.12)";
@@ -70,6 +70,7 @@ export function Layout() {
     { path: "/ticket-resale", label: "티켓 양도", icon: Tag },
     { path: "/combine", label: "카드 조합", icon: Layers },
     { path: "/market", label: "팬 자산 장터", icon: ShoppingBag },
+    { path: "/exchange", label: "교환소", icon: ArrowLeftRight },
     { path: "/community", label: "커뮤니티", icon: MessagesSquare },
     { path: "/notice", label: "공지사항", icon: Bell },
   ];
@@ -130,11 +131,11 @@ export function Layout() {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className="relative px-4 py-2.5 rounded-xl text-[0.92rem] font-semibold transition-all duration-200 group"
+                  className="relative px-4 py-2.5 rounded-xl text-[1rem] font-semibold transition-all duration-200 group"
                   style={{
                     color: active ? (theme === "dark" ? "#e2edf6" : "#223750") : textColor,
-                    background: active ? activeBackground : panelBackground,
-                    border: active ? "1px solid rgba(90,116,146,0.18)" : "1px solid transparent",
+                    background: "transparent",
+                    border: "none",
                   }}
                 >
                   <span className="relative z-10 transition-colors duration-200"

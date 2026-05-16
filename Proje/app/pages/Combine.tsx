@@ -316,7 +316,10 @@ export function Combine() {
   };
 
   const handleCloseResult = () => setResult(null);
-  const handleCloseOpenResult = () => setOpenResult(null);
+  const handleCloseOpenResult = () => {
+    setOpenResult(null);
+    setViewMode("combine");
+  };
 
   // ─── 로딩 / 에러 ─────────────────────────────────────────
   if (loading) {

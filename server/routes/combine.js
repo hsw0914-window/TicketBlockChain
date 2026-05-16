@@ -48,6 +48,7 @@ async function fetchInventory(userId) {
      FROM fragment_types ft
      LEFT JOIN market_assets ma ON ma.fragment_type_id = ft.id
      LEFT JOIN user_fragments uf ON uf.fragment_type_id = ft.id AND uf.user_id = ?
+     WHERE ft.family != 'raffle'
      ORDER BY ft.id`,
     [userId]
   );
@@ -69,7 +70,13 @@ async function fetchInventory(userId) {
     [userId]
   );
 
-  return { fragments, cards };
+  const [[raffleRow]] = await _pool.query(
+    `SELECT COALESCE(count, 0) AS count FROM user_fragments WHERE user_id = ? AND fragment_type_id = 'early-access-pass'`,
+    [userId]
+  );
+  const raffleTickets = Number(raffleRow?.count ?? 0);
+
+  return { fragments, cards, raffleTickets };
 }
 
 // ─── GET /api/inventory ──────────────────────────────────

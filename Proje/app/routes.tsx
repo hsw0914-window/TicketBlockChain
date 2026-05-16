@@ -19,6 +19,7 @@ import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 import { NoticeWrite } from "./pages/NoticeWrite";
 import { TicketResale } from "./pages/TicketResale";
+import { Exchange } from "./pages/Exchange";
 
 export const router = createBrowserRouter([
   {
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
       { path: "mypage", Component: MyPage },
       { path: "mypage/membership", Component: Membership },
       { path: "ticket-resale", Component: TicketResale },
+      { path: "exchange", Component: Exchange },
       { path: "collection", Component: Collection },
       { path: "meme-info", Component: MemeInfo },
       { path: "attendance", Component: Attendance },

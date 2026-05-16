@@ -103,10 +103,6 @@ export function Notice() {
       {/* Header */}
       <div className="page-header flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center relative overflow-hidden"
-            style={{ background: "linear-gradient(135deg, #506987, #6f89a3)", boxShadow: "0 8px 18px rgba(48,69,94,0.12)" }}>
-            <Bell className="w-6 h-6 text-white relative z-10" />
-          </div>
           <div>
             <p
               className="page-eyebrow mb-1 font-bold cursor-pointer transition-colors select-none"

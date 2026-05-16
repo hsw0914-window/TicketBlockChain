@@ -243,7 +243,12 @@ export function Membership() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "티어업 실패");
-      setTierUpMsg({ type: 'success', text: data.message });
+      let successText = data.message;
+      if (data.awardedCards?.length > 0) {
+        const cardNames = data.awardedCards.map((c: { name: string }) => c.name).join(', ');
+        successText += ` (${cardNames})`;
+      }
+      setTierUpMsg({ type: 'success', text: successText });
       fetchData();
     } catch (err) {
       setTierUpMsg({ type: 'error', text: err instanceof Error ? err.message : "티어업 중 오류가 발생했습니다." });
@@ -393,7 +398,10 @@ export function Membership() {
                   {!membership.nextTier
                     ? "골드 등급의 모든 혜택을 누리고 있습니다"
                     : membership.canTierUp
-                      ? membership.nextTier === '실버' ? '응모권 1장이 지급됩니다' : membership.nextTier === '골드' ? '응모권 3장이 지급됩니다' : '등급이 상승합니다'
+                      ? membership.nextTier === '브론즈' ? '실물 NFT 카드 1장이 지급됩니다'
+                          : membership.nextTier === '실버' ? '실물 NFT 카드 2장 + 응모권 1장이 지급됩니다'
+                          : membership.nextTier === '골드' ? '실물 NFT 카드 3장 + 응모권 3장이 지급됩니다'
+                          : '등급이 상승합니다'
                       : `조건: 시즌 입장 ${membership.nextTierCount}회`}
                 </p>
               </div>

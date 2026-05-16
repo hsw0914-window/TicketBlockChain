@@ -15,6 +15,7 @@ const combineRoute   = require('./routes/combine');
 const marketRoute       = require('./routes/market');
 const ticketResaleRoute = require('./routes/ticketResale');
 const txHistoryRoute    = require('./routes/txHistory');
+const exchangeRoute     = require('./routes/exchange');
 
 const app = express();
 app.use(cors({
@@ -49,6 +50,7 @@ async function start() {
   marketRoute.setPool(pool);
   ticketResaleRoute.setPool(pool);
   txHistoryRoute.setPool(pool);
+  exchangeRoute.setPool(pool);
 
   // ─── 신규 라우트 ────────────────────────────────────────
   app.use('/api/auth',       authRoute.router);
@@ -61,6 +63,7 @@ async function start() {
   app.use('/api/market',        marketRoute.router);
   app.use('/api/ticket-resale', ticketResaleRoute.router);
   app.use('/api/tx-history',   txHistoryRoute.router);
+  app.use('/api/exchange',     exchangeRoute.router);
 
   // 업로드 이미지 정적 서빙
   app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));

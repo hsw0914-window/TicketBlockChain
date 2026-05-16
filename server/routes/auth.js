@@ -218,6 +218,7 @@ const { mintFragmentOnChain } = require('../services/nftService');
 const TIER_ORDER = ['일반', '브론즈', '실버', '골드'];
 const TIER_REQUIREMENTS = { '브론즈': 3, '실버': 6, '골드': 10 };
 const TIER_RAFFLE_REWARDS = { '실버': 1, '골드': 3 };
+const TIER_CARD_REWARDS = { '브론즈': 1, '실버': 2, '골드': 3 };
 
 // GET /api/auth/membership — 멤버십 현황 조회
 router.get('/membership', requireAuth, async (req, res) => {
@@ -312,13 +313,36 @@ router.post('/tier-up', requireAuth, async (req, res) => {
       }
     }
 
+    // NFT 카드 지급
+    const cardCount = TIER_CARD_REWARDS[nextTier] || 0;
+    const awardedCards = [];
+    if (cardCount > 0) {
+      const [cardTypes] = await _pool.query('SELECT id, team, name, image_url, note FROM card_types');
+      for (let i = 0; i < cardCount; i++) {
+        const cardType = cardTypes[Math.floor(Math.random() * cardTypes.length)];
+        const nftId = `#TIER-${crypto.randomBytes(8).toString('hex')}`;
+        await _pool.query(
+          `INSERT INTO user_cards (user_id, card_type_id, nft_id, display_team, display_name, display_image_url, display_note, source_mode)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'tier-reward')`,
+          [userId, cardType.id, nftId, cardType.team, cardType.name, cardType.image_url, cardType.note]
+        );
+        awardedCards.push({ nftId, name: cardType.name, image: cardType.image_url });
+      }
+    }
+
+    const msgParts = [];
+    if (cardCount > 0) msgParts.push(`실물 NFT 카드 ${cardCount}장`);
+    if (raffleCount > 0) msgParts.push(`응모권 ${raffleCount}장`);
+
     res.json({
       success: true,
       newTier: nextTier,
       raffleCount,
+      cardCount,
+      awardedCards,
       txHash: lastTxHash,
-      message: raffleCount > 0
-        ? `${nextTier} 등급으로 업그레이드! 응모권 ${raffleCount}장이 지급되었습니다.`
+      message: msgParts.length > 0
+        ? `${nextTier} 등급으로 업그레이드! ${msgParts.join(', ')}이 지급되었습니다.`
         : `${nextTier} 등급으로 업그레이드되었습니다!`,
     });
   } catch (err) {

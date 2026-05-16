@@ -17,7 +17,8 @@ import {
   ExternalLink,
   History,
 } from "lucide-react";
-import { GiBaseballGlove } from "react-icons/gi";
+import { GiBaseballBat, GiBaseballGlove } from "react-icons/gi";
+import { FaBaseballBall, FaTrophy } from "react-icons/fa";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -283,7 +284,6 @@ export function MyPage() {
         style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" }}
       >
         <div className="mb-6 flex items-center gap-3">
-          <Settings2 className="h-5 w-5" style={{ color: "#526183" }} />
           <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>내 활동 내역</h2>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -298,7 +298,6 @@ export function MyPage() {
               className="rounded-[24px] border h-[140px] transition-all hover:brightness-95 group flex flex-col items-center justify-center gap-2"
               style={{ background: item.bg, borderColor: item.border }}
             >
-              <item.icon className="h-10 w-10 transition-transform group-hover:scale-110" style={{ color: item.text }} />
               <div className="text-center">
                 <p className="text-[1rem] font-bold" style={{ color: item.text, opacity: 0.9 }}>{item.label}</p>
                 <p className="text-[1.8rem] font-black" style={{ color: item.text }}>{item.count}</p>
@@ -311,8 +310,8 @@ export function MyPage() {
             className="group relative col-span-2 overflow-hidden rounded-[24px] border h-[140px] transition-all hover:brightness-95 md:col-span-1"
             style={{
               background: "linear-gradient(145deg, #f8fbff 0%, #eefcf7 100%)",
-              borderColor: "#cbd5e1",
-              boxShadow: `inset 0 4px 0 ${{ 일반: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b"}, inset -4px 0 0 ${{ 일반: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8"}`,
+              borderColor: { 일반: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8",
+              borderWidth: 2,
             }}
           >
             <div className="flex h-full flex-col items-center justify-center gap-1.5">
@@ -331,7 +330,18 @@ export function MyPage() {
                     color: { 일반: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b",
                   }}
                 >
-                  <GiBaseballGlove className="h-6 w-6" />
+                  {memberTier === "골드" ? (
+                    <FaTrophy className="h-5 w-5" />
+                  ) : memberTier === "브론즈" ? (
+                    <div className="relative h-6 w-6">
+                      <GiBaseballBat className="absolute left-0 top-0 h-6 w-6 -rotate-[32deg]" />
+                      <FaBaseballBall className="absolute bottom-0 right-0 h-3 w-3" />
+                    </div>
+                  ) : memberTier === "일반" ? (
+                    <FaBaseballBall className="h-5 w-5" />
+                  ) : (
+                    <GiBaseballGlove className="h-6 w-6" />
+                  )}
                 </div>
               </div>
               <div className="text-center">
