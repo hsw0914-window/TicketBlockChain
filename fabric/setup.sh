@@ -81,6 +81,11 @@ if $RESET || [ ! -d "$BASIC_NET/organizations/peerOrganizations" ]; then
   echo "[ 2/7 ] 기존 네트워크 정리..."
   cd "$DOCKER_DIR"
   $DC -f docker-compose-test-net.yaml down --volumes --remove-orphans 2>/dev/null || true
+  # 잔여 컨테이너 강제 제거
+  for c in orderer.example.com peer0.org1.example.com peer0.org2.example.com \
+            ca.org1.example.com ca.org2.example.com cli; do
+    docker rm -f "$c" 2>/dev/null || true
+  done
   rm -rf "$BASIC_NET/organizations/peerOrganizations"
   rm -rf "$BASIC_NET/organizations/ordererOrganizations"
   rm -rf "$BASIC_NET/system-genesis-block"
