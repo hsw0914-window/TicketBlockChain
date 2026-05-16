@@ -306,7 +306,7 @@ export function TicketResale() {
       const provider = new BrowserProvider(window.ethereum!);
       const signer = await provider.getSigner();
       sellerWalletAddress = await signer.getAddress();
-      listingMessage = `Listing ticket ${selectedTicket.id} for ${price} KRW at ${Date.now()}`;
+      listingMessage = `Listing ticket ${selectedTicket.id} seat ${selectedTicket.seatSection} for ${price} KRW at ${Date.now()}`;
       listingSignature = await signer.signMessage(listingMessage);
     } catch (err: unknown) {
       const e = err as { code?: number; message?: string };
