@@ -90,7 +90,7 @@ if $RESET || [ ! -d "$BASIC_NET/organizations/peerOrganizations" ]; then
   rm -rf "$BASIC_NET/organizations/ordererOrganizations"
   rm -rf "$BASIC_NET/system-genesis-block"
   rm -rf "$BASIC_NET/channel-artifacts"
-  rm -rf "$APP_DIR/wallet"
+  rm -rf "$FABRIC_DIR/wallet"
   echo "✅ 정리 완료"
 fi
 
