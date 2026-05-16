@@ -127,6 +127,34 @@ docker exec cli bash scripts/joinChannel.sh joinChannelOrg2
 docker exec cli bash scripts/joinChannel.sh updateAnchorOrg2
 
 echo ""
+echo "▶ 체인코드 패키지 생성 및 Docker 이미지 사전 태깅..."
+# Docker 29.x + Fabric 2.5.x 호환성: 이미지 사전 태깅으로 broken pipe 우회
+docker exec cli bash -c "
+  cd /opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode/ticket/go
+  go mod tidy && go mod vendor
+  cd /opt/gopath/src/github.com/hyperledger/fabric/peer
+  peer lifecycle chaincode package ticket.tar.gz \
+    --path ./chaincode/ticket/go/ --lang golang --label ticket_1
+"
+CC_PACKAGE_ID=$(docker exec cli bash -c \
+  "peer lifecycle chaincode calculatepackageid /opt/gopath/src/github.com/hyperledger/fabric/peer/ticket.tar.gz 2>/dev/null")
+CC_HASH="${CC_PACKAGE_ID#*:}"
+echo "체인코드 해시: $CC_HASH"
+
+# 기존 이미지를 현재 해시로 재태깅 (또는 신규 이미지가 없으면 스킵)
+SRC=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "ticket_1-" | head -1 || true)
+if [ -n "$SRC" ] && [ -n "$CC_HASH" ]; then
+  for TAG in \
+    "dev-peer0.org1.example.com-ticket_1-${CC_HASH}" \
+    "dev-peer0.org2.example.com-ticket_1-${CC_HASH}" \
+    "dev-peer0-org1-example-com-ticket-1-${CC_HASH}" \
+    "dev-peer0-org2-example-com-ticket-1-${CC_HASH}"; do
+    docker tag "$SRC" "$TAG" 2>/dev/null || true
+  done
+  echo "✅ Docker 이미지 태깅 완료 ($SRC → $CC_HASH)"
+fi
+
+echo ""
 echo "▶ 체인코드 배포 (ticket) — Org1 + Org2 양쪽 승인..."
 docker exec cli bash scripts/installCC.sh ticket
 

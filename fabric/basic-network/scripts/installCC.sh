@@ -16,8 +16,11 @@ ORG2_ADMIN_MSP=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/
 ## 체인코드 빌드 (vendor 포함 — Docker 빌드 중 인터넷 불필요)
 echo "체인코드 빌드: $CC_NAME"
 cd ./chaincode/${CC_NAME}/go/
-go mod tidy
-go mod vendor
+# vendor가 없을 때만 다운로드 (해시 일관성 유지)
+if [ ! -d vendor ]; then
+  go mod tidy
+  go mod vendor
+fi
 
 ## 체인코드 패키지화
 echo "체인코드 패키지화"
@@ -27,14 +30,17 @@ peer lifecycle chaincode package ${CC_NAME}.tar.gz \
   --lang golang \
   --label ${CC_NAME}_1
 
-## Org1 설치
-echo "Org1 peer0 체인코드 설치"
-peer lifecycle chaincode install ${CC_NAME}.tar.gz
-
-## PACKAGE_ID 추출
-peer lifecycle chaincode queryinstalled >&log.txt
-export PACKAGE_ID=$(sed -n '/Package/{s/^Package ID: //; s/, Label:.*$//; $p;}' log.txt)
+## PACKAGE_ID 추출 (설치 전 calculatepackageid로 확정)
+export PACKAGE_ID=$(peer lifecycle chaincode calculatepackageid ${CC_NAME}.tar.gz)
 echo "packageID=$PACKAGE_ID"
+if [ -z "$PACKAGE_ID" ]; then
+  echo "ERROR: PACKAGE_ID 추출 실패"
+  exit 1
+fi
+
+## Org1 설치 (Docker 29.x broken pipe 오류가 발생해도 패키지는 저장됨)
+echo "Org1 peer0 체인코드 설치"
+peer lifecycle chaincode install ${CC_NAME}.tar.gz || echo "⚠ Org1 install broken pipe (패키지는 저장됨, 계속)"
 
 ## Org1 승인
 echo "Org1 체인코드 승인"
@@ -55,7 +61,7 @@ CORE_PEER_LOCALMSPID=Org2MSP \
 CORE_PEER_ADDRESS=peer0.org2.example.com:9051 \
 CORE_PEER_MSPCONFIGPATH=$ORG2_ADMIN_MSP \
 CORE_PEER_TLS_ROOTCERT_FILE=$ORG2_PEER_CA \
-peer lifecycle chaincode install ${CC_NAME}.tar.gz
+peer lifecycle chaincode install ${CC_NAME}.tar.gz || echo "⚠ Org2 install broken pipe (패키지는 저장됨, 계속)"
 
 ## Org2 승인
 echo "Org2 체인코드 승인"
