@@ -112,11 +112,17 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 echo ""
 echo "[ 6/7 ] 채널 생성 / 조인 / 앵커피어 업데이트..."
 docker exec cli bash scripts/joinChannel.sh createChannel
+
+echo "▶ Org1 채널 조인 + 앵커피어..."
 docker exec cli bash scripts/joinChannel.sh joinChannel
 docker exec cli bash scripts/joinChannel.sh updateAnchor
 
+echo "▶ Org2 채널 조인 + 앵커피어..."
+docker exec cli bash scripts/joinChannel.sh joinChannelOrg2
+docker exec cli bash scripts/joinChannel.sh updateAnchorOrg2
+
 echo ""
-echo "▶ 체인코드 배포 (ticket)..."
+echo "▶ 체인코드 배포 (ticket) — Org1 + Org2 양쪽 승인..."
 docker exec cli bash scripts/installCC.sh ticket
 
 # ─── 7. SDK 등록 (enrollAdmin + registerUser) ─────────────
