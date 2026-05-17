@@ -169,7 +169,7 @@ router.get('/listings', optionalAuth, async (req, res) => {
   const { team, sort } = req.query;
   const userId = req.user?.user_id ?? null;
   try {
-    const conditions = ["tl.status = 'active'", 'tl.game_date >= CURDATE()'];
+    const conditions = ["tl.status = 'active'"];
     const params = [];
     if (team) {
       const teams = Array.isArray(team) ? team : [team];
@@ -226,7 +226,7 @@ router.get('/my', requireAuth, async (req, res) => {
          tl.price_wei AS priceWei,
          tl.status, tl.created_at AS createdAtRaw
        FROM ticket_listings tl
-       WHERE tl.seller_id = ? AND tl.status = 'active' AND tl.game_date >= CURDATE()
+       WHERE tl.seller_id = ? AND tl.status = 'active'
        ORDER BY tl.game_date ASC, tl.created_at DESC`,
       [userId],
     );
