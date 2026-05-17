@@ -271,6 +271,7 @@ export function TicketResale() {
         body: JSON.stringify({
           ticketId: selectedTicket.id,
           listedPrice: price,
+          nftTokenId: selectedTicket.tokenId ?? null,
           sellerWalletAddress,
           listingMessage,
           listingSignature,

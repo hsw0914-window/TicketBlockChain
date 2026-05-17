@@ -404,7 +404,7 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
        FROM ticket_listings tl
        JOIN users u ON u.user_id = tl.seller_id
        LEFT JOIN user_wallets uw ON uw.user_id = tl.seller_id
-       WHERE tl.id = ? AND tl.status = 'active' AND tl.game_date >= CURDATE()
+       WHERE tl.id = ? AND tl.status = 'active'
        FOR UPDATE`,
       [req.params.id],
     );
@@ -527,10 +527,6 @@ router.delete('/listings/:id', requireAuth, async (req, res) => {
     if (!listing) {
       await conn.rollback();
       return res.status(404).json({ error: '취소할 수 있는 티켓이 없습니다' });
-    }
-    if (!listing.nft_token_id) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'NFT 발급 기록이 없는 티켓은 블록체인 취소가 불가능합니다' });
     }
     await conn.query(
       `UPDATE ticket_listings SET status = 'cancelled' WHERE id = ?`,
