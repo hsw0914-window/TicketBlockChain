@@ -422,14 +422,17 @@ export function MyTickets() {
   const [apiTickets, setApiTickets] = useState<NormalizedTicket[]>([]);
 
   useEffect(() => {
-    if (!walletAddress) return;
-    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/${walletAddress}`)
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((res) => res.json())
       .then((data) => {
         if (data.success) setApiTickets(data.data.map(normalizeApiTicket));
       })
       .catch((err) => console.error("내 티켓 조회 실패:", err));
-  }, [walletAddress]);
+  }, []);
 
   const handleRefunded = useCallback((ticketId: string) => {
     setApiTickets(prev => prev.filter(t => t.ticketId !== ticketId));
@@ -486,17 +489,8 @@ export function MyTickets() {
         </p>
       </div>
 
-      {/* 지갑 미연결 */}
-      {!walletAddress && (
-        <div className="rounded-[24px] px-6 py-10 text-center mb-6"
-          style={{ background: "#f8fbfd", border: "1px solid #d8e3ec", boxShadow: "0 12px 28px rgba(17,40,73,0.05)" }}>
-          <p className="text-[1rem] font-semibold" style={{ color: "#21354b" }}>MetaMask 지갑을 연결해주세요.</p>
-          <p className="mt-2 text-[0.88rem]" style={{ color: "#6d7d90" }}>지갑 연결 후 예매한 티켓을 확인할 수 있습니다.</p>
-        </div>
-      )}
-
       {/* 빈 상태 */}
-      {walletAddress && visibleTickets.length === 0 && (
+      {visibleTickets.length === 0 && (
         <div className="rounded-[24px] px-6 py-10 text-center mb-6"
           style={{ background: "#f8fbfd", border: "1px solid #d8e3ec", boxShadow: "0 12px 28px rgba(17,40,73,0.05)" }}>
           <p className="text-[1rem] font-semibold" style={{ color: "#21354b" }}>

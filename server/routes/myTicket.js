@@ -1,4 +1,5 @@
 const express = require("express");
+const { requireAuth, optionalAuth } = require("../middleware/auth");
 
 const router = express.Router();
 let _pool;
@@ -55,13 +56,16 @@ router.get("/nearest/:walletAddress", async (req, res) => {
   }
 });
 
-// ─── 내 입장권 목록 ───────────────────────────────────────
-router.get("/:walletAddress", async (req, res) => {
+// ─── 내 입장권 목록 (auth 기반) ──────────────────────────
+router.get("/", requireAuth, async (req, res) => {
   try {
-    const { walletAddress } = req.params;
-
-    if (!walletAddress) {
-      return res.status(400).json({ success: false, message: "지갑 주소가 필요합니다" });
+    const userId = req.user.user_id;
+    const [[walletRow]] = await _pool.query(
+      "SELECT wallet_address FROM user_wallets WHERE user_id = ?",
+      [userId],
+    );
+    if (!walletRow?.wallet_address) {
+      return res.json({ success: true, data: [] });
     }
 
     const [rows] = await _pool.query(
@@ -75,7 +79,7 @@ router.get("/:walletAddress", async (req, res) => {
        LEFT JOIN stadiums s ON g.stadium_id = s.id
        WHERE t.wallet_address = ?
        ORDER BY t.booked_at DESC`,
-      [walletAddress],
+      [walletRow.wallet_address],
     );
 
     res.json({ success: true, data: rows.map(normalizeTicket) });

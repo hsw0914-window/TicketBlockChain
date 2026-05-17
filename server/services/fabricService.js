@@ -237,6 +237,10 @@ async function getAllDraws() {
   return JSON.parse(raw);
 }
 
+async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, transferPrice }) {
+  await submitTx('TransferTicket', ticketId, fromWalletAddress, toWalletAddress, String(transferPrice));
+}
+
 // seedUser는 mock 전용 — real Fabric에서는 불필요
 function seedUser() {}
 
@@ -270,5 +274,6 @@ module.exports = {
   getUserRaffleNFTs,
   getDraw,
   getAllDraws,
+  transferTicket,
   seedUser,
 };

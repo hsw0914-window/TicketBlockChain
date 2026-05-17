@@ -328,6 +328,7 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
   const {
     paymentKey, orderId, amount,
     walletAddress, gameId, stadium, grade, block, seats,
+    pointDiscount,
   } = req.body;
 
   if (!paymentKey || !orderId || !amount) {
@@ -448,6 +449,20 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
       }
     } catch (boxErr) {
       console.error('[toss] 박스 지급 실패 (무시):', boxErr.message);
+    }
+
+    // 포인트 차감
+    if (pointDiscount > 0 && ticketResults.length > 0) {
+      try {
+        const userDidHash = fabricService.hashDid(verifiedWalletAddress);
+        await fabricService.usePointForTicket({
+          userDidHash,
+          ticketId: ticketResults[0].ticketId,
+          pointAmount: Number(pointDiscount),
+        });
+      } catch (pointErr) {
+        console.error('[toss] 포인트 차감 실패 (무시):', pointErr.message);
+      }
     }
 
     res.json({ success: true, data: { tickets: ticketResults, boxTxHash, paymentKey } });
