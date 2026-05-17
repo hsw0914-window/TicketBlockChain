@@ -133,6 +133,8 @@ router.post('/verify', async (req, res) => {
       ]
     );
 
+    console.log(`[entry] 입장 완료 - 티켓: ${ticketId} | 포인트 적립: ${fabricResult.earnedPoint ?? 0}P | 등급: ${fabricResult.membershipGrade ?? '-'}`);
+
     return res.json({
       allowed:         true,
       ticketId,

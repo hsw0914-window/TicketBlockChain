@@ -472,6 +472,7 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
               rate:        0.003,
             });
             earnedPoint = result.earnedPoint;
+            console.log(`[ticketResale] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.listed_price}원 × 0.3%)`);
           }
         }
       } catch (pointErr) {

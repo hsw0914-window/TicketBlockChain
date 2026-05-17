@@ -460,6 +460,7 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
           ticketId: ticketResults[0].ticketId,
           pointAmount: Number(pointDiscount),
         });
+        console.log(`[toss] 포인트 차감 완료: ${pointDiscount}P (티켓 ${ticketResults[0].ticketId})`);
       } catch (pointErr) {
         console.error('[toss] 포인트 차감 실패 (무시):', pointErr.message);
       }
