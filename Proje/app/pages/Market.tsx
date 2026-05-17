@@ -331,7 +331,7 @@ export function Market() {
     if (!tossBuyWidgets || !tossBuyListingRef.current) return;
     setIsPurchasing(true);
     const listing = tossBuyListingRef.current;
-    const orderId = `fragment-${listing.id}-${crypto.randomUUID()}`;
+    const orderId = `fr-${crypto.randomUUID()}`;
     sessionStorage.setItem(`toss_fragment_${orderId}`, JSON.stringify({
       listingId:    listing.id,
       fragmentName: selectedFragment.fragmentName,
