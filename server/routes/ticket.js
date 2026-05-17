@@ -430,6 +430,9 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
       })
     );
 
+    const seatList = ticketRows.map(t => `${block}블록 ${t.row}열 ${t.seatNumber}번`).join(', ');
+    console.log(`[toss] 예매 완료: ${gameRow?.home_team} vs ${gameRow?.away_team} | ${seats.length}석 (${seatList}) | ${amount}원 | 지갑: ${verifiedWalletAddress.slice(0, 10)}...`);
+
     // 6. 박스 NFT 지급 (좌석 수만큼)
     let boxTxHash = null;
     try {
@@ -446,6 +449,7 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
         if (process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS) {
           boxTxHash = await mintBoxOnChain(verifiedWalletAddress);
         }
+        console.log(`[toss] 박스 NFT ${seats.length}개 지급 완료 (user: ${walletRow.user_id})`);
       }
     } catch (boxErr) {
       console.error('[toss] 박스 지급 실패 (무시):', boxErr.message);

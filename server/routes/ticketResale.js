@@ -372,6 +372,7 @@ router.post('/listings', requireAuth, async (req, res) => {
 
     await conn.query(`UPDATE tickets SET status = 'listed' WHERE id = ?`, [ticketId]);
     await conn.commit();
+    console.log(`[ticketResale] 매물 등록: ${ticket.homeTeam} vs ${ticket.awayTeam} | ${ticket.seatSection} | ${listedPrice}원 | 판매자: ${userId}`);
     res.json({ listingId });
   } catch (err) {
     await conn.rollback();
@@ -440,6 +441,9 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
       );
       newTicketId = await ensureTransferredTicket(conn, listing, buyerWalletAddress);
       await conn.commit();
+
+      const { grossAmount: ga, platformFee: pf, settlementAmount: sa } = calculateTicketSettlement(listing.listed_price);
+      console.log(`[ticketResale] 거래 완료: ${listing.home_team} vs ${listing.away_team} | ${listing.seat_section} | 결제 ${ga}원 (수수료 ${pf}원, 정산 ${sa}원) | 구매자: ${userId}`);
 
       // Fabric TransferTicket 기록
       try {
@@ -537,6 +541,7 @@ router.delete('/listings/:id', requireAuth, async (req, res) => {
       await conn.query(`UPDATE tickets SET status = 'confirmed' WHERE id = ?`, [listing.ticket_id]);
     }
     await conn.commit();
+    console.log(`[ticketResale] 매물 취소: listingId ${req.params.id} | 티켓 ${listing.ticket_id} → 상태 복구 | 판매자: ${userId}`);
     res.json({ success: true });
   } catch (err) {
     await conn.rollback();

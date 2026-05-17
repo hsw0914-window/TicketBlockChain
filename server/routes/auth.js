@@ -39,6 +39,7 @@ router.post('/register', async (req, res) => {
     );
 
     const token = jwt.sign({ sub: user_id }, jwtSecret(), { expiresIn: '7d' });
+    console.log(`[auth] 회원가입: ${email} | 닉네임: ${nickname} | ID: ${user_id}`);
     res.status(201).json({ token, user: { user_id, nickname, email } });
   } catch (err) {
     console.error('[register]', err);
@@ -68,6 +69,7 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
+    console.log(`[auth] 로그인: ${email} | ID: ${user.user_id}`);
     res.json({ token, user: { user_id: user.user_id, nickname: user.nickname, email: user.email } });
   } catch (err) {
     console.error('[login]', err);
@@ -119,6 +121,7 @@ router.post('/google', async (req, res) => {
     if (!user.is_active) return res.status(403).json({ error: '비활성화된 계정입니다.' });
 
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
+    console.log(`[auth] 구글 로그인: ${email} | ID: ${user.user_id}`);
     res.json({
       token,
       user: {

@@ -460,6 +460,7 @@ router.post('/buy', requireAuth, async (req, res) => {
           rate:   0.001,
         });
         earnedPoint = result.earnedPoint;
+        console.log(`[market] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.price}원 × 0.1%)`);
       }
     } catch (pointErr) {
       console.error('[market] 포인트 적립 실패:', pointErr.message);
@@ -471,6 +472,8 @@ router.post('/buy', requireAuth, async (req, res) => {
     );
     const assetId = assetRow?.id ?? fragmentId ?? listing.fragment_type_id;
     const updatedFragment = await buildFragmentMarket(assetId, userId);
+
+    console.log(`[market] 파편 거래 완료: ${assetRow?.asset_name ?? listing.fragment_type_id} | ${listing.price}원 | 구매자: ${userId} | 판매자: ${listing.seller_id}`);
 
     res.json({
       receipt: { fragmentId: assetId, sellerName: listing.seller_name, price: listing.price, earnedPoint },
@@ -936,6 +939,7 @@ router.post('/toss-confirm', requireAuth, async (req, res) => {
             rate:   0.001,
           });
           earnedPoint = result.earnedPoint;
+          console.log(`[market/toss-confirm] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.price}원 × 0.1%)`);
         }
       } catch (pointErr) {
         console.error('[market/toss-confirm] 포인트 적립 실패:', pointErr.message);
@@ -945,6 +949,8 @@ router.post('/toss-confirm', requireAuth, async (req, res) => {
         'SELECT id, idol, asset_name FROM market_assets WHERE fragment_type_id = ? LIMIT 1',
         [listing.fragment_type_id]
       );
+
+      console.log(`[market/toss-confirm] 파편 거래 완료 (토스): ${assetRow?.asset_name ?? listing.fragment_type_id} | ${listing.price}원 | 구매자: ${userId}`);
 
       res.json({
         success: true,
