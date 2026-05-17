@@ -291,11 +291,12 @@ router.get("/:ticketId/qr", async (req, res) => {
     const msUntilGame    = gameDateTime.getTime() - nowMs;
     const hoursUntilGame = msUntilGame / (1000 * 60 * 60);
 
-    // 경기 시작 2시간 전부터만 QR 활성화
-    if (hoursUntilGame > 2) {
+    // 경기 시작 N시간 전부터 QR 활성화 (QR_HOURS_BEFORE 환경변수로 제어, 기본 2시간)
+    const qrHoursBefore = Number(process.env.QR_HOURS_BEFORE ?? 2);
+    if (hoursUntilGame > qrHoursBefore) {
       return res.json({
         available: false,
-        message:   "경기 시작 2시간 전부터 QR 조회 가능",
+        message:   `경기 시작 ${qrHoursBefore}시간 전부터 QR 조회 가능`,
       });
     }
 

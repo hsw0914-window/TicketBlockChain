@@ -107,25 +107,49 @@ const TEST_USER = {
 };
 
 const SEED_STADIUMS = [
-  { id: "jamsil",  name: "잠실야구장",              location: "서울특별시 송파구",   capacity: 25000 },
-  { id: "sajik",   name: "사직야구장",              location: "부산광역시 동래구",   capacity: 24000 },
-  { id: "munhak",  name: "인천SSG랜더스필드",        location: "인천광역시 미추홀구", capacity: 23000 },
-  { id: "gochuck", name: "고척스카이돔",             location: "서울특별시 구로구",   capacity: 16744 },
-  { id: "gwangju", name: "광주-기아 챔피언스 필드",  location: "광주광역시 북구",     capacity: 20000 },
-  { id: "daejeon", name: "한화생명 이글스파크",      location: "대전광역시 중구",     capacity: 13000 },
+  { id: "jamsil",   name: "잠실야구장",              location: "서울특별시 송파구",    capacity: 25000 },
+  { id: "sajik",    name: "사직야구장",              location: "부산광역시 동래구",    capacity: 24000 },
+  { id: "munhak",   name: "인천SSG랜더스필드",       location: "인천광역시 미추홀구",  capacity: 23000 },
+  { id: "gochuck",  name: "고척스카이돔",            location: "서울특별시 구로구",    capacity: 16744 },
+  { id: "gwangju",  name: "광주-기아 챔피언스 필드", location: "광주광역시 북구",      capacity: 20000 },
+  { id: "daejeon",  name: "한화생명 이글스파크",     location: "대전광역시 중구",      capacity: 13000 },
+  { id: "daegu",    name: "삼성 라이온즈파크",       location: "대구광역시 수성구",    capacity: 24000 },
+  { id: "changwon", name: "창원NC파크",              location: "경상남도 창원시 마산", capacity: 22000 },
+  { id: "suwon",    name: "수원KT위즈파크",          location: "경기도 수원시 장안구", capacity: 20000 },
 ];
 
 const SEED_GAMES = [
-  { id: "G001", home_team: "두산", away_team: "LG",  game_date: "2026-05-15", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
-  { id: "G002", home_team: "삼성", away_team: "KT",  game_date: "2026-05-15", game_time: "14:00:00", stadium_id: "munhak",  status: "ALMOST",   base_price: 13000 },
-  { id: "G003", home_team: "롯데", away_team: "NC",  game_date: "2026-05-15", game_time: "14:00:00", stadium_id: "sajik",   status: "SOLDOUT",  base_price: 13000 },
-  { id: "G004", home_team: "삼성", away_team: "LG",  game_date: "2026-05-16", game_time: "18:30:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
-  { id: "G005", home_team: "키움", away_team: "한화", game_date: "2026-05-16", game_time: "18:30:00", stadium_id: "gochuck", status: "OPEN",     base_price: 13000 },
-  { id: "G006", home_team: "KIA",  away_team: "두산", game_date: "2026-05-16", game_time: "18:30:00", stadium_id: "gwangju", status: "UPCOMING", base_price: 13000 },
-  { id: "G007", home_team: "LG",   away_team: "NC",  game_date: "2026-05-20", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
-  { id: "G008", home_team: "한화", away_team: "SSG", game_date: "2026-05-20", game_time: "14:00:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000 },
-  { id: "G009", home_team: "두산", away_team: "키움", game_date: "2026-05-23", game_time: "18:30:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
-  { id: "G010", home_team: "KIA",  away_team: "롯데", game_date: "2026-05-23", game_time: "18:30:00", stadium_id: "sajik",   status: "UPCOMING", base_price: 13000 },
+  // ── 5월 초 (과거 경기, 이미 종료) ──────────────────────────
+  { id: "G001", home_team: "두산", away_team: "LG",   game_date: "2026-05-02", game_time: "18:30:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G002", home_team: "KIA",  away_team: "삼성",  game_date: "2026-05-03", game_time: "14:00:00", stadium_id: "gwangju", status: "SOLDOUT",  base_price: 13000 },
+  { id: "G003", home_team: "롯데", away_team: "NC",   game_date: "2026-05-04", game_time: "14:00:00", stadium_id: "sajik",   status: "SOLDOUT",  base_price: 13000 },
+  { id: "G004", home_team: "한화", away_team: "SSG",  game_date: "2026-05-06", game_time: "18:30:00", stadium_id: "daejeon", status: "SOLDOUT",  base_price: 13000 },
+  { id: "G005", home_team: "키움", away_team: "KT",   game_date: "2026-05-07", game_time: "18:30:00", stadium_id: "gochuck", status: "SOLDOUT",  base_price: 13000 },
+  { id: "G006", home_team: "LG",   away_team: "두산",  game_date: "2026-05-09", game_time: "18:30:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G007", home_team: "삼성", away_team: "롯데",  game_date: "2026-05-10", game_time: "14:00:00", stadium_id: "daegu",   status: "SOLDOUT",  base_price: 13000 },
+  { id: "G008", home_team: "NC",   away_team: "KIA",   game_date: "2026-05-13", game_time: "18:30:00", stadium_id: "changwon",status: "SOLDOUT",  base_price: 13000 },
+  { id: "G009", home_team: "SSG",  away_team: "한화",  game_date: "2026-05-14", game_time: "18:30:00", stadium_id: "munhak",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G010", home_team: "두산", away_team: "KT",   game_date: "2026-05-15", game_time: "14:00:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G011", home_team: "LG",   away_team: "키움",  game_date: "2026-05-16", game_time: "14:00:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G012", home_team: "KIA",  away_team: "NC",   game_date: "2026-05-17", game_time: "14:00:00", stadium_id: "gwangju", status: "ALMOST",   base_price: 13000 },
+  // ── 5월 18~19일 (오늘 / 내일 — QR·환불 테스트용) ──────────
+  { id: "G013", home_team: "두산", away_team: "한화",  game_date: "2026-05-18", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G014", home_team: "LG",   away_team: "삼성",  game_date: "2026-05-18", game_time: "18:30:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G015", home_team: "KIA",  away_team: "SSG",  game_date: "2026-05-18", game_time: "18:30:00", stadium_id: "gwangju", status: "OPEN",     base_price: 13000 },
+  { id: "G016", home_team: "롯데", away_team: "KT",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "sajik",   status: "OPEN",     base_price: 13000 },
+  { id: "G017", home_team: "키움", away_team: "NC",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "gochuck", status: "OPEN",     base_price: 13000 },
+  // ── 5월 20일~말 (예매 가능 / UPCOMING) ─────────────────────
+  { id: "G018", home_team: "한화", away_team: "두산",  game_date: "2026-05-20", game_time: "18:30:00", stadium_id: "daejeon", status: "OPEN",     base_price: 13000 },
+  { id: "G019", home_team: "삼성", away_team: "LG",   game_date: "2026-05-21", game_time: "18:30:00", stadium_id: "daegu",   status: "OPEN",     base_price: 13000 },
+  { id: "G020", home_team: "SSG",  away_team: "KIA",   game_date: "2026-05-22", game_time: "18:30:00", stadium_id: "munhak",  status: "OPEN",     base_price: 13000 },
+  { id: "G021", home_team: "두산", away_team: "NC",   game_date: "2026-05-23", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G022", home_team: "KIA",  away_team: "롯데",  game_date: "2026-05-24", game_time: "14:00:00", stadium_id: "gwangju", status: "ALMOST",   base_price: 13000 },
+  { id: "G023", home_team: "LG",   away_team: "한화",  game_date: "2026-05-25", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
+  { id: "G024", home_team: "KT",   away_team: "키움",  game_date: "2026-05-27", game_time: "18:30:00", stadium_id: "suwon",   status: "UPCOMING", base_price: 13000 },
+  { id: "G025", home_team: "NC",   away_team: "SSG",  game_date: "2026-05-28", game_time: "18:30:00", stadium_id: "changwon",status: "UPCOMING", base_price: 13000 },
+  { id: "G026", home_team: "롯데", away_team: "삼성",  game_date: "2026-05-29", game_time: "18:30:00", stadium_id: "sajik",   status: "UPCOMING", base_price: 13000 },
+  { id: "G027", home_team: "두산", away_team: "KIA",  game_date: "2026-05-30", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
+  { id: "G028", home_team: "한화", away_team: "LG",   game_date: "2026-05-31", game_time: "14:00:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000 },
 ];
 
 // ─── 초기화 함수 ──────────────────────────────────────────
