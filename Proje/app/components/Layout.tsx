@@ -72,7 +72,7 @@ export function Layout() {
     { path: "/raffle-status",    label: "응모권 NFT",   icon: Star,         adminOnly: false },
     { path: "/priority-booking", label: "우선 예매",    icon: Ticket,       adminOnly: false },
     { path: "/admin-draw",       label: "추첨 관리",    icon: Settings2,    adminOnly: true  },
-    { path: "/entry-scan",       label: "입장 스캔",    icon: ScanLine,     adminOnly: true  },
+    { path: "/entry-scan",       label: "입장 스캔",    icon: ScanLine,     adminOnly: false },
     { path: "/combine",          label: "카드 조합",    icon: Layers,       adminOnly: false },
     { path: "/market",           label: "팬 자산 장터", icon: ShoppingBag,  adminOnly: false },
     { path: "/community",        label: "커뮤니티",     icon: MessagesSquare, adminOnly: false },
