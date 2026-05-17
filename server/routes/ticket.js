@@ -128,7 +128,7 @@ router.get("/seats/:gameId", async (req, res) => {
   try {
     const { gameId } = req.params;
     const [rows] = await _pool.query(
-      "SELECT block, row_num, seat_number FROM tickets WHERE game_id = ? AND status = 'confirmed'",
+      "SELECT block, row_num, seat_number FROM tickets WHERE game_id = ? AND status IN ('confirmed', 'listed')",
       [gameId],
     );
     const bookedSeats = rows.map((t) => `${t.block}:${t.row_num}-${t.seat_number}`);

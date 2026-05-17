@@ -71,13 +71,16 @@ function NftTicketCard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!walletAddress) { setLoading(false); return; }
-    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/nearest/${walletAddress}`)
+    const token = localStorage.getItem("auth_token");
+    if (!token) { setLoading(false); return; }
+    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/nearest`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((r) => r.json())
       .then((d) => { if (d.success) setTicket(d.data); })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [walletAddress]);
+  }, []);
 
   const { qrData, formattedCountdown } = useTicketQR(
     ticket?.ticketId ?? null,

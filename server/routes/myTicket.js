@@ -28,9 +28,16 @@ function normalizeTicket(t) {
 }
 
 // ─── 가장 임박한 티켓 1장 ─────────────────────────────────
-router.get("/nearest/:walletAddress", async (req, res) => {
+router.get("/nearest", requireAuth, async (req, res) => {
   try {
-    const { walletAddress } = req.params;
+    const userId = req.user.user_id;
+    const [[walletRow]] = await _pool.query(
+      "SELECT wallet_address FROM user_wallets WHERE user_id = ?",
+      [userId],
+    );
+    if (!walletRow?.wallet_address) {
+      return res.json({ success: true, data: null });
+    }
 
     const [rows] = await _pool.query(
       `SELECT t.*,
@@ -46,7 +53,7 @@ router.get("/nearest/:walletAddress", async (req, res) => {
          AND TIMESTAMP(g.game_date, g.game_time) >= NOW()
        ORDER BY g.game_date ASC, g.game_time ASC
        LIMIT 1`,
-      [walletAddress],
+      [walletRow.wallet_address],
     );
 
     res.json({ success: true, data: rows.length ? normalizeTicket(rows[0]) : null });
@@ -90,13 +97,24 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // ─── 티켓 상세 ────────────────────────────────────────────
-router.get("/detail/:ticketId", async (req, res) => {
+router.get("/detail/:ticketId", requireAuth, async (req, res) => {
   try {
     const { ticketId } = req.params;
+    const userId = req.user.user_id;
+
+    const [[walletRow]] = await _pool.query(
+      "SELECT wallet_address FROM user_wallets WHERE user_id = ?",
+      [userId],
+    );
+
     const [rows] = await _pool.query("SELECT * FROM tickets WHERE id = ?", [ticketId]);
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: "티켓을 찾을 수 없습니다" });
+    }
+
+    if (rows[0].wallet_address !== walletRow?.wallet_address) {
+      return res.status(403).json({ success: false, message: "접근 권한이 없습니다" });
     }
 
     res.json({ success: true, data: rows[0] });
