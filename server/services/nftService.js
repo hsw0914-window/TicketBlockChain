@@ -103,6 +103,7 @@ function getTicketContract() {
  * @returns {{ txHash: string, tokenId: number }}
  */
 async function mintTicketOnChain(toAddress, { gameId, gameDate, homeTeam, awayTeam, seatSection, originalPrice }) {
+  const nonce    = await getNextNonce();
   const contract = getTicketContract();
   const tx = await contract.mint(toAddress, {
     gameId,
@@ -111,7 +112,7 @@ async function mintTicketOnChain(toAddress, { gameId, gameDate, homeTeam, awayTe
     awayTeam,
     seatSection,
     originalPrice: BigInt(Math.round(originalPrice)),
-  });
+  }, { nonce });
   const receipt = await tx.wait();
 
   // 이벤트에서 tokenId 추출

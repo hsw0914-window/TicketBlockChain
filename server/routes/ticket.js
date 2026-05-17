@@ -353,72 +353,81 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
   const ticketResults = [];
 
   try {
+    // Phase 1: 모든 좌석 DB 저장 (순서대로, 빠름)
+    const ticketRows = [];
     for (const seat of seats) {
       const { row, seatNumber, price } = seat;
-
-      // 2. DB 티켓 저장
       const ticketResult = await purchaseTicket(_pool, {
         walletAddress: verifiedWalletAddress,
         gameId, stadium, grade, block, row, seatNumber, price,
       });
-      const ticketId = ticketResult.id;
-
-      // 3. payment_key DB 저장 (환불 시 필요)
-      await _pool.query("UPDATE tickets SET payment_key = ? WHERE id = ?", [paymentKey, ticketId]);
-
-      let tokenId = null;
-      let txHash = null;
-
-      // 4. NFT 민팅
-      try {
-        const mintResult = await mintTicketOnChain(verifiedWalletAddress, {
-          gameId: String(gameId),
-          gameDate: gameRow?.game_date || '',
-          homeTeam: gameRow?.home_team || '',
-          awayTeam: gameRow?.away_team || '',
-          seatSection: `${block}-${row}-${seatNumber}`,
-          originalPrice: Number(price),
-        });
-        tokenId = mintResult.tokenId;
-        txHash = mintResult.txHash;
-        await _pool.query(
-          "UPDATE tickets SET token_id = ?, ticket_tx_hash = ? WHERE id = ?",
-          [tokenId, txHash, ticketId]
-        );
-      } catch (mintErr) {
-        console.error('[toss] NFT 민팅 실패:', mintErr.message);
-        await cancelPayment({ paymentKey, cancelReason: 'NFT 발급 실패로 인한 자동 환불', cancelAmount: amount });
-        await _pool.query("UPDATE tickets SET status = 'cancelled' WHERE id = ?", [ticketId]);
-        return res.status(500).json({ success: false, message: 'NFT 발급 실패로 자동 환불되었습니다' });
-      }
-
-      // 5. Fabric 티켓 등록
-      try {
-        const { v4: uuidv4 } = require('uuid');
-        await fabricService.registerTicket({
-          ticketId,
-          tokenId: String(tokenId || '0'),
-          gameId: String(gameId),
-          seatId: `${block}-${row}-${seatNumber}`,
-          walletAddress: verifiedWalletAddress,
-          price: Number(price),
-          purchaseType: 'PRIMARY',
-          gameDate: gameRow?.game_date || '',
-        });
-        const userDidHash = fabricService.hashDid ? fabricService.hashDid(verifiedWalletAddress) : '';
-        if (userDidHash) {
-          const reservationId = uuidv4();
-          await fabricService.createReservation({
-            reservationId, userDidHash, gameId: String(gameId), raffleNftId: '', isPriority: false,
-          });
-          await fabricService.confirmReservation({ reservationId, ticketId });
-        }
-      } catch (fabErr) {
-        console.error('[toss] Fabric 등록 실패 (무시):', fabErr.message);
-      }
-
-      ticketResults.push({ ticketId, tokenId, txHash });
+      await _pool.query("UPDATE tickets SET payment_key = ? WHERE id = ?", [paymentKey, ticketResult.id]);
+      ticketRows.push({ ticketId: ticketResult.id, row, seatNumber, price });
     }
+
+    // Phase 2: NFT 민팅 병렬 처리
+    // nftService.getNextNonce()가 뮤텍스로 nonce를 순차 할당하므로 충돌 없이 병렬 실행 가능
+    let mintedResults;
+    try {
+      mintedResults = await Promise.all(
+        ticketRows.map(({ ticketId, row, seatNumber, price }) =>
+          mintTicketOnChain(verifiedWalletAddress, {
+            gameId:        String(gameId),
+            gameDate:      gameRow?.game_date || '',
+            homeTeam:      gameRow?.home_team || '',
+            awayTeam:      gameRow?.away_team || '',
+            seatSection:   `${block}-${row}-${seatNumber}`,
+            originalPrice: Number(price),
+          }).then(async (mintResult) => {
+            await _pool.query(
+              "UPDATE tickets SET token_id = ?, ticket_tx_hash = ? WHERE id = ?",
+              [mintResult.tokenId, mintResult.txHash, ticketId]
+            );
+            return { ticketId, tokenId: mintResult.tokenId, txHash: mintResult.txHash };
+          })
+        )
+      );
+    } catch (mintErr) {
+      console.error('[toss] NFT 민팅 실패:', mintErr.message);
+      await cancelPayment({ paymentKey, cancelReason: 'NFT 발급 실패로 인한 자동 환불', cancelAmount: amount }).catch(() => {});
+      const placeholders = ticketRows.map(() => '?').join(',');
+      await _pool.query(
+        `UPDATE tickets SET status = 'cancelled' WHERE id IN (${placeholders})`,
+        ticketRows.map(r => r.ticketId)
+      ).catch(() => {});
+      return res.status(500).json({ success: false, message: 'NFT 발급 실패로 자동 환불되었습니다' });
+    }
+
+    ticketResults.push(...mintedResults);
+
+    // Phase 3: Fabric 등록 병렬 처리 (nonce 없음 — 동시 실행 안전, 실패해도 무시)
+    const { v4: uuidv4 } = require('uuid');
+    await Promise.allSettled(
+      mintedResults.map(({ ticketId, tokenId }, i) => {
+        const { row, seatNumber, price } = ticketRows[i];
+        return fabricService.registerTicket({
+          ticketId,
+          tokenId:       String(tokenId || '0'),
+          gameId:        String(gameId),
+          seatId:        `${block}-${row}-${seatNumber}`,
+          walletAddress: verifiedWalletAddress,
+          price:         Number(price),
+          purchaseType:  'PRIMARY',
+          gameDate:      gameRow?.game_date || '',
+        }).then(async () => {
+          const userDidHash = fabricService.hashDid ? fabricService.hashDid(verifiedWalletAddress) : '';
+          if (userDidHash) {
+            const reservationId = uuidv4();
+            await fabricService.createReservation({
+              reservationId, userDidHash, gameId: String(gameId), raffleNftId: '', isPriority: false,
+            });
+            await fabricService.confirmReservation({ reservationId, ticketId });
+          }
+        }).catch(fabErr => {
+          console.error('[toss] Fabric 등록 실패 (무시):', fabErr.message);
+        });
+      })
+    );
 
     // 6. 박스 NFT 지급 (좌석 수만큼)
     let boxTxHash = null;
