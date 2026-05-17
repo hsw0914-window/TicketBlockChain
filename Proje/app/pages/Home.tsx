@@ -184,7 +184,7 @@ function NftTicketCard() {
                 {qrData?.available && qrData.qrToken ? (
                   <div className="flex items-center gap-4">
                     <div className="rounded-xl overflow-hidden bg-white p-1.5 shrink-0">
-                      <QRCodeSVG value={qrData.qrToken} size={56} />
+                      <QRCodeSVG value={JSON.stringify({ ticketId: ticket?.ticketId, qrToken: qrData.qrToken })} size={56} />
                     </div>
                     <div>
                       <p className="text-xs text-[#a393d1] mb-0.5">현장 입장 QR</p>
