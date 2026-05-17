@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import {
   ArrowRight,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useAppSettings } from "../context/AppSettingsContext";
+import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
 
 // ─── API 설정 ─────────────────────────────────────────────────
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "";
@@ -134,10 +135,9 @@ function shortWallet(address: string | null | undefined) {
 }
 
 export function Market() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const viewerHandle = getMarketViewerHandle();
-  const { walletAddress, walletConnected, connectWallet, isConnectingWallet } = useAppSettings();
+  const { walletAddress } = useAppSettings();
 
   const [marketState, setMarketState] = useState<FragmentMarket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,6 +158,12 @@ export function Market() {
   const [soldOutNotice, setSoldOutNotice] = useState<{ fragmentId: string; sellerName: string; price: number } | null>(null);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [salesHistory, setSalesHistory] = useState<SaleHistoryItem[]>([]);
+
+  const [showBuyModal, setShowBuyModal]           = useState(false);
+  const [tossBuyWidgets, setTossBuyWidgets]       = useState<any>(null);
+  const [tossBuyWidgetReady, setTossBuyWidgetReady] = useState(false);
+  const [tossBuyError, setTossBuyError]           = useState("");
+  const tossBuyListingRef = useRef<MarketListing | null>(null);
 
   const fetchMarket = useCallback(async () => {
     try {
@@ -294,50 +300,54 @@ export function Market() {
     if (selectedListingId && !visibleFragmentListings.some((l) => l.id === selectedListingId)) setSelectedListingId(defaultListingId);
   }, [selectedListingId, viewerHandle, visibleFragmentListings]);
 
-  const handlePurchase = async () => {
-    if (!selectedListing || isPurchasing) return;
-    if (selectedListing.sellerHandle === viewerHandle) { alert("내가 올린 매물은 직접 구매할 수 없습니다."); return; }
+  useEffect(() => {
+    if (!showBuyModal || !tossBuyListingRef.current) return;
+    setTossBuyWidgetReady(false);
+    setTossBuyWidgets(null);
+    setTossBuyError("");
+    let cancelled = false;
+    (async () => {
+      try {
+        const tossPayments = await loadTossPayments(import.meta.env.VITE_TOSS_CLIENT_KEY as string);
+        const widgets = tossPayments.widgets({ customerKey: ANONYMOUS });
+        await widgets.setAmount({ value: tossBuyListingRef.current!.price, currency: "KRW" });
+        await widgets.renderPaymentMethods({ selector: "#toss-market-payment-widget", variantKey: "DEFAULT" });
+        await widgets.renderAgreement({ selector: "#toss-market-agreement-widget", variantKey: "AGREEMENT" });
+        if (!cancelled) { setTossBuyWidgets(widgets); setTossBuyWidgetReady(true); }
+      } catch {
+        if (!cancelled) setTossBuyError("결제 위젯 초기화에 실패했습니다.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showBuyModal]);
+
+  const handleOpenBuyModal = () => {
+    if (!selectedListing || selectedListing.sellerHandle === viewerHandle) return;
+    tossBuyListingRef.current = selectedListing;
+    setShowBuyModal(true);
+  };
+
+  const handleTossBuy = async () => {
+    if (!tossBuyWidgets || !tossBuyListingRef.current) return;
     setIsPurchasing(true);
+    const listing = tossBuyListingRef.current;
+    const orderId = `fragment-${listing.id}-${Date.now()}`;
+    sessionStorage.setItem(`toss_fragment_${orderId}`, JSON.stringify({
+      listingId:    listing.id,
+      fragmentName: selectedFragment.fragmentName,
+      sellerName:   listing.sellerName,
+      price:        listing.price,
+    }));
     try {
-      let activeWalletAddress = walletAddress;
-      if (!activeWalletAddress || !walletConnected) {
-        const connected = await connectWallet();
-        if (!connected || !window.ethereum) throw new Error("메타마스크 연결이 필요합니다.");
-        const accounts = (await window.ethereum.request({ method: "eth_accounts" })) as string[];
-        activeWalletAddress = accounts[0] ?? null;
-      }
-      if (!activeWalletAddress || !window.ethereum) throw new Error("메타마스크 지갑 주소를 확인하지 못했습니다.");
-
-      const prepareRes = await fetch(apiUrl("/api/market/buy/prepare"), {
-        method: "POST",
-        headers: API_HEADERS(activeWalletAddress),
-        body: JSON.stringify({ listingId: selectedListing.id, fragmentId: selectedFragment.id }),
+      await tossBuyWidgets.requestPayment({
+        orderId,
+        orderName: `${selectedFragment.fragmentName} 파편 구매`,
+        successUrl: `${window.location.origin}/market/fragment/buy/success`,
+        failUrl:    `${window.location.origin}/market`,
       });
-      const purchaseQuote = await parseApiResponse<{
-        listingId: string; fragmentId: string; sellerWalletAddress: string;
-        buyerWalletAddress: string; paymentAmountHex: string; paymentAmountDisplay: string; nativeSymbol: string;
-      }>(prepareRes);
-
-      const txHash = (await window.ethereum.request({
-        method: "eth_sendTransaction",
-        params: [{ from: purchaseQuote.buyerWalletAddress, to: purchaseQuote.sellerWalletAddress, value: purchaseQuote.paymentAmountHex }],
-      })) as string;
-
-      const res = await fetch(apiUrl("/api/market/buy"), {
-        method: "POST",
-        headers: API_HEADERS(activeWalletAddress),
-        body: JSON.stringify({ listingId: selectedListing.id, fragmentId: selectedFragment.id, txHash }),
-      });
-      const data = await parseApiResponse<{ updatedFragment?: FragmentMarket; soldOut?: boolean; receipt?: { fragmentId: string; sellerName: string; price: number } }>(res);
-
-      if (data.updatedFragment) {
-        setMarketState((prev) => prev.map((f) => f.id === data.updatedFragment!.id ? data.updatedFragment! : f));
-      }
-      setPurchaseReceipt({ fragmentId: selectedFragment.id, sellerName: selectedListing.sellerName, price: selectedListing.price });
-      setSoldOutNotice(data.soldOut ? { fragmentId: selectedFragment.id, sellerName: selectedListing.sellerName, price: selectedListing.price } : null);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "구매 중 오류가 발생했습니다.");
-    } finally {
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
+      if (e.code !== "USER_CANCEL") setTossBuyError(e.message ?? "결제 오류가 발생했습니다.");
       setIsPurchasing(false);
     }
   };
@@ -863,7 +873,7 @@ export function Market() {
                   </div>
 
                   <Button className="w-full h-12 text-sm font-bold disabled:opacity-50" style={{ background: isPurchasing ? "#888" : selectedListing && selectedListing.sellerHandle !== viewerHandle ? priceGreen : "#c8d6cc", color: "#102015" }}
-                    onClick={handlePurchase} disabled={isPurchasing || isConnectingWallet || !selectedListing || selectedListing.sellerHandle === viewerHandle}>
+                    onClick={handleOpenBuyModal} disabled={isPurchasing || !selectedListing || selectedListing.sellerHandle === viewerHandle}>
                     {isPurchasing ? (
                       <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />구매 처리 중...</span>
                     ) : (
@@ -1066,6 +1076,78 @@ export function Market() {
           </div>
         )}
       </section>
+
+      {/* ════════ 파편 구매 모달 (Toss) ════════ */}
+      {showBuyModal && tossBuyListingRef.current && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(17,40,73,.45)", backdropFilter: "blur(6px)" }}
+          onClick={e => { if (e.target === e.currentTarget && !isPurchasing) { setShowBuyModal(false); setTossBuyError(""); } }}>
+          <div className="w-full max-w-sm rounded-[24px] p-6 overflow-y-auto"
+            style={{ background: "#fff", border: "1px solid #d6dee8", boxShadow: "0 24px 64px rgba(17,40,73,.14)", maxHeight: "90vh" }}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-[1.05rem] font-bold" style={{ color: "#1c2f4a" }}>파편 구매</h2>
+              {!isPurchasing && (
+                <button onClick={() => { setShowBuyModal(false); setTossBuyError(""); }}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#728195" }}>
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-[16px] p-4 mb-4 space-y-2" style={{ background: "#eef2f5", border: "1px solid #dde4ec" }}>
+              {[
+                ["파편", selectedFragment.fragmentName],
+                ["판매자", tossBuyListingRef.current.sellerName],
+                ["수량", "1개"],
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between text-[0.85rem]">
+                  <span style={{ color: "#728195" }}>{k}</span>
+                  <span style={{ color: "#1c2f4a", fontWeight: 500 }}>{v}</span>
+                </div>
+              ))}
+              <div className="pt-2 border-t" style={{ borderColor: "#d6dee7" }}>
+                <div className="flex justify-between text-[0.95rem]">
+                  <span style={{ color: "#728195" }}>결제 금액</span>
+                  <span style={{ color: "#547b63", fontWeight: 700 }}>{tossBuyListingRef.current.price.toLocaleString()}원</span>
+                </div>
+                <div className="flex justify-between text-[0.75rem] mt-1">
+                  <span style={{ color: "#9aaab8" }}>플랫폼 수수료</span>
+                  <span style={{ color: "#9aaab8" }}>9%</span>
+                </div>
+              </div>
+            </div>
+
+            <div id="toss-market-payment-widget" className="mb-3" />
+            <div id="toss-market-agreement-widget" className="mb-3" />
+
+            {!tossBuyWidgetReady && !tossBuyError && (
+              <div className="flex items-center gap-2 p-3 rounded-xl text-[0.84rem] mb-3"
+                style={{ background: "#eef4ff", color: "#4b6581", border: "1px solid #c8d8ef" }}>
+                <span className="w-4 h-4 border-2 border-[#4b6581] border-t-transparent rounded-full animate-spin shrink-0" />
+                결제 위젯을 불러오는 중...
+              </div>
+            )}
+
+            {tossBuyError && (
+              <div className="flex items-center gap-2 p-3 rounded-xl text-[0.84rem] mb-3"
+                style={{ background: "#fce8e8", color: "#b94040", border: "1px solid #f0c4c4" }}>
+                ⚠ {tossBuyError}
+              </div>
+            )}
+
+            <button onClick={handleTossBuy} disabled={isPurchasing || !tossBuyWidgetReady}
+              className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 text-[0.9rem]"
+              style={{
+                background: isPurchasing || !tossBuyWidgetReady ? "#b0bec8" : "#547b63",
+                color: "#fff", border: "none",
+                cursor: isPurchasing || !tossBuyWidgetReady ? "not-allowed" : "pointer",
+              }}>
+              {isPurchasing && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {isPurchasing ? "결제 처리 중…" : "토스페이로 결제"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -718,37 +718,50 @@ export function TicketResale() {
               <>
                 <p className="text-[0.82rem] mb-3" style={{ color: mutedText }}>양도할 티켓을 선택하세요</p>
                 <div className="space-y-2 mb-5 max-h-52 overflow-y-auto pr-1">
-                  {myTickets.map(t => (
-                    <div key={t.id}
-                      onClick={() => { setSelectedTicket(t); setListedPrice(String(t.originalPrice)); }}
-                      className="rounded-[14px] p-3.5 cursor-pointer transition-all"
-                      style={{
-                        ...mutedPanel,
-                        border: selectedTicket?.id === t.id ? `2px solid ${actionBlue}` : "1px solid #dde4ec",
-                        background: selectedTicket?.id === t.id ? accentSurface : "#eef2f5",
-                      }}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-[0.88rem] font-bold" style={{ color: neutralText }}>
-                            {t.homeTeam} vs {t.awayTeam}
-                          </p>
-                          <p className="text-[0.78rem] mt-0.5" style={{ color: mutedText }}>
-                            {t.gameDate} · {t.stadiumName} · {t.seatSection}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[0.84rem] font-bold" style={{ color: priceGreen }}>
-                            {t.originalPrice.toLocaleString()}원
-                          </p>
-                          {t.tokenId !== null ? (
-                            <p className="text-[0.68rem]" style={{ color: actionBlue, fontWeight: 600 }}>NFT #{t.tokenId}</p>
-                          ) : (
-                            <p className="text-[0.68rem]" style={{ color: "#9aaab8" }}>NFT 미발급</p>
-                          )}
+                  {myTickets.map(t => {
+                    const isListed = t.status === "listed";
+                    return (
+                      <div key={t.id}
+                        onClick={() => { if (isListed) return; setSelectedTicket(t); setListedPrice(String(t.originalPrice)); }}
+                        className="rounded-[14px] p-3.5 transition-all"
+                        style={{
+                          ...mutedPanel,
+                          border: selectedTicket?.id === t.id ? `2px solid ${actionBlue}` : "1px solid #dde4ec",
+                          background: isListed ? "#f4f4f4" : selectedTicket?.id === t.id ? accentSurface : "#eef2f5",
+                          cursor: isListed ? "default" : "pointer",
+                          opacity: isListed ? 0.7 : 1,
+                        }}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-[0.88rem] font-bold" style={{ color: neutralText }}>
+                                {t.homeTeam} vs {t.awayTeam}
+                              </p>
+                              {isListed && (
+                                <span className="text-[0.64rem] font-bold px-1.5 py-0.5 rounded-md"
+                                  style={{ background: "#fff3e8", color: "#b86a2e", border: "1px solid #f0d4b4" }}>
+                                  판매 중
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[0.78rem] mt-0.5" style={{ color: mutedText }}>
+                              {t.gameDate} · {t.stadiumName} · {t.seatSection}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[0.84rem] font-bold" style={{ color: priceGreen }}>
+                              {t.originalPrice.toLocaleString()}원
+                            </p>
+                            {t.tokenId !== null ? (
+                              <p className="text-[0.68rem]" style={{ color: actionBlue, fontWeight: 600 }}>NFT #{t.tokenId}</p>
+                            ) : (
+                              <p className="text-[0.68rem]" style={{ color: "#9aaab8" }}>NFT 미발급</p>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {selectedTicket && (

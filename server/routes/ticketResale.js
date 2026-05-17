@@ -153,7 +153,7 @@ router.get('/my-tickets', requireAuth, async (req, res) => {
        JOIN user_wallets uw ON uw.wallet_address = t.wallet_address
        JOIN games g ON g.id = t.game_id
        JOIN stadiums s ON s.id = g.stadium_id
-       WHERE uw.user_id = ? AND t.status = 'confirmed' AND g.game_date >= CURDATE()
+       WHERE uw.user_id = ? AND t.status IN ('confirmed', 'listed') AND g.game_date >= CURDATE()
        ORDER BY g.game_date ASC`,
       [userId],
     );

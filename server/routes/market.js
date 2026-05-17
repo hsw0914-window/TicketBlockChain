@@ -2,6 +2,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
+const { confirmPayment, cancelPayment } = require('../services/tossPayService');
 
 const router = express.Router();
 let _pool;
@@ -781,6 +782,200 @@ router.get('/sales', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[market/sales]', err);
     res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// ─── POST /api/market/toss-confirm ──────────────────────
+
+router.post('/toss-confirm', requireAuth, async (req, res) => {
+  const userId = req.user.user_id;
+  const { paymentKey, orderId, amount, listingId } = req.body;
+
+  if (!paymentKey || !orderId || !amount || !listingId)
+    return res.status(400).json({ error: '필수 항목 누락 (paymentKey, orderId, amount, listingId)' });
+
+  const buyerWalletAddress = await getWalletAddress(userId);
+  const conn = await _pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[listing]] = await conn.query(
+      `SELECT ml.*, u.nickname AS seller_name
+       FROM market_listings ml
+       JOIN users u ON u.user_id = ml.seller_id
+       WHERE ml.id = ? AND ml.is_active = TRUE
+       FOR UPDATE`,
+      [listingId]
+    );
+
+    if (!listing) {
+      await conn.rollback();
+      return res.status(404).json({ error: '이미 판매 완료되었거나 존재하지 않는 매물입니다' });
+    }
+    if (listing.seller_id === userId) {
+      await conn.rollback();
+      return res.status(400).json({ error: '본인 매물은 구매할 수 없습니다' });
+    }
+    if (Number(amount) !== Number(listing.price)) {
+      await conn.rollback();
+      return res.status(400).json({ error: '결제 금액이 매물 가격과 일치하지 않습니다' });
+    }
+
+    const tossResult = await confirmPayment({ paymentKey, orderId, amount: Number(amount) });
+    if (!tossResult.success) {
+      await conn.rollback();
+      return res.status(400).json({ error: `결제 승인 실패: ${tossResult.message}` });
+    }
+
+    try {
+      const txHash = createTxHash();
+      const [[sellerWalletRow]] = await conn.query(
+        'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
+        [listing.seller_id]
+      );
+      const sellerWalletAddress = sellerWalletRow?.wallet_address ?? listing.seller_wallet_address ?? `0x${'0'.repeat(40)}`;
+      const platformFee      = Math.floor(listing.price * PLATFORM_FEE_RATE);
+      const settlementAmount = listing.price - platformFee;
+
+      let tradedTokenId = null;
+      const [[tokenRow]] = await conn.query(
+        `SELECT token_id FROM nft_tokens
+         WHERE listed_listing_id = ? AND status = 'listed'
+         ORDER BY minted_at ASC LIMIT 1 FOR UPDATE`,
+        [listingId]
+      );
+
+      if (tokenRow) {
+        tradedTokenId = tokenRow.token_id;
+        await conn.query(
+          `UPDATE nft_tokens
+           SET owner_user_id = ?, owner_wallet = ?, listed_listing_id = NULL,
+               status = 'owned', last_tx_hash = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE token_id = ?`,
+          [userId, buyerWalletAddress, txHash, tradedTokenId]
+        );
+      } else {
+        tradedTokenId = createTokenId('FRAG');
+        await conn.query(
+          `INSERT INTO nft_tokens
+             (token_id, token_type, owner_user_id, owner_wallet, fragment_type_id, status, source_action, mint_tx_hash, last_tx_hash)
+           VALUES (?, 'fragment', ?, ?, ?, 'owned', 'market_toss_transfer', ?, ?)`,
+          [tradedTokenId, userId, buyerWalletAddress, listing.fragment_type_id, txHash, txHash]
+        );
+      }
+
+      if (listing.quantity === 1) {
+        await conn.query(
+          'UPDATE market_listings SET is_active = FALSE, reserved_by = NULL, reserved_until = NULL WHERE id = ?',
+          [listingId]
+        );
+      } else {
+        await conn.query(
+          'UPDATE market_listings SET quantity = quantity - 1, reserved_by = NULL, reserved_until = NULL WHERE id = ?',
+          [listingId]
+        );
+      }
+
+      await conn.query(
+        `INSERT INTO user_fragments (user_id, fragment_type_id, count)
+         VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE count = count + 1`,
+        [userId, listing.fragment_type_id]
+      );
+
+      await conn.query(
+        `INSERT INTO trades
+           (fragment_type_id, listing_id, buyer_id, seller_id,
+            buyer_wallet_address, seller_wallet_address, token_id,
+            price, quantity, platform_fee, settlement_amount, tx_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+        [listing.fragment_type_id, listingId, userId, listing.seller_id,
+         buyerWalletAddress, sellerWalletAddress, tradedTokenId,
+         listing.price, platformFee, settlementAmount, txHash]
+      );
+
+      await conn.query(
+        `INSERT INTO price_history (fragment_type_id, price, recorded_date)
+         VALUES (?, ?, CURDATE()) ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+        [listing.fragment_type_id, listing.price]
+      );
+
+      const purchaseHistoryId = crypto.randomUUID();
+      await conn.query(
+        `INSERT INTO purchase_history
+           (id, buyer_id, fragment_type_id, listing_id, seller_id,
+            buyer_wallet_address, seller_wallet_address, token_id,
+            price, quantity, platform_fee, settlement_amount, tx_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+        [purchaseHistoryId, userId, listing.fragment_type_id, listingId, listing.seller_id,
+         buyerWalletAddress, sellerWalletAddress, tradedTokenId,
+         listing.price, platformFee, settlementAmount, txHash]
+      );
+
+      await conn.query(
+        `INSERT INTO onchain_tx_logs
+           (id, user_id, wallet_address, action_type, tx_hash, token_id, payload_json)
+         VALUES (UUID(), ?, ?, 'FRAGMENT_TRANSFER', ?, ?,
+                 JSON_OBJECT('listingId', ?, 'sellerWallet', ?, 'buyerWallet', ?, 'price', ?, 'platformFee', ?, 'settlementAmount', ?, 'paymentKey', ?))`,
+        [userId, buyerWalletAddress, txHash, tradedTokenId,
+         listingId, sellerWalletAddress, buyerWalletAddress,
+         listing.price, platformFee, settlementAmount, paymentKey]
+      );
+
+      await conn.commit();
+
+      let earnedPoint = 0;
+      try {
+        const [[{ cnt }]] = await _pool.query(
+          'SELECT COUNT(*) AS cnt FROM trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
+          [listing.seller_id]
+        );
+        if (Number(cnt) < 2) {
+          const result = await fabricService.earnPointFromTrade({
+            userDidHash: fabricService.hashDid(sellerWalletAddress),
+            amount: listing.price,
+            rate:   0.001,
+          });
+          earnedPoint = result.earnedPoint;
+        }
+      } catch (pointErr) {
+        console.error('[market/toss-confirm] 포인트 적립 실패:', pointErr.message);
+      }
+
+      const [[assetRow]] = await _pool.query(
+        'SELECT id, idol, asset_name FROM market_assets WHERE fragment_type_id = ? LIMIT 1',
+        [listing.fragment_type_id]
+      );
+
+      res.json({
+        success: true,
+        receipt: {
+          fragmentId:       assetRow?.id ?? listingId,
+          idol:             assetRow?.idol ?? '',
+          fragmentName:     assetRow?.asset_name ?? '',
+          sellerName:       listing.seller_name,
+          price:            listing.price,
+          platformFee,
+          settlementAmount,
+          earnedPoint,
+          tokenId:          tradedTokenId,
+          txHash,
+        },
+      });
+    } catch (dbErr) {
+      await conn.rollback();
+      try {
+        await cancelPayment({ paymentKey, cancelReason: '구매 처리 중 오류', cancelAmount: Number(amount) });
+      } catch (cancelErr) {
+        console.error('[market/toss-confirm] 보상 환불 실패:', cancelErr.message);
+      }
+      throw dbErr;
+    }
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(err.statusCode || 500).json({ error: err.message || '구매 처리 중 오류가 발생했습니다' });
+    }
+  } finally {
+    conn.release();
   }
 });
 
