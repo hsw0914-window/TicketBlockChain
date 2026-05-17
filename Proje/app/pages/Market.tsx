@@ -11,6 +11,7 @@ import {
 import { Button } from "../components/ui/button";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
+import { signListingMessage } from "../lib/contract";
 
 // ─── API 설정 ─────────────────────────────────────────────────
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "";
@@ -355,11 +356,24 @@ export function Market() {
   const handleCreateListing = async () => {
     const sellableCount = Math.max(Math.min(sellQuantity, getOwnedCount(selectedFragment)), 0);
     if (sellableCount <= 0) return;
+    if (!walletAddress) {
+      alert("MetaMask 지갑을 연결해주세요.");
+      return;
+    }
+    let listingMessage: string;
+    let listingSignature: string;
+    try {
+      listingMessage = `Listing fragment ${selectedFragment.id} quantity ${sellableCount} price ${sellPrice} KRW at ${Date.now()}`;
+      listingSignature = await signListingMessage(listingMessage, walletAddress);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "MetaMask 서명에 실패했습니다.");
+      return;
+    }
     try {
       const res = await fetch(apiUrl("/api/market/listings"), {
         method: "POST",
         headers: API_HEADERS(walletAddress),
-        body: JSON.stringify({ fragmentId: selectedFragment.id, price: sellPrice, quantity: sellableCount }),
+        body: JSON.stringify({ fragmentId: selectedFragment.id, price: sellPrice, quantity: sellableCount, listingMessage, listingSignature }),
       });
       const data = await parseApiResponse<{ updatedFragment?: FragmentMarket; listingId?: string }>(res);
       if (data.updatedFragment) {

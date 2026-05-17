@@ -608,6 +608,8 @@ async function initDB() {
       reserved_by          VARCHAR(50) NULL,
       reserved_until       DATETIME    NULL,
       posted_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      listing_message      TEXT        NULL,
+      listing_signature    VARCHAR(132) NULL,
       FOREIGN KEY (seller_id)        REFERENCES users(user_id),
       FOREIGN KEY (reserved_by)      REFERENCES users(user_id),
       FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id)

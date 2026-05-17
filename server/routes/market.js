@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto  = require('crypto');
+const { getAddress, verifyMessage } = require('ethers');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const { confirmPayment, cancelPayment } = require('../services/tossPayService');
@@ -9,6 +10,12 @@ let _pool;
 
 function setPool(pool) {
   _pool = pool;
+}
+
+// ─── 헬퍼 ────────────────────────────────────────────────
+
+function normalizeAddress(address) {
+  try { return getAddress(String(address)).toLowerCase(); } catch { return String(address).toLowerCase(); }
 }
 
 // ─── 설정 ────────────────────────────────────────────────
@@ -511,7 +518,7 @@ router.post('/buy', requireAuth, async (req, res) => {
 
 router.post('/listings', requireAuth, async (req, res) => {
   const userId = req.user.user_id;
-  const { fragmentId, price, quantity } = req.body;
+  const { fragmentId, price, quantity, listingMessage, listingSignature } = req.body;
 
   if (!fragmentId || !price || !quantity)
     return res.status(400).json({ error: 'fragmentId, price, quantity 필요' });
@@ -519,8 +526,24 @@ router.post('/listings', requireAuth, async (req, res) => {
     return res.status(400).json({ error: '판매 가격은 1,000원 이상이어야 합니다' });
   if (!Number.isInteger(quantity) || quantity <= 0)
     return res.status(400).json({ error: '판매 수량은 1개 이상의 정수여야 합니다' });
+  if (!listingMessage || !listingSignature)
+    return res.status(400).json({ error: 'MetaMask 서명이 필요합니다' });
 
   const sellerWalletAddress = await getWalletAddress(userId);
+  if (!sellerWalletAddress)
+    return res.status(400).json({ error: '등록된 지갑 주소가 없습니다' });
+
+  // MetaMask 서명 검증
+  let recoveredAddress = '';
+  try {
+    recoveredAddress = verifyMessage(String(listingMessage), String(listingSignature));
+  } catch {
+    return res.status(400).json({ error: 'MetaMask 서명을 검증할 수 없습니다' });
+  }
+  if (normalizeAddress(recoveredAddress) !== normalizeAddress(sellerWalletAddress))
+    return res.status(400).json({ error: 'MetaMask 서명자와 판매자 지갑이 일치하지 않습니다' });
+  if (!String(listingMessage).includes(String(fragmentId)))
+    return res.status(400).json({ error: '서명 메시지와 파편 정보가 일치하지 않습니다' });
   const conn = await _pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -567,9 +590,9 @@ router.post('/listings', requireAuth, async (req, res) => {
     );
 
     await conn.query(
-      `INSERT INTO market_listings (id, seller_id, seller_wallet_address, fragment_type_id, price, quantity)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [listingId, userId, sellerWalletAddress, fragmentTypeId, price, quantity]
+      `INSERT INTO market_listings (id, seller_id, seller_wallet_address, fragment_type_id, price, quantity, listing_message, listing_signature)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [listingId, userId, sellerWalletAddress, fragmentTypeId, price, quantity, listingMessage, listingSignature]
     );
 
     for (const token of tokenRows) {
@@ -590,6 +613,8 @@ router.post('/listings', requireAuth, async (req, res) => {
     );
 
     await conn.commit();
+
+    console.log(`[market] 파편 매물 등록: fragmentId ${fragmentId} | ${price}원 × ${quantity}개 | 판매자: ${userId} | 지갑: ${sellerWalletAddress?.slice(0, 10)}...`);
 
     const updatedFragment = await buildFragmentMarket(fragmentId, userId);
     res.json({ listingId, sellerHandle: userId, sellerWalletAddress, txHash: listingTxHash, updatedFragment });
