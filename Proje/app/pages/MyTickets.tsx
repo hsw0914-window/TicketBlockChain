@@ -421,7 +421,7 @@ export function MyTickets() {
   const [ticketView, setTicketView] = useState<"active" | "completed">("active");
   const [apiTickets, setApiTickets] = useState<NormalizedTicket[]>([]);
 
-  useEffect(() => {
+  const fetchTickets = useCallback(() => {
     const token = localStorage.getItem("auth_token");
     if (!token) return;
     fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets`, {
@@ -433,6 +433,17 @@ export function MyTickets() {
       })
       .catch((err) => console.error("내 티켓 조회 실패:", err));
   }, []);
+
+  // 초기 로드
+  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  // ACTIVE 티켓이 있을 때 10초마다 폴링 (QR 스캔 후 자동 갱신)
+  const hasActive = apiTickets.some((t) => t.status === "ACTIVE");
+  useEffect(() => {
+    if (!hasActive) return;
+    const id = setInterval(fetchTickets, 10_000);
+    return () => clearInterval(id);
+  }, [hasActive, fetchTickets]);
 
   const handleRefunded = useCallback((ticketId: string) => {
     setApiTickets(prev => prev.filter(t => t.ticketId !== ticketId));

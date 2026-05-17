@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion, useInView } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -70,7 +70,7 @@ function NftTicketCard() {
   const [ticket, setTicket] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchNearest = useCallback(() => {
     const token = localStorage.getItem("auth_token");
     if (!token) { setLoading(false); return; }
     fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/nearest`, {
@@ -81,6 +81,16 @@ function NftTicketCard() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  // 초기 로드
+  useEffect(() => { fetchNearest(); }, [fetchNearest]);
+
+  // 티켓이 있을 때 10초마다 폴링 (QR 스캔 후 사용완료 자동 반영)
+  useEffect(() => {
+    if (!ticket) return;
+    const id = setInterval(fetchNearest, 10_000);
+    return () => clearInterval(id);
+  }, [!!ticket, fetchNearest]);
 
   const { qrData, formattedCountdown } = useTicketQR(
     ticket?.ticketId ?? null,
