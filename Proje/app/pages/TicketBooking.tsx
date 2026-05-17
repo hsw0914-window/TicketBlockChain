@@ -363,7 +363,7 @@ export function TicketBooking() {
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStep, finalTotal]);
+  }, [currentStep]);
 
   // 포인트 할인 적용 시 위젯 금액 갱신
   useEffect(() => {
