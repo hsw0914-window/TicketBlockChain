@@ -1,4 +1,13 @@
 require('dotenv').config();
+
+// 필수 보안 환경변수 미설정 시 서버 시작 거부
+for (const key of ['JWT_SECRET', 'QR_SECRET']) {
+  if (!process.env[key]) {
+    console.error(`[startup] 필수 환경변수 미설정: ${key} — server/.env 를 확인하세요`);
+    process.exit(1);
+  }
+}
+
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2/promise");

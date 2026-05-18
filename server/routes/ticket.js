@@ -56,7 +56,7 @@ async function requireVerifiedDidForWallet(req, res, next) {
 
 // ─── QR 유틸 ──────────────────────────────────────────────
 
-const QR_SECRET = process.env.QR_SECRET || "base-chain-qr-secret-2026";
+const QR_SECRET = process.env.QR_SECRET;
 
 // 테스트용: DEBUG_TIME_OFFSET_HOURS 만큼 현재 시간을 앞당김
 function getNowMs() {
@@ -341,7 +341,33 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
 
   const verifiedWalletAddress = req.verifiedWalletAddress || String(walletAddress).toLowerCase();
 
-  // 1. 토스페이 결제 승인
+  // 1-a. pointDiscount 서버 검증 (결제 호출 전)
+  const pd = Number(pointDiscount || 0);
+  if (pd < 0) {
+    return res.status(400).json({ success: false, message: '포인트 할인 금액은 0 이상이어야 합니다' });
+  }
+  if (pd > 0) {
+    // 좌석 총액과 결제 금액이 맞는지 확인
+    const totalSeatPrice = seats.reduce((sum, s) => sum + Number(s.price), 0);
+    if (Number(amount) !== totalSeatPrice - pd) {
+      return res.status(400).json({ success: false, message: '결제 금액이 올바르지 않습니다' });
+    }
+    // Fabric에서 실제 보유 포인트 잔액 조회
+    const userDidHash = fabricService.hashDid(verifiedWalletAddress);
+    let pointBalance = 0;
+    try {
+      const result = await fabricService.getPointBalance({ userDidHash });
+      pointBalance = result.balance ?? 0;
+    } catch (_) {}
+    if (pointBalance < pd) {
+      return res.status(400).json({
+        success: false,
+        message: `포인트 잔액 부족 (보유: ${pointBalance}P, 요청: ${pd}P)`,
+      });
+    }
+  }
+
+  // 1-b. 토스페이 결제 승인
   const tossResult = await confirmPayment({ paymentKey, orderId, amount });
   if (!tossResult.success) {
     return res.status(400).json({ success: false, message: `결제 승인 실패: ${tossResult.message}` });

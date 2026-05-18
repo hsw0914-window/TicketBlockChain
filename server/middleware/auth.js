@@ -14,7 +14,7 @@ async function requireAuth(req, res, next) {
 
   let payload;
   try {
-    payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'fallback-secret');
+    payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
   } catch {
     return res.status(401).json({ error: '인증 정보가 유효하지 않습니다.' });
   }
@@ -34,7 +34,7 @@ async function optionalAuth(req, res, next) {
   const header = req.headers['authorization'];
   if (!header || !header.startsWith('Bearer ')) return next();
   try {
-    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'fallback-secret');
+    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
     const [[user]] = await _pool.query(
       'SELECT user_id, nickname, email, login_type FROM users WHERE user_id = ?',
       [payload.sub]

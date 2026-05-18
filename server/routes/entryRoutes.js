@@ -9,7 +9,7 @@ const router = express.Router();
 let _pool;
 function setPool(pool) { _pool = pool; }
 
-const QR_SECRET = process.env.QR_SECRET || 'base-chain-qr-secret-2026';
+const QR_SECRET = process.env.QR_SECRET;
 
 function getCurrentSlot() {
   return Math.floor(Date.now() / 1000 / 60);

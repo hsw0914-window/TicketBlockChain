@@ -11,7 +11,7 @@ function setPool(pool) {
   _pool = pool;
 }
 
-const jwtSecret = () => process.env.JWT_SECRET || 'fallback-secret';
+const jwtSecret = () => process.env.JWT_SECRET;
 
 // POST /api/auth/register — 회원가입
 router.post('/register', async (req, res) => {
