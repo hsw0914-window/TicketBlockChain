@@ -144,12 +144,20 @@ const (
 
 // ─── 유틸 함수 ────────────────────────────────────────────
 
-func nowISO() string {
-	return time.Now().UTC().Format(time.RFC3339)
+func nowISO(ctx contractapi.TransactionContextInterface) string {
+	ts, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return time.Now().UTC().Format(time.RFC3339)
+	}
+	return time.Unix(ts.Seconds, int64(ts.Nanos)).UTC().Format(time.RFC3339)
 }
 
-func currentMonth() string {
-	return time.Now().UTC().Format("2006-01")
+func currentMonth(ctx contractapi.TransactionContextInterface) string {
+	ts, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return time.Now().UTC().Format("2006-01")
+	}
+	return time.Unix(ts.Seconds, int64(ts.Nanos)).UTC().Format("2006-01")
 }
 
 func hashDid(walletAddress string) string {
@@ -234,7 +242,7 @@ func getTicketRecord(ctx contractapi.TransactionContextInterface, ticketId strin
 }
 
 func putTicketRecord(ctx contractapi.TransactionContextInterface, r *TicketRecord) error {
-	r.UpdatedAt = nowISO()
+	r.UpdatedAt = nowISO(ctx)
 	b, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -248,7 +256,7 @@ func getOrCreatePoint(ctx contractapi.TransactionContextInterface, userDidHash s
 		return nil, err
 	}
 	if b == nil {
-		return &PointRecord{UserDidHash: userDidHash, LastUpdatedAt: nowISO()}, nil
+		return &PointRecord{UserDidHash: userDidHash, LastUpdatedAt: nowISO(ctx)}, nil
 	}
 	var r PointRecord
 	if err = json.Unmarshal(b, &r); err != nil {
@@ -258,7 +266,7 @@ func getOrCreatePoint(ctx contractapi.TransactionContextInterface, userDidHash s
 }
 
 func putPoint(ctx contractapi.TransactionContextInterface, r *PointRecord) error {
-	r.LastUpdatedAt = nowISO()
+	r.LastUpdatedAt = nowISO(ctx)
 	b, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -275,8 +283,8 @@ func getOrCreateMembership(ctx contractapi.TransactionContextInterface, userDidH
 		return &MembershipRecord{
 			UserDidHash:    userDidHash,
 			Grade:          "BASIC",
-			LastResetMonth: currentMonth(),
-			UpdatedAt:      nowISO(),
+			LastResetMonth: currentMonth(ctx),
+			UpdatedAt:      nowISO(ctx),
 		}, nil
 	}
 	var r MembershipRecord
@@ -287,7 +295,7 @@ func getOrCreateMembership(ctx contractapi.TransactionContextInterface, userDidH
 }
 
 func putMembership(ctx contractapi.TransactionContextInterface, r *MembershipRecord) error {
-	r.UpdatedAt = nowISO()
+	r.UpdatedAt = nowISO(ctx)
 	b, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -353,8 +361,8 @@ func (t *TicketChaincode) RegisterTicket(
 		PurchaseType:  purchaseType,
 		Price:         price,
 		GameDate:      gameDate,
-		CreatedAt:     nowISO(),
-		UpdatedAt:     nowISO(),
+		CreatedAt:     nowISO(ctx),
+		UpdatedAt:     nowISO(ctx),
 	}
 	return putTicketRecord(ctx, r)
 }
@@ -405,10 +413,10 @@ func (t *TicketChaincode) VerifyEntry(
 	}
 
 	// 월 초기화
-	if membership.LastResetMonth != currentMonth() {
+	if membership.LastResetMonth != currentMonth(ctx) {
 		membership.MonthlyRaffleExchangeCount = 0
 		membership.MonthlyCardExchangeCount = 0
-		membership.LastResetMonth = currentMonth()
+		membership.LastResetMonth = currentMonth(ctx)
 	}
 
 	earnedPoint := math.Floor(ticket.Price * getEarnRate(membership.Grade))
@@ -498,10 +506,10 @@ func (t *TicketChaincode) ExchangePointItem(
 		return "", err
 	}
 
-	if membership.LastResetMonth != currentMonth() {
+	if membership.LastResetMonth != currentMonth(ctx) {
 		membership.MonthlyRaffleExchangeCount = 0
 		membership.MonthlyCardExchangeCount = 0
-		membership.LastResetMonth = currentMonth()
+		membership.LastResetMonth = currentMonth(ctx)
 	}
 
 	limit := exchangeMonthlyLimit(membership.Grade, itemType)
@@ -535,7 +543,7 @@ func (t *TicketChaincode) ExchangePointItem(
 		ItemType:    itemType,
 		PointUsed:   cost,
 		Status:      "MINT_REQUESTED",
-		RequestedAt: nowISO(),
+		RequestedAt: nowISO(ctx),
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
@@ -559,14 +567,19 @@ func (t *TicketChaincode) ExchangePointItem(
 // TRANSFERRED: 항상 0%
 // PRIMARY: 7일 이상=100%, 3일 이상=90%, 1일 이상=80%, 당일/이후=0%
 
-func calcRefundRate(gameDateStr, purchaseType string) float64 {
+func calcRefundRate(ctx contractapi.TransactionContextInterface, gameDateStr, purchaseType string) float64 {
 	if purchaseType == "TRANSFERRED" {
 		return 0
 	}
 	if gameDateStr == "" {
 		return 100
 	}
-	now := time.Now().UTC().Truncate(24 * time.Hour)
+	var now time.Time
+	if ts, err := ctx.GetStub().GetTxTimestamp(); err == nil {
+		now = time.Unix(ts.Seconds, int64(ts.Nanos)).UTC().Truncate(24 * time.Hour)
+	} else {
+		now = time.Now().UTC().Truncate(24 * time.Hour)
+	}
 	game, err := time.Parse("2006-01-02", gameDateStr)
 	if err != nil {
 		return 100
@@ -609,7 +622,7 @@ func (t *TicketChaincode) RequestRefund(
 		return "", fmt.Errorf("REFUND_ALREADY_PROCESSING")
 	}
 
-	rate := calcRefundRate(ticket.GameDate, ticket.PurchaseType)
+	rate := calcRefundRate(ctx, ticket.GameDate, ticket.PurchaseType)
 	if rate == 0 {
 		return "", fmt.Errorf("REFUND_DENIED: 환불 불가 기간입니다")
 	}
@@ -650,8 +663,8 @@ func (t *TicketChaincode) RequestRefund(
 		RefundReason:  refundReason,
 		RefundAmount:  refundAmount,
 		RefundStatus:  "COMPLETED",
-		RequestedAt:   nowISO(),
-		CompletedAt:   nowISO(),
+		RequestedAt:   nowISO(ctx),
+		CompletedAt:   nowISO(ctx),
 	}
 
 	b, err := json.Marshal(rec)
@@ -746,8 +759,8 @@ func (t *TicketChaincode) CancelGameRefundAll(
 			RefundReason:  "경기 취소",
 			RefundAmount:  ticket.Price - ticket.PointUsed,
 			RefundStatus:  "COMPLETED",
-			RequestedAt:   nowISO(),
-			CompletedAt:   nowISO(),
+			RequestedAt:   nowISO(ctx),
+			CompletedAt:   nowISO(ctx),
 		}
 		rb, err := json.Marshal(rec)
 		if err != nil {
@@ -892,7 +905,7 @@ func (t *TicketChaincode) CreateSettlement(
 		PlatformFee:      platformFee,
 		ClubRevenue:      clubRevenue,
 		SettlementStatus: "DRAFT",
-		CreatedAt:        nowISO(),
+		CreatedAt:        nowISO(ctx),
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
@@ -966,8 +979,8 @@ func (t *TicketChaincode) RegisterRaffleNFT(
 		UserDidHash: userDidHash,
 		GameId:      gameId,
 		Status:      "ISSUED",
-		IssuedAt:    nowISO(),
-		UpdatedAt:   nowISO(),
+		IssuedAt:    nowISO(ctx),
+		UpdatedAt:   nowISO(ctx),
 	}
 	rb, err := json.Marshal(rec)
 	if err != nil {
@@ -1011,7 +1024,7 @@ func (t *TicketChaincode) EnterDraw(
 
 	raffle.Status = "ENTERED"
 	raffle.DrawId = drawId
-	raffle.UpdatedAt = nowISO()
+	raffle.UpdatedAt = nowISO(ctx)
 	rb2, err := json.Marshal(raffle)
 	if err != nil {
 		return err
@@ -1053,7 +1066,7 @@ func (t *TicketChaincode) CreateDraw(
 		GameId:      gameId,
 		Status:      "PENDING",
 		WinnerCount: winnerCount,
-		CreatedAt:   nowISO(),
+		CreatedAt:   nowISO(ctx),
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
@@ -1134,7 +1147,7 @@ func (t *TicketChaincode) ExecuteDraw(
 		} else {
 			raffle.Status = "LOST"
 		}
-		raffle.UpdatedAt = nowISO()
+		raffle.UpdatedAt = nowISO(ctx)
 		rb2, err2 := json.Marshal(raffle)
 		if err2 != nil {
 			continue
@@ -1145,7 +1158,7 @@ func (t *TicketChaincode) ExecuteDraw(
 	}
 
 	draw.Status = "COMPLETED"
-	draw.ExecutedAt = nowISO()
+	draw.ExecutedAt = nowISO(ctx)
 	db2, err := json.Marshal(draw)
 	if err != nil {
 		return "", err
@@ -1184,7 +1197,7 @@ func (t *TicketChaincode) UseRaffleNFT(
 	}
 
 	raffle.Status = "USED"
-	raffle.UpdatedAt = nowISO()
+	raffle.UpdatedAt = nowISO(ctx)
 	rb2, err := json.Marshal(raffle)
 	if err != nil {
 		return err
@@ -1206,8 +1219,8 @@ func (t *TicketChaincode) CreateReservation(
 		RaffleNftId:   raffleNftId,
 		IsPriority:    isPriority,
 		Status:        "PENDING",
-		CreatedAt:     nowISO(),
-		UpdatedAt:     nowISO(),
+		CreatedAt:     nowISO(ctx),
+		UpdatedAt:     nowISO(ctx),
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
@@ -1236,7 +1249,7 @@ func (t *TicketChaincode) ConfirmReservation(
 	}
 	rec.TicketId = ticketId
 	rec.Status = "CONFIRMED"
-	rec.UpdatedAt = nowISO()
+	rec.UpdatedAt = nowISO(ctx)
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -1263,7 +1276,7 @@ func (t *TicketChaincode) CancelReservation(
 		return err
 	}
 	rec.Status = "CANCELLED"
-	rec.UpdatedAt = nowISO()
+	rec.UpdatedAt = nowISO(ctx)
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
