@@ -97,6 +97,12 @@ async function usePointForTicket({ userDidHash, ticketId, pointAmount }) {
   return { success: true };
 }
 
+// ─── 5-b. RestorePointForRefund ─────────────────────────
+async function restorePointForRefund({ userDidHash, ticketId, pointAmount }) {
+  await submitTx('RestorePointForRefund', userDidHash, ticketId || '', String(pointAmount));
+  return { success: true };
+}
+
 // ─── 6. ExchangePointItem ────────────────────────────────
 async function exchangePointItem({ userDidHash, itemType }) {
   const raw = await submitTx('ExchangePointItem', userDidHash, itemType);
@@ -251,6 +257,7 @@ module.exports = {
   earnPointByEntry,
   updateMembershipGrade,
   usePointForTicket,
+  restorePointForRefund,
   exchangePointItem,
   requestRefund,
   completeRefund,

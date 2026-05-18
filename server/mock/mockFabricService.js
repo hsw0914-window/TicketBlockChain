@@ -203,6 +203,21 @@ async function usePointForTicket({ userDidHash, ticketId, pointAmount }) {
   return { success: true, remainingBalance: point.balance };
 }
 
+// ─── 5-b. RestorePointForRefund ────────────────────────────
+async function restorePointForRefund({ userDidHash, ticketId, pointAmount }) {
+  if (!pointAmount || pointAmount <= 0) return { success: true, remainingBalance: 0 };
+  const point = _getOrCreatePoint(userDidHash);
+  point.balance    += pointAmount;
+  point.totalUsed  -= pointAmount;
+  point.lastUpdatedAt = now();
+  if (ticketId && _store.tickets[ticketId]) {
+    _store.tickets[ticketId].pointUsed = 0;
+  }
+  _store.points[userDidHash] = point;
+  console.log(`[MockFabric] RestorePoint: ${userDidHash.slice(0, 8)}... +${pointAmount}P (잔액: ${point.balance}P)`);
+  return { success: true, remainingBalance: point.balance };
+}
+
 // ─── 6. ExchangePointItem ──────────────────────────────────
 async function exchangePointItem({ userDidHash, itemType }) {
   const cost = EXCHANGE_COSTS[itemType];
@@ -738,6 +753,7 @@ module.exports = {
   earnPointFromTrade,
   updateMembershipGrade,
   usePointForTicket,
+  restorePointForRefund,
   exchangePointItem,
   requestRefund,
   completeRefund,

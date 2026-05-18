@@ -389,7 +389,10 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
         walletAddress: verifiedWalletAddress,
         gameId, stadium, grade, block, row, seatNumber, price,
       });
-      await _pool.query("UPDATE tickets SET payment_key = ? WHERE id = ?", [paymentKey, ticketResult.id]);
+      await _pool.query(
+        "UPDATE tickets SET payment_key = ?, point_discount = ? WHERE id = ?",
+        [paymentKey, ticketRows.length === 0 ? pd : 0, ticketResult.id]
+      );
       ticketRows.push({ ticketId: ticketResult.id, row, seatNumber, price });
     }
 

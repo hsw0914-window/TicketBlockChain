@@ -349,6 +349,7 @@ async function initDB() {
       token_id       INT           DEFAULT NULL,
       ticket_tx_hash VARCHAR(66)   DEFAULT NULL,
       payment_key    VARCHAR(200)  DEFAULT NULL,
+      point_discount INT           NOT NULL DEFAULT 0,
       purchase_type  ENUM('PRIMARY','TRANSFERRED') NOT NULL DEFAULT 'PRIMARY',
       status         ENUM('confirmed','used','listed','sold','refund_processing','refund_rejected','refunded') NOT NULL DEFAULT 'confirmed',
       booked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
