@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
@@ -1484,19 +1482,6 @@ func main() {
 	cc, err := contractapi.NewChaincode(new(TicketChaincode))
 	if err != nil {
 		panic(err.Error())
-	}
-
-	if serverAddr := os.Getenv("CHAINCODE_SERVER_ADDRESS"); serverAddr != "" {
-		server := &shim.ChaincodeServer{
-			CCID:    os.Getenv("CHAINCODE_ID"),
-			Address: serverAddr,
-			CC:      cc,
-			TLSProps: shim.TLSProperties{Disabled: true},
-		}
-		if err := server.Start(); err != nil {
-			fmt.Printf("Error starting CCaaS server: %s\n", err)
-		}
-		return
 	}
 
 	if err := cc.Start(); err != nil {
