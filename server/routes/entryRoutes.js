@@ -65,10 +65,13 @@ router.post('/verify', async (req, res) => {
       return res.json({ allowed: false, reason: `INVALID_STATUS:${ticket.status}` });
     }
 
-    // 3. NFT 소유권 확인 (Phase 1: mock → 항상 true)
-    const isOwner = await nftBridge.checkNftOwner(ticket.token_id, ticket.wallet_address);
-    if (!isOwner) {
-      return res.json({ allowed: false, reason: 'NOT_NFT_OWNER' });
+    // 3. NFT 소유권 확인
+    // TRANSFERRED 티켓은 장터 2차 거래 시 온체인 이전 없이 DB로만 소유권 관리하므로 체크 생략
+    if (ticket.purchase_type !== 'TRANSFERRED') {
+      const isOwner = await nftBridge.checkNftOwner(ticket.token_id, ticket.wallet_address);
+      if (!isOwner) {
+        return res.json({ allowed: false, reason: 'NOT_NFT_OWNER' });
+      }
     }
 
     // 4. Fabric 입장 처리 (mock in-memory)
