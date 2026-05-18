@@ -296,6 +296,9 @@ export function TicketBooking() {
   const serviceFee = Math.round(ticketTotal * 0.03); // 3% 서비스 이용료
   const finalTotal = Math.max(0, ticketTotal + serviceFee - pointDiscount);
   const paymentReady = selectedTickets.length > 0;
+  const bookingDeadlinePassed = event
+    ? Date.now() > new Date(event.dateTime).getTime() + 60 * 60 * 1000
+    : false;
 
   const updateStep = (nextStep: number) => {
     setCurrentStep(Math.max(0, Math.min(nextStep, steps.length - 1)));
@@ -1146,16 +1149,25 @@ export function TicketBooking() {
                   <ChevronLeft className="h-4 w-4" />
                   좌석 다시 보기
                 </Button>
+                {bookingDeadlinePassed && (
+                  <div className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-[0.84rem] font-semibold mb-2"
+                    style={{ background: "#fff3f3", color: "#b94040", border: "1px solid #f0c4c4" }}>
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    예매 마감 (경기 시작 1시간 이후 예매 불가)
+                  </div>
+                )}
                 <Button
                   className="rounded-2xl px-5 text-white"
-                  style={{ background: paymentReady && widgetReady && !paymentLoading ? "#1456a0" : "#97afcc" }}
-                  disabled={!paymentReady || !widgetReady || paymentLoading}
+                  style={{ background: paymentReady && widgetReady && !paymentLoading && !bookingDeadlinePassed ? "#1456a0" : "#97afcc" }}
+                  disabled={!paymentReady || !widgetReady || paymentLoading || bookingDeadlinePassed}
                   onClick={() => void handleCompleteBooking()}
                 >
                   {paymentLoading
                     ? <><Loader2 className="h-4 w-4 animate-spin" />결제 준비 중...</>
                     : !widgetReady
                     ? <><Loader2 className="h-4 w-4 animate-spin" />위젯 로딩 중...</>
+                    : bookingDeadlinePassed
+                    ? <>예매 마감</>
                     : <>토스페이로 결제하기<CheckCircle2 className="h-4 w-4" /></>}
                 </Button>
               </div>

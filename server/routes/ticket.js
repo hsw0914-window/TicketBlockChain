@@ -5,6 +5,7 @@ const { mintBoxOnChain, mintTicketOnChain } = require("../services/nftService");
 const fabricService = require("../services/fabricBridge");
 const { confirmPayment, cancelPayment } = require("../services/tossPayService");
 const { requireAuth } = require("../middleware/auth");
+const { isWithinGamePlus1h } = require("../utils/gameTime");
 
 const router = express.Router();
 let _pool;
@@ -341,7 +342,19 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
 
   const verifiedWalletAddress = req.verifiedWalletAddress || String(walletAddress).toLowerCase();
 
-  // 1-a. pointDiscount 서버 검증 (결제 호출 전)
+  // 1-a. 예매 마감 체크 (경기 시작 후 1시간까지)
+  const [[gameDeadlineRow]] = await _pool.query(
+    `SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date, TIME_FORMAT(game_time, '%H:%i:%s') AS game_time FROM games WHERE id = ?`,
+    [gameId]
+  );
+  if (!gameDeadlineRow) {
+    return res.status(404).json({ success: false, message: '경기 정보를 찾을 수 없습니다' });
+  }
+  if (!isWithinGamePlus1h(gameDeadlineRow.game_date, gameDeadlineRow.game_time)) {
+    return res.status(400).json({ success: false, message: '예매 마감 시간이 지났습니다 (경기 시작 1시간 이후 예매 불가)' });
+  }
+
+  // 1-b. pointDiscount 서버 검증 (결제 호출 전)
   const pd = Number(pointDiscount || 0);
   if (pd < 0) {
     return res.status(400).json({ success: false, message: '포인트 할인 금액은 0 이상이어야 합니다' });

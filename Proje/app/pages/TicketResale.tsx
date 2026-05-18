@@ -25,6 +25,7 @@ interface Listing {
   id: string;
   sellerName: string;
   gameDate: string;
+  gameTime: string;
   homeTeam: string;
   awayTeam: string;
   seatSection: string;
@@ -65,15 +66,27 @@ interface MyTicket {
   id: string;
   tokenId: number | null;
   gameDate: string;
+  gameTime: string;
   homeTeam: string;
   awayTeam: string;
   stadiumName: string;
   seatSection: string;
   originalPrice: number;
   status: string;
+  purchaseType: string;
 }
 
 // ─────────────────────────────────────────────────────────────
+
+function gameStartMs(gameDate: string, gameTime: string): number {
+  return new Date(`${gameDate}T${gameTime || "18:30:00"}+09:00`).getTime();
+}
+function isPurchaseDeadlinePassed(gameDate: string, gameTime: string): boolean {
+  return Date.now() > gameStartMs(gameDate, gameTime) + 60 * 60 * 1000;
+}
+function isListingDeadlinePassed(gameDate: string, gameTime: string): boolean {
+  return Date.now() >= gameStartMs(gameDate, gameTime) - 60 * 60 * 1000;
+}
 
 const neutralText  = "#1c2f4a";
 const mutedText    = "#728195";
@@ -470,12 +483,15 @@ export function TicketResale() {
               </div>
             ) : (
               <div className="space-y-3">
-                {listings.map(l => (
+                {listings.map(l => {
+                  const buyDeadlinePassed = isPurchaseDeadlinePassed(l.gameDate, l.gameTime);
+                  const isClickable = !l.isMine && !buyDeadlinePassed;
+                  return (
                   <div key={l.id}
-                    className={`rounded-[18px] p-5 transition-all ${l.isMine ? "" : "cursor-pointer hover:shadow-md"}`}
-                    style={{ ...panelStyle, transition: "box-shadow .2s", opacity: l.isMine ? 0.85 : 1 }}
+                    className={`rounded-[18px] p-5 transition-all ${isClickable ? "cursor-pointer hover:shadow-md" : ""}`}
+                    style={{ ...panelStyle, transition: "box-shadow .2s", opacity: l.isMine || buyDeadlinePassed ? 0.65 : 1 }}
                     onClick={() => {
-                      if (l.isMine) return;
+                      if (!isClickable) return;
                       setSelectedListing(l); setBuyStep(1); setBuyError(""); setBuyWidgetReady(false); setBuyPaymentWidgets(null);
                     }}>
                     <div className="flex items-start justify-between gap-4">
@@ -492,6 +508,12 @@ export function TicketResale() {
                             <span className="text-[0.68rem] px-1.5 py-0.5 rounded-md font-bold"
                               style={{ background: "#edf7f1", color: priceGreen, border: "1px solid #cbe1d3" }}>
                               내 매물
+                            </span>
+                          )}
+                          {buyDeadlinePassed && (
+                            <span className="text-[0.68rem] px-1.5 py-0.5 rounded-md font-bold"
+                              style={{ background: "#f4f4f4", color: "#999", border: "1px solid #ddd" }}>
+                              구매 마감
                             </span>
                           )}
                           {l.nftTokenId !== null && (
@@ -516,7 +538,8 @@ export function TicketResale() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -719,22 +742,26 @@ export function TicketResale() {
               <>
                 <p className="text-[0.82rem] mb-3" style={{ color: mutedText }}>양도할 티켓을 선택하세요</p>
                 <div className="space-y-2 mb-5 max-h-52 overflow-y-auto pr-1">
-                  {myTickets.map(t => {
+                  {myTickets
+                    .filter(t => t.purchaseType !== "TRANSFERRED")
+                    .map(t => {
                     const isListed = t.status === "listed";
+                    const listDeadlinePassed = isListingDeadlinePassed(t.gameDate, t.gameTime);
+                    const isDisabled = isListed || listDeadlinePassed;
                     return (
                       <div key={t.id}
-                        onClick={() => { if (isListed) return; setSelectedTicket(t); setListedPrice(String(t.originalPrice)); }}
+                        onClick={() => { if (isDisabled) return; setSelectedTicket(t); setListedPrice(String(t.originalPrice)); }}
                         className="rounded-[14px] p-3.5 transition-all"
                         style={{
                           ...mutedPanel,
                           border: selectedTicket?.id === t.id ? `2px solid ${actionBlue}` : "1px solid #dde4ec",
-                          background: isListed ? "#f4f4f4" : selectedTicket?.id === t.id ? accentSurface : "#eef2f5",
-                          cursor: isListed ? "default" : "pointer",
-                          opacity: isListed ? 0.7 : 1,
+                          background: isDisabled ? "#f4f4f4" : selectedTicket?.id === t.id ? accentSurface : "#eef2f5",
+                          cursor: isDisabled ? "default" : "pointer",
+                          opacity: isDisabled ? 0.7 : 1,
                         }}>
                         <div className="flex items-center justify-between">
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-[0.88rem] font-bold" style={{ color: neutralText }}>
                                 {t.homeTeam} vs {t.awayTeam}
                               </p>
@@ -742,6 +769,12 @@ export function TicketResale() {
                                 <span className="text-[0.64rem] font-bold px-1.5 py-0.5 rounded-md"
                                   style={{ background: "#fff3e8", color: "#b86a2e", border: "1px solid #f0d4b4" }}>
                                   판매 중
+                                </span>
+                              )}
+                              {!isListed && listDeadlinePassed && (
+                                <span className="text-[0.64rem] font-bold px-1.5 py-0.5 rounded-md"
+                                  style={{ background: "#f4f4f4", color: "#999", border: "1px solid #ddd" }}>
+                                  등록 마감
                                 </span>
                               )}
                             </div>
@@ -809,11 +842,17 @@ export function TicketResale() {
                   </div>
                 )}
 
-                <button onClick={handlePost} disabled={!selectedTicket || posting}
+                <button onClick={handlePost}
+                  disabled={!selectedTicket || posting || (!!selectedTicket && isListingDeadlinePassed(selectedTicket.gameDate, selectedTicket.gameTime))}
                   className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2"
-                  style={{ background: selectedTicket ? actionBlue : "#b0bec8", color: "#fff", border: "none", cursor: selectedTicket && !posting ? "pointer" : "not-allowed", opacity: posting ? .7 : 1 }}>
+                  style={{
+                    background: (selectedTicket && !isListingDeadlinePassed(selectedTicket.gameDate, selectedTicket.gameTime)) ? actionBlue : "#b0bec8",
+                    color: "#fff", border: "none",
+                    cursor: (selectedTicket && !posting && !isListingDeadlinePassed(selectedTicket.gameDate, selectedTicket.gameTime)) ? "pointer" : "not-allowed",
+                    opacity: posting ? .7 : 1,
+                  }}>
                   {posting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {posting ? postStepLabel : "장터에 올리기"}
+                  {posting ? postStepLabel : (selectedTicket && isListingDeadlinePassed(selectedTicket.gameDate, selectedTicket.gameTime)) ? "등록 마감" : "장터에 올리기"}
                 </button>
               </>
             )}

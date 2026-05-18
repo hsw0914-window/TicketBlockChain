@@ -4,6 +4,7 @@ const { getAddress, verifyMessage } = require('ethers');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const { confirmPayment, cancelPayment } = require('../services/tossPayService');
+const { isBeforeGameMinus1h, isWithinGamePlus1h } = require('../utils/gameTime');
 
 const router = express.Router();
 let _pool;
@@ -144,11 +145,12 @@ router.get('/my-tickets', requireAuth, async (req, res) => {
     const [rows] = await _pool.query(
       `SELECT t.id, t.token_id AS tokenId, t.ticket_tx_hash AS txHash,
          DATE_FORMAT(g.game_date, '%Y-%m-%d') AS gameDate,
+         TIME_FORMAT(g.game_time, '%H:%i:%s') AS gameTime,
          g.home_team AS homeTeam, g.away_team AS awayTeam,
          s.name AS stadiumName,
          t.grade, t.block, t.row_num AS rowNum, t.seat_number AS seatNumber,
          ${SEAT_SECTION_SQL} AS seatSection,
-         t.price AS originalPrice, t.status
+         t.price AS originalPrice, t.status, t.purchase_type AS purchaseType
        FROM tickets t
        JOIN user_wallets uw ON uw.wallet_address = t.wallet_address
        JOIN games g ON g.id = t.game_id
@@ -184,6 +186,13 @@ router.get('/listings', optionalAuth, async (req, res) => {
     const [rows] = await _pool.query(
       `SELECT tl.id, u.nickname AS sellerName, tl.seller_id AS sellerId,
          DATE_FORMAT(tl.game_date, '%Y-%m-%d') AS gameDate,
+         COALESCE(
+           TIME_FORMAT(g.game_time, '%H:%i:%s'),
+           (SELECT TIME_FORMAT(g2.game_time, '%H:%i:%s')
+            FROM games g2
+            WHERE g2.home_team = tl.home_team AND DATE(g2.game_date) = DATE(tl.game_date)
+            LIMIT 1)
+         ) AS gameTime,
          tl.home_team AS homeTeam, tl.away_team AS awayTeam,
          tl.seat_section AS seatSection,
          tl.original_price AS originalPrice,
@@ -195,6 +204,8 @@ router.get('/listings', optionalAuth, async (req, res) => {
        FROM ticket_listings tl
        JOIN users u ON u.user_id = tl.seller_id
        LEFT JOIN user_wallets uw ON uw.user_id = tl.seller_id
+       LEFT JOIN tickets tk ON tk.id = tl.ticket_id
+       LEFT JOIN games g ON g.id = tk.game_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY ${orderBy}
        LIMIT 100`,
@@ -301,18 +312,24 @@ router.post('/listings', requireAuth, async (req, res) => {
     const [[ticket]] = await conn.query(
       `SELECT t.id, t.price AS originalPrice, t.token_id AS tokenId,
          DATE_FORMAT(g.game_date, '%Y-%m-%d') AS gameDate,
+         TIME_FORMAT(g.game_time, '%H:%i:%s') AS gameTime,
          g.home_team AS homeTeam, g.away_team AS awayTeam,
          ${SEAT_SECTION_SQL} AS seatSection
        FROM tickets t
        JOIN user_wallets uw ON uw.wallet_address = t.wallet_address
        JOIN games g ON g.id = t.game_id
-       WHERE t.id = ? AND uw.user_id = ? AND t.status = 'confirmed'
+       WHERE t.id = ? AND uw.user_id = ? AND t.status = 'confirmed' AND t.purchase_type = 'PRIMARY'
        FOR UPDATE`,
       [ticketId, userId],
     );
     if (!ticket) {
       await conn.rollback();
-      return res.status(404).json({ error: '유효한 티켓을 찾을 수 없습니다' });
+      return res.status(404).json({ error: '유효한 티켓을 찾을 수 없습니다 (양도받은 티켓은 재등록 불가)' });
+    }
+
+    if (!isBeforeGameMinus1h(ticket.gameDate, ticket.gameTime)) {
+      await conn.rollback();
+      return res.status(400).json({ error: '2차 거래 등록 마감 시간이 지났습니다 (경기 시작 1시간 전까지 등록 가능)' });
     }
 
     const maxPrice = Math.floor(Number(ticket.originalPrice) * MAX_PRICE_RATIO);
@@ -401,10 +418,19 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
     const buyerWalletAddress = await getBuyerWalletOrThrow(conn, userId);
     const [[listing]] = await conn.query(
       `SELECT tl.*, u.nickname AS seller_name,
-              COALESCE(tl.seller_wallet_address, uw.wallet_address) AS resolved_seller_wallet_address
+              COALESCE(tl.seller_wallet_address, uw.wallet_address) AS resolved_seller_wallet_address,
+              COALESCE(
+                TIME_FORMAT(g.game_time, '%H:%i:%s'),
+                (SELECT TIME_FORMAT(g2.game_time, '%H:%i:%s')
+                 FROM games g2
+                 WHERE g2.home_team = tl.home_team AND DATE(g2.game_date) = DATE(tl.game_date)
+                 LIMIT 1)
+              ) AS game_time_str
        FROM ticket_listings tl
        JOIN users u ON u.user_id = tl.seller_id
        LEFT JOIN user_wallets uw ON uw.user_id = tl.seller_id
+       LEFT JOIN tickets tk ON tk.id = tl.ticket_id
+       LEFT JOIN games g ON g.id = tk.game_id
        WHERE tl.id = ? AND tl.status = 'active'
        FOR UPDATE`,
       [req.params.id],
@@ -416,6 +442,10 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
     if (listing.seller_id === userId) {
       await conn.rollback();
       return res.status(400).json({ error: '본인이 올린 티켓은 구매할 수 없습니다' });
+    }
+    if (!isWithinGamePlus1h(formatDate(listing.game_date), listing.game_time_str)) {
+      await conn.rollback();
+      return res.status(400).json({ error: '2차 거래 구매 마감 시간이 지났습니다 (경기 시작 1시간 이후 구매 불가)' });
     }
     if (Number(amount) !== Number(listing.listed_price)) {
       await conn.rollback();
