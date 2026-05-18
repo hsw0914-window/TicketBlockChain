@@ -2,8 +2,9 @@
 const express  = require('express');
 const crypto   = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const fabricService = require('../services/fabricBridge');
-const nftBridge     = require('../services/nftBridgeAdapter');
+const fabricService    = require('../services/fabricBridge');
+const nftBridge        = require('../services/nftBridgeAdapter');
+const { mintBoxOnChain } = require('../services/nftService');
 
 const router = express.Router();
 let _pool;
@@ -133,6 +134,28 @@ router.post('/verify', async (req, res) => {
       ]
     );
 
+    // 7. 박스 NFT 지급 (입장 보상 — 실패해도 입장은 유효)
+    let boxTxHash = null;
+    try {
+      const [[walletRow]] = await _pool.query(
+        'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
+        [ticket.wallet_address]
+      );
+      if (walletRow) {
+        await _pool.query(
+          `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 1)
+           ON DUPLICATE KEY UPDATE season_count = season_count + 1`,
+          [walletRow.user_id]
+        );
+        if (process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS) {
+          boxTxHash = await mintBoxOnChain(ticket.wallet_address);
+        }
+        console.log(`[entry] 박스 NFT 지급 완료 (user: ${walletRow.user_id})`);
+      }
+    } catch (boxErr) {
+      console.error('[entry] 박스 지급 실패 (입장은 유효):', boxErr.message);
+    }
+
     console.log(`[entry] 입장 완료 - 티켓: ${ticketId} | 포인트 적립: ${fabricResult.earnedPoint ?? 0}P | 등급: ${fabricResult.membershipGrade ?? '-'}`);
 
     return res.json({
@@ -142,6 +165,7 @@ router.post('/verify', async (req, res) => {
       membershipGrade: fabricResult.membershipGrade,
       entryId:         fabricResult.entryId,
       walletAddress:   ticket.wallet_address,
+      boxTxHash,
     });
 
   } catch (err) {

@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto  = require("crypto");
 const { purchaseTicket } = require("../services/ticketService");
-const { mintBoxOnChain, mintTicketOnChain } = require("../services/nftService");
+const { mintTicketOnChain } = require("../services/nftService");
 const fabricService = require("../services/fabricBridge");
 const { confirmPayment, cancelPayment } = require("../services/tossPayService");
 const { requireAuth } = require("../middleware/auth");
@@ -164,35 +164,6 @@ router.post("/purchase", requireAuth, requireVerifiedDidForWallet, async (req, r
     // 티켓 구매 성공 시 → 지갑 주소로 user_id 조회 후 시즌 박스 1개 지급
     let ticketTokenId = null;
     let ticketTxHash  = null;
-    let boxTxHash     = null;
-
-    try {
-      const [[walletRow]] = await _pool.query(
-        'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
-        [verifiedWalletAddress]
-      );
-      if (walletRow) {
-        // DB 박스 지급
-        await _pool.query(
-          `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 1)
-           ON DUPLICATE KEY UPDATE season_count = season_count + 1`,
-          [walletRow.user_id]
-        );
-
-        // 티켓 NFT는 프론트(MetaMask)에서 이미 민팅 완료 → 서버 측 이중 민팅 생략
-        // BoxNFT만 서버 지갑으로 민팅
-        const boxOnChainEnabled = !!(process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS);
-        if (boxOnChainEnabled) {
-          try {
-            boxTxHash = await mintBoxOnChain(verifiedWalletAddress);
-          } catch (mintErr) {
-            console.error('[ticket] 박스 온체인 민팅 실패 (DB는 정상):', mintErr.message);
-          }
-        }
-      }
-    } catch (boxErr) {
-      console.error('[ticket box reward]', boxErr);
-    }
 
     // Fabric 티켓 등록 + 예약 레코드 생성 (실패해도 구매 자체는 성공 처리)
     try {
@@ -229,7 +200,7 @@ router.post("/purchase", requireAuth, requireVerifiedDidForWallet, async (req, r
 
     res.json({
       success: true,
-      data: { ...result, ticketTokenId, ticketTxHash, boxTxHash },
+      data: { ...result, ticketTokenId, ticketTxHash },
     });
   } catch (err) {
     console.error(err);
@@ -360,9 +331,10 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
     return res.status(400).json({ success: false, message: '포인트 할인 금액은 0 이상이어야 합니다' });
   }
   if (pd > 0) {
-    // 좌석 총액과 결제 금액이 맞는지 확인
+    // 좌석 총액과 결제 금액이 맞는지 확인 (서비스 수수료 3% 포함)
     const totalSeatPrice = seats.reduce((sum, s) => sum + Number(s.price), 0);
-    if (Number(amount) !== totalSeatPrice - pd) {
+    const serviceFee = Math.round(totalSeatPrice * 0.03);
+    if (Number(amount) !== totalSeatPrice + serviceFee - pd) {
       return res.status(400).json({ success: false, message: '결제 금액이 올바르지 않습니다' });
     }
     // Fabric에서 실제 보유 포인트 잔액 조회
@@ -409,28 +381,25 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
       ticketRows.push({ ticketId: ticketResult.id, row, seatNumber, price });
     }
 
-    // Phase 2: NFT 민팅 병렬 처리
-    // nftService.getNextNonce()가 뮤텍스로 nonce를 순차 할당하므로 충돌 없이 병렬 실행 가능
+    // Phase 2: NFT 민팅 순차 처리 (병렬 시 nonce 충돌 발생)
     let mintedResults;
     try {
-      mintedResults = await Promise.all(
-        ticketRows.map(({ ticketId, row, seatNumber, price }) =>
-          mintTicketOnChain(verifiedWalletAddress, {
-            gameId:        String(gameId),
-            gameDate:      gameRow?.game_date || '',
-            homeTeam:      gameRow?.home_team || '',
-            awayTeam:      gameRow?.away_team || '',
-            seatSection:   `${block}-${row}-${seatNumber}`,
-            originalPrice: Number(price),
-          }).then(async (mintResult) => {
-            await _pool.query(
-              "UPDATE tickets SET token_id = ?, ticket_tx_hash = ? WHERE id = ?",
-              [mintResult.tokenId, mintResult.txHash, ticketId]
-            );
-            return { ticketId, tokenId: mintResult.tokenId, txHash: mintResult.txHash };
-          })
-        )
-      );
+      mintedResults = [];
+      for (const { ticketId, row, seatNumber, price } of ticketRows) {
+        const mintResult = await mintTicketOnChain(verifiedWalletAddress, {
+          gameId:        String(gameId),
+          gameDate:      gameRow?.game_date || '',
+          homeTeam:      gameRow?.home_team || '',
+          awayTeam:      gameRow?.away_team || '',
+          seatSection:   `${block}-${row}-${seatNumber}`,
+          originalPrice: Number(price),
+        });
+        await _pool.query(
+          "UPDATE tickets SET token_id = ?, ticket_tx_hash = ? WHERE id = ?",
+          [mintResult.tokenId, mintResult.txHash, ticketId]
+        );
+        mintedResults.push({ ticketId, tokenId: mintResult.tokenId, txHash: mintResult.txHash });
+      }
     } catch (mintErr) {
       console.error('[toss] NFT 민팅 실패:', mintErr.message);
       await cancelPayment({ paymentKey, cancelReason: 'NFT 발급 실패로 인한 자동 환불', cancelAmount: amount }).catch(() => {});
@@ -476,28 +445,6 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
     const seatList = ticketRows.map(t => `${block}블록 ${t.row}열 ${t.seatNumber}번`).join(', ');
     console.log(`[toss] 예매 완료: ${gameRow?.home_team} vs ${gameRow?.away_team} | ${seats.length}석 (${seatList}) | ${amount}원 | 지갑: ${verifiedWalletAddress.slice(0, 10)}...`);
 
-    // 6. 박스 NFT 지급 (좌석 수만큼)
-    let boxTxHash = null;
-    try {
-      const [[walletRow]] = await _pool.query(
-        'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
-        [verifiedWalletAddress]
-      );
-      if (walletRow) {
-        await _pool.query(
-          `INSERT INTO user_boxes (user_id, season_count) VALUES (?, ?)
-           ON DUPLICATE KEY UPDATE season_count = season_count + ?`,
-          [walletRow.user_id, seats.length, seats.length]
-        );
-        if (process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS) {
-          boxTxHash = await mintBoxOnChain(verifiedWalletAddress);
-        }
-        console.log(`[toss] 박스 NFT ${seats.length}개 지급 완료 (user: ${walletRow.user_id})`);
-      }
-    } catch (boxErr) {
-      console.error('[toss] 박스 지급 실패 (무시):', boxErr.message);
-    }
-
     // 포인트 차감
     if (pointDiscount > 0 && ticketResults.length > 0) {
       try {
@@ -513,7 +460,7 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
       }
     }
 
-    res.json({ success: true, data: { tickets: ticketResults, boxTxHash, paymentKey } });
+    res.json({ success: true, data: { tickets: ticketResults, paymentKey } });
 
   } catch (err) {
     console.error('[toss/confirm]', err);
