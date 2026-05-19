@@ -300,6 +300,73 @@ h6 {
   100% { background-position: 200% 50%; }
 }
 
+.membership-current-tier {
+  isolation: isolate;
+}
+
+.membership-tier-popover {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.95rem);
+  z-index: 40;
+  width: min(21rem, calc(100vw - 2rem));
+  transform: translate(-50%, 0.5rem);
+  border-radius: 1.35rem;
+  background: #1d3158;
+  padding: 1.35rem 1.45rem;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.24);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.membership-tier-popover::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -0.72rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 0 0 0.2rem 0;
+  background: #1d3158;
+}
+
+.group:hover > .membership-tier-popover,
+.group:focus-visible > .membership-tier-popover {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.membership-current-orbit {
+  position: absolute;
+  inset: -0.38rem -0.5rem -0.6rem;
+  z-index: 0;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgba(96, 165, 250, 0.22) 0 40%,
+    rgba(45, 212, 191, 0.12) 58%,
+    transparent 72%
+  );
+  animation: membership-orbit-spin 2.8s linear infinite;
+  pointer-events: none;
+}
+
+.membership-current-orbit::after {
+  content: "";
+  position: absolute;
+  inset: 0.5rem;
+  border-radius: inherit;
+  background: rgba(244, 248, 255, 0.92);
+}
+
+@keyframes membership-orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Smooth scrollbar */
 html {
   scroll-behavior: smooth;

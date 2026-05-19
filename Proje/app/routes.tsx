@@ -16,6 +16,7 @@ const Community      = lazy(() => import("./pages/Community").then((m) => ({ def
 const Notice         = lazy(() => import("./pages/Notice").then((m) => ({ default: m.Notice })));
 const NoticeWrite    = lazy(() => import("./pages/NoticeWrite").then((m) => ({ default: m.NoticeWrite })));
 const MyPage         = lazy(() => import("./pages/MyPage").then((m) => ({ default: m.MyPage })));
+const Membership     = lazy(() => import("./pages/Membership").then((m) => ({ default: m.Membership })));
 const TicketResale        = lazy(() => import("./pages/TicketResale").then((m) => ({ default: m.TicketResale })));
 const TicketResaleSuccess = lazy(() => import("./pages/TicketResaleSuccess").then((m) => ({ default: m.TicketResaleSuccess })));
 const MarketBuySuccess    = lazy(() => import("./pages/MarketBuySuccess").then((m) => ({ default: m.MarketBuySuccess })));
@@ -23,11 +24,6 @@ const Collection     = lazy(() => import("./pages/Collection").then((m) => ({ de
 const MemeInfo       = lazy(() => import("./pages/MemeInfo").then((m) => ({ default: m.MemeInfo })));
 const Attendance     = lazy(() => import("./pages/Attendance").then((m) => ({ default: m.Attendance })));
 const Detail         = lazy(() => import("./pages/Detail").then((m) => ({ default: m.Detail })));
-const EntryScanner   = lazy(() => import("./pages/EntryScanner").then((m) => ({ default: m.EntryScanner })));
-const PointExchange  = lazy(() => import("./pages/PointExchange").then((m) => ({ default: m.PointExchange })));
-const RaffleStatus   = lazy(() => import("./pages/RaffleStatus").then((m) => ({ default: m.RaffleStatus })));
-const PriorityBooking = lazy(() => import("./pages/PriorityBooking").then((m) => ({ default: m.PriorityBooking })));
-const AdminDraw      = lazy(() => import("./pages/AdminDraw").then((m) => ({ default: m.AdminDraw })));
 
 function withSuspense(Component: React.ComponentType) {
   return function LazyRoute() {
@@ -65,6 +61,7 @@ export const router = createBrowserRouter([
       { path: "notice/write",             Component: withSuspense(NoticeWrite) },
       { path: "notice/write/:id",         Component: withSuspense(NoticeWrite) },
       { path: "mypage",                   Component: withSuspense(MyPage) },
+      { path: "mypage/membership",        Component: withSuspense(Membership) },
       { path: "ticket-resale",            Component: withSuspense(TicketResale) },
       { path: "market/buy/success",          Component: withSuspense(TicketResaleSuccess) },
       { path: "market/fragment/buy/success", Component: withSuspense(MarketBuySuccess) },
@@ -72,11 +69,6 @@ export const router = createBrowserRouter([
       { path: "meme-info",                Component: withSuspense(MemeInfo) },
       { path: "attendance",               Component: withSuspense(Attendance) },
       { path: "detail/:id",               Component: withSuspense(Detail) },
-      { path: "entry-scan",               Component: withSuspense(EntryScanner) },
-      { path: "point-exchange",           Component: withSuspense(PointExchange) },
-      { path: "raffle-status",            Component: withSuspense(RaffleStatus) },
-      { path: "priority-booking",         Component: withSuspense(PriorityBooking) },
-      { path: "admin-draw",               Component: withSuspense(AdminDraw) },
     ],
   },
   {

@@ -316,7 +316,10 @@ export function Combine() {
   };
 
   const handleCloseResult = () => setResult(null);
-  const handleCloseOpenResult = () => setOpenResult(null);
+  const handleCloseOpenResult = () => {
+    setOpenResult(null);
+    setViewMode("combine");
+  };
 
   // ─── 로딩 / 에러 ─────────────────────────────────────────
   if (loading) {
@@ -654,14 +657,13 @@ export function Combine() {
                     </span>
                   </div>
 
-                  <div className="grid lg:grid-cols-[minmax(0,1fr)_90px_280px] gap-6 items-center">
-                    <div className="grid grid-cols-2 gap-4">
+                  <div className="flex items-center gap-4 lg:gap-6">
                       {[0, 1].map((index) => {
                         const fragment = selectedFragmentObjects[index];
                         return (
-                          <div key={index}>
+                          <div key={index} className="flex-1">
                             <div
-                              className="h-36 rounded-[22px] flex items-center justify-center relative overflow-hidden"
+                              className="aspect-square rounded-[22px] flex items-center justify-center relative overflow-hidden"
                               style={fragment ? shellTone.panelSoft : { ...shellTone.surface, border: `2px dashed ${shellTone.dashed}` }}
                             >
                               {fragment ? (
@@ -682,17 +684,16 @@ export function Combine() {
                           </div>
                         );
                       })}
-                    </div>
 
-                    <div className="flex justify-center">
+                    <div className="flex-shrink-0 flex justify-center">
                       <div className="p-3 rounded-full" style={shellTone.surface}>
                         <ArrowRight className="w-8 h-8" style={{ color: shellTone.accent }} />
                       </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="flex-1 space-y-4">
                       <div
-                        className={`h-48 rounded-[24px] flex items-center justify-center relative overflow-hidden ${canCombine ? "animate-pulse" : ""}`}
+                        className={`aspect-square rounded-[24px] flex items-center justify-center relative overflow-hidden ${canCombine ? "animate-pulse" : ""}`}
                         style={canCombine ? shellTone.panelSoft : { ...shellTone.surface, border: `2px dashed ${shellTone.dashed}` }}
                       >
                         {canCombine && expectedCombineResult ? (

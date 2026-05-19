@@ -1,15 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, MapPin, Calendar, Tag, Ticket, ShieldCheck } from "lucide-react";
+import { Search, MapPin, Calendar, Tag, Ticket, ShieldCheck, Clock } from "lucide-react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { useBookingAccess, ACCESS_MESSAGES, type AccessStatus } from "../hooks/useBookingAccess";
 
+function formatBookingOpen(dateStr: string) {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })
+    + " " + d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function remainingToOpen(dateStr: string): string {
+  const diff = Math.max(0, new Date(dateStr).getTime() - Date.now());
+  const totalMin = Math.floor(diff / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d}일 ${h % 24}시간 후 오픈`;
+  if (h > 0) return `${h}시간 ${m}분 후 오픈`;
+  if (m > 0) return `${m}분 후 오픈`;
+  return "곧 오픈";
+}
+
 export function Tickets() {
   const [events, setEvents] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [blockedStatus, setBlockedStatus] = useState<AccessStatus | null>(null);
+  const [now, setNow] = useState(Date.now());
   const navigate = useNavigate();
   const accessStatus = useBookingAccess();
 
@@ -18,6 +37,12 @@ export function Tickets() {
       .then((res) => res.json())
       .then((data) => { if (data.success) setEvents(data.data); })
       .catch((err) => console.error("경기 목록 조회 실패:", err));
+  }, []);
+
+  // 1분마다 now 갱신 → UPCOMING 카운트다운 실시간 업데이트
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
   }, []);
 
   const filteredEvents = useMemo(() => {
@@ -80,9 +105,11 @@ export function Tickets() {
         {filteredEvents.map((ev, i) => {
           const statusColor = getStatusColor(ev.status);
           const statusLabel = getStatusLabel(ev.status);
-          const isSoldOut = ev.status === "SOLDOUT";
-          const isEnded   = ev.status === "ENDED";
+          const isSoldOut  = ev.status === "SOLDOUT";
+          const isEnded    = ev.status === "ENDED";
           const isUpcoming = ev.status === "UPCOMING";
+          const opensWithin24h = isUpcoming && ev.booking_open_at
+            && (new Date(ev.booking_open_at).getTime() - now) < 24 * 60 * 60 * 1000;
 
           return (
             <motion.div
@@ -132,23 +159,40 @@ export function Tickets() {
                         </span>
                       </div>
                     )}
+                    {/* 예매 오픈 일시 안내 */}
+                    {isUpcoming && ev.booking_open_at && (
+                      <div className="flex items-center gap-2 text-[0.82rem] rounded-[10px] px-3 py-2 mt-1"
+                        style={{
+                          background: opensWithin24h ? "#fff7ed" : "#f0f6ff",
+                          color: opensWithin24h ? "#b45309" : "#2563eb",
+                          border: `1px solid ${opensWithin24h ? "#fed7aa" : "#bfdbfe"}`,
+                        }}>
+                        <Clock className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          <span className="font-bold">{remainingToOpen(ev.booking_open_at)}</span>
+                          <span className="ml-1.5 opacity-70">({formatBookingOpen(ev.booking_open_at)})</span>
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <Button
-                    className="w-full h-11 rounded-xl font-bold text-white"
+                    className="w-full h-11 rounded-xl font-bold"
                     disabled={isSoldOut || isEnded}
                     style={{
                       background: isSoldOut || isEnded
                         ? "#9ca3af"
-                        : "linear-gradient(135deg, #1456a0, #1e7fd0)",
-                      boxShadow: isSoldOut || isEnded
-                        ? "none"
-                        : "0 10px 20px rgba(20,86,160,0.20)",
+                        : isUpcoming
+                          ? "#e2e8f0"
+                          : "linear-gradient(135deg, #1456a0, #1e7fd0)",
+                      color: isUpcoming ? "#64748b" : "#fff",
+                      boxShadow: !isSoldOut && !isEnded && !isUpcoming
+                        ? "0 10px 20px rgba(20,86,160,0.20)"
+                        : "none",
                     }}
                     onClick={() => {
-                      if (isUpcoming) {
-                        window.alert(`${ev.home_team} vs ${ev.away_team} 예매 오픈 전입니다.`);
-                      } else if (!isSoldOut && !isEnded) {
+                      if (isUpcoming) return;
+                      if (!isSoldOut && !isEnded) {
                         if (accessStatus !== "ok" && accessStatus !== "checking") {
                           setBlockedStatus(accessStatus);
                         } else {
@@ -158,7 +202,7 @@ export function Tickets() {
                     }}
                   >
                     <Ticket className="w-4 h-4 mr-2" />
-                    {isSoldOut ? "매진" : isEnded ? "경기 종료" : isUpcoming ? "오픈 알림 받기" : "좌석 보러가기"}
+                    {isSoldOut ? "매진" : isEnded ? "경기 종료" : isUpcoming ? "오픈 예정" : "좌석 보러가기"}
                   </Button>
                 </div>
               </Card>
