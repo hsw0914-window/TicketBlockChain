@@ -63,7 +63,7 @@ export function Exchange() {
 
   const fetchStatus = () => {
     setStatus({
-      tier: "?쇰컲",
+      tier: "일반",
       limits: { nft: 1, raffle: 1 },
       used: { nft: 0, raffle: raffleCount ?? 0 },
       remaining: { nft: 1, raffle: Math.max(0, 1 - (raffleCount ?? 0)) },
@@ -88,7 +88,7 @@ export function Exchange() {
       setRaffleCount(count);
       if (pointData.success) setPoints(Number(pointData.data?.balance ?? pointData.data ?? 0));
       setStatus({
-        tier: "?쇰컲",
+        tier: "일반",
         limits: { nft: 1, raffle: 1 },
         used: { nft: 0, raffle: count },
         remaining: { nft: 1, raffle: Math.max(0, 1 - count) },
@@ -158,8 +158,8 @@ export function Exchange() {
       {/* ?? ??*/}
       <div className="flex items-center gap-3">
         {[
-          { key: "nft",    label: "?ㅻЪ NFT 援먰솚", icon: ArrowLeftRight },
-          { key: "raffle", label: "?묐え沅?援먰솚",    icon: Ticket },
+          { key: "nft",    label: "실물 NFT 교환", icon: ArrowLeftRight },
+          { key: "raffle", label: "응모권 교환",    icon: Ticket },
         ].map(tab => {
           const Icon = tab.icon;
           const active = activeTab === tab.key;
@@ -194,9 +194,9 @@ export function Exchange() {
                 <ArrowLeftRight className="w-5 h-5 text-white" />
               </div>
               <div>
-                <p className="font-black text-[1rem]" style={{ color: accentBlue }}>?ㅻЪ NFT 移대뱶 援먰솚?대??</p>
+                <p className="font-black text-[1rem]" style={{ color: accentBlue }}>실물 NFT 카드 교환이란?</p>
                 <p className="mt-1 text-[0.88rem] leading-6" style={{ color: mutedText }}>
-                  蹂댁쑀 以묒씤 ?꾩꽦 NFT 移대뱶瑜??ㅼ젣 援우쫰 ?곹뭹?쇰줈 援먰솚?????덉뒿?덈떎. 援먰솚 ?좎껌 ???댁쁺??먯꽌 ?뺤씤?섏뿬 ?깅줉??二쇱냼濡?諛쒖넚???쒕┰?덈떎.
+                  보유 중인 완성 NFT 카드를 실제 굿즈 상품으로 교환할 수 있습니다. 교환 신청 후 운영팀에서 확인하여 등록된 주소로 발송해 드립니다.
                 </p>
               </div>
             </div>
@@ -212,10 +212,10 @@ export function Exchange() {
                   <ShieldAlert className="w-5 h-5 shrink-0" style={{ color: nftLimitReached ? "#ef4444" : mutedText }} />
                   <div>
                     <p className="text-[0.82rem] font-bold" style={{ color: nftLimitReached ? "#ef4444" : neutralText }}>
-                      ?대쾲 ???ㅻЪ NFT 援먰솚 ?꾪솴
+                      이번 달 실물 NFT 교환 현황
                     </p>
                     <p className="text-[0.76rem] mt-0.5" style={{ color: mutedText }}>
-                      {status.tier} ?깃툒 쨌 ??理쒕? {status.limits.nft}??
+                      {status.tier} 등급 · 월 최대 {status.limits.nft}회
                     </p>
                   </div>
                 </div>
@@ -242,13 +242,13 @@ export function Exchange() {
                 <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}>
                   <Package className="w-8 h-8" />
                 </motion.div>
-                <span className="ml-3">移대뱶 紐⑸줉 遺덈윭?ㅻ뒗 以?..</span>
+                <span className="ml-3">카드 목록 불러오는 중...</span>
               </div>
             ) : exchangableCards.length === 0 ? (
               <div className="rounded-[18px] border px-6 py-16 text-center" style={{ background: panelBg, border: panelBorder }}>
                 <Package className="w-12 h-12 mx-auto mb-4" style={{ color: mutedText, opacity: 0.5 }} />
-                <p className="font-bold text-[1rem]" style={{ color: neutralText }}>援먰솚 媛?ν븳 NFT 移대뱶媛 ?놁뒿?덈떎</p>
-                <p className="mt-2 text-[0.88rem]" style={{ color: mutedText }}>移대뱶 議고빀 ?섏씠吏?먯꽌 ?뚰렪??議고빀??NFT 移대뱶瑜??띾뱷?대낫?몄슂!</p>
+                <p className="font-bold text-[1rem]" style={{ color: neutralText }}>교환 가능한 NFT 카드가 없습니다</p>
+                <p className="mt-2 text-[0.88rem]" style={{ color: mutedText }}>카드 조합 페이지에서 파편을 조합해 NFT 카드를 획득해보세요!</p>
               </div>
             ) : (
               <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -303,7 +303,7 @@ export function Exchange() {
                   }}
                 >
                   <ArrowLeftRight className="w-4 h-4" />
-                  {nftLimitReached ? "?대쾲 ??援먰솚 ?쒕룄 珥덇낵" : "援먰솚 ?좎껌?섍린"}
+                  {nftLimitReached ? "이번 달 교환 한도 초과" : "교환 신청하기"}
                   {selectedCard && !nftLimitReached && <ChevronRight className="w-4 h-4" />}
                 </Button>
               </div>
@@ -380,7 +380,7 @@ export function Exchange() {
                     {/* ?대쾲 ??援먰솚 ?꾪솴 */}
                     <div className="flex flex-col items-center gap-1 py-4"
                       style={{ borderBottom: `1px solid ${isDark ? "rgba(88,110,134,0.2)" : "#e2e8f2"}` }}>
-                      <p className="text-[0.84rem] font-bold" style={{ color: mutedText }}>?대쾲 ??援먰솚 ?꾪솴</p>
+                      <p className="text-[0.84rem] font-bold" style={{ color: mutedText }}>이번 달 교환 현황</p>
                       {status ? (
                         <>
                           <span className="text-[2rem] font-black leading-none" style={{ color: raffleLimitReached ? "#ef4444" : accentGreen }}>
@@ -442,7 +442,7 @@ export function Exchange() {
 
                 {/* ?ㅻ뜑 */}
                 <div className="flex items-center justify-between px-6 py-5 border-b" style={{ borderColor: isDark ? "rgba(88,110,134,0.2)" : "#e8edf4" }}>
-                  <p className="font-black text-[1.05rem]" style={{ color: neutralText }}>援먰솚 ?좎껌</p>
+                  <p className="font-black text-[1.05rem]" style={{ color: neutralText }}>교환 신청</p>
                   <button onClick={() => setConfirmModal(null)} className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-70"
                     style={{ background: surfaceBg }}>
                     <X className="w-4 h-4" style={{ color: mutedText }} />
@@ -520,7 +520,7 @@ export function Exchange() {
                   <div className="flex gap-3">
                     <button onClick={() => setConfirmModal(null)} className="flex-1 py-3 rounded-[12px] text-[0.9rem] font-bold"
                       style={{ background: surfaceBg, border: surfaceBorder, color: mutedText }}>
-                      痍⑥냼
+                      취소
                     </button>
                     <button
                       onClick={() => handleExchange(confirmModal)}
@@ -528,7 +528,7 @@ export function Exchange() {
                       className="flex-1 py-3 rounded-[12px] text-[0.9rem] font-black text-white transition-opacity"
                       style={{ background: addrFilled ? "linear-gradient(135deg, #2563eb, #10b981)" : (isDark ? "rgba(88,110,134,0.2)" : "#e2e8f0"),
                         color: addrFilled ? "#fff" : mutedText, opacity: exchanging ? 0.7 : 1, cursor: addrFilled && !exchanging ? "pointer" : "not-allowed" }}>
-                      {exchanging ? "泥섎━ 以?.." : "援먰솚 ?좎껌"}
+                      {exchanging ? "처리 중..." : "교환 신청"}
                     </button>
                   </div>
                 </div>
