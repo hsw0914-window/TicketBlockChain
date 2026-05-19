@@ -21,40 +21,48 @@ function hashDid(walletAddress) {
   return crypto.createHash('sha256').update(walletAddress.toLowerCase()).digest('hex');
 }
 
+let _gatewayPromise = null;
+
 async function getGateway() {
-  const ccp    = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
-  const wallet = await Wallets.newFileSystemWallet(walletPath);
-  const gateway = new Gateway();
-  await gateway.connect(ccp, {
-    wallet,
-    identity:  'appUser',
-    discovery: { enabled: true, asLocalhost: true },
-  });
-  return gateway;
+  if (_gatewayPromise) return _gatewayPromise;
+  _gatewayPromise = (async () => {
+    const ccp    = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
+    const wallet = await Wallets.newFileSystemWallet(walletPath);
+    const gateway = new Gateway();
+    let lastErr;
+    for (let i = 0; i < 5; i++) {
+      try {
+        await gateway.connect(ccp, {
+          wallet,
+          identity:  'appUser',
+          discovery: { enabled: false, asLocalhost: true },
+        });
+        return gateway;
+      } catch (e) {
+        lastErr = e;
+        if (i < 4) await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+    _gatewayPromise = null;
+    throw lastErr;
+  })();
+  return _gatewayPromise;
 }
 
 async function submitTx(func, ...args) {
-  const gateway = await getGateway();
-  try {
-    const network  = await gateway.getNetwork(channelName);
-    const contract = network.getContract(chaincodeName);
-    const result   = await contract.submitTransaction(func, ...args.map(String));
-    return result ? result.toString() : '';
-  } finally {
-    gateway.disconnect();
-  }
+  const gateway  = await getGateway();
+  const network  = await gateway.getNetwork(channelName);
+  const contract = network.getContract(chaincodeName);
+  const result   = await contract.submitTransaction(func, ...args.map(String));
+  return result ? result.toString() : '';
 }
 
 async function evaluateTx(func, ...args) {
-  const gateway = await getGateway();
-  try {
-    const network  = await gateway.getNetwork(channelName);
-    const contract = network.getContract(chaincodeName);
-    const result   = await contract.evaluateTransaction(func, ...args.map(String));
-    return result ? result.toString() : '';
-  } finally {
-    gateway.disconnect();
-  }
+  const gateway  = await getGateway();
+  const network  = await gateway.getNetwork(channelName);
+  const contract = network.getContract(chaincodeName);
+  const result   = await contract.evaluateTransaction(func, ...args.map(String));
+  return result ? result.toString() : '';
 }
 
 // ─── 1. RegisterTicket ────────────────────────────────────
