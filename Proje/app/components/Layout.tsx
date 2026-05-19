@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, Gift } from "lucide-react";
+import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, Gift, QrCode } from "lucide-react";
 import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
@@ -73,6 +73,7 @@ export function Layout() {
     { path: "/exchange",      label: "교환소",       icon: Gift },
     { path: "/community",     label: "커뮤니티",     icon: MessagesSquare },
     { path: "/notice",        label: "공지사항",     icon: Bell },
+    { path: "/entry-scanner", label: "QR 입장",      icon: QrCode },
   ];
 
   const isActive = (path: string) => {

@@ -25,6 +25,7 @@ const MemeInfo       = lazy(() => import("./pages/MemeInfo").then((m) => ({ defa
 const Attendance     = lazy(() => import("./pages/Attendance").then((m) => ({ default: m.Attendance })));
 const Detail         = lazy(() => import("./pages/Detail").then((m) => ({ default: m.Detail })));
 const Exchange       = lazy(() => import("./pages/Exchange").then((m) => ({ default: m.Exchange })));
+const EntryScanner   = lazy(() => import("./pages/EntryScanner").then((m) => ({ default: m.EntryScanner })));
 
 function withSuspense(Component: React.ComponentType) {
   return function LazyRoute() {
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
       { path: "attendance",               Component: withSuspense(Attendance) },
       { path: "detail/:id",               Component: withSuspense(Detail) },
       { path: "exchange",                  Component: withSuspense(Exchange) },
+      { path: "entry-scanner",             Component: withSuspense(EntryScanner) },
     ],
   },
   {
