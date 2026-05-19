@@ -37,6 +37,11 @@ async function getGateway() {
   return gateway;
 }
 
+function isChaincodeBizError(e) {
+  // 체인코드가 status=500으로 반환한 비즈니스 에러 → 재시도 불필요
+  return e && typeof e.message === 'string' && e.message.includes('status=500');
+}
+
 async function submitTx(func, ...args) {
   let lastErr;
   for (let i = 0; i < 3; i++) {
@@ -48,6 +53,7 @@ async function submitTx(func, ...args) {
       return result ? result.toString() : '';
     } catch (e) {
       lastErr = e;
+      if (isChaincodeBizError(e)) throw e;
       _gateway = null;
       if (i < 2) await new Promise(r => setTimeout(r, 3000));
     }
@@ -66,6 +72,7 @@ async function evaluateTx(func, ...args) {
       return result ? result.toString() : '';
     } catch (e) {
       lastErr = e;
+      if (isChaincodeBizError(e)) throw e;
       _gateway = null;
       if (i < 2) await new Promise(r => setTimeout(r, 3000));
     }
