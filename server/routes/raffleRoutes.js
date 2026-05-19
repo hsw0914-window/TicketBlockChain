@@ -204,7 +204,18 @@ router.post('/draw/execute', requireAuth, async (req, res) => {
     if (!draw) return res.status(404).json({ error: '추첨을 찾을 수 없습니다' });
     if (draw.status === 'COMPLETED') return res.status(400).json({ error: '이미 완료된 추첨입니다' });
 
-    const fabricResult = await fabricService.executeDraw({ drawId });
+    // Fabric 원장에 draw가 없으면 (DB 시드 데이터 등) 먼저 생성
+    let fabricResult;
+    try {
+      fabricResult = await fabricService.executeDraw({ drawId });
+    } catch (execErr) {
+      if (execErr.message && execErr.message.includes('DRAW_NOT_FOUND')) {
+        await fabricService.createDraw({ drawId: draw.id, gameId: draw.game_id, winnerCount: draw.winner_count });
+        fabricResult = await fabricService.executeDraw({ drawId });
+      } else {
+        throw execErr;
+      }
+    }
 
     await conn.beginTransaction();
 

@@ -13,20 +13,28 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 BASE = os.path.join(REPO, 'fabric', 'basic-network', 'organizations')
 CCP  = os.path.join(REPO, 'fabric', 'application', 'connection-org1.json')
 
-peer_ca_path    = os.path.join(BASE, 'peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt')
+peer1_ca_path   = os.path.join(BASE, 'peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt')
+peer2_ca_path   = os.path.join(BASE, 'peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt')
 orderer_ca_path = os.path.join(BASE, 'ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt')
 
-for p in [peer_ca_path, orderer_ca_path, CCP]:
+for p in [peer1_ca_path, orderer_ca_path, CCP]:
     if not os.path.exists(p):
         print(f'❌ 파일 없음: {p}')
         sys.exit(1)
 
-peer_ca    = open(peer_ca_path).read().strip()
-orderer_ca = open(orderer_ca_path).read().strip()
+# Org2 TLS CA는 없을 수도 있음 (dev 모드에서 Org2 컨테이너 미실행 시)
+has_org2 = os.path.exists(peer2_ca_path)
+if not has_org2:
+    print('⚠️  Org2 TLS CA 없음 — Org2 피어 제외 (dev 모드)')
+
+peer1_ca    = open(peer1_ca_path).read().strip()
+orderer_ca  = open(orderer_ca_path).read().strip()
+peer2_ca    = open(peer2_ca_path).read().strip() if has_org2 else None
 
 d = json.load(open(CCP))
 
-d['peers']['peer0.org1.example.com']['tlsCACerts']['pem'] = peer_ca
+# ── Org1 피어 ─────────────────────────────────────────────
+d['peers']['peer0.org1.example.com']['tlsCACerts']['pem'] = peer1_ca
 d['peers']['peer0.org1.example.com']['grpcOptions'] = {
     'ssl-target-name-override': 'peer0.org1.example.com',
     'hostnameOverride':         'peer0.org1.example.com',
@@ -34,6 +42,27 @@ d['peers']['peer0.org1.example.com']['grpcOptions'] = {
     'grpc-wait-for-ready-timeout': 30000,
 }
 
+# ── Org2 피어 (있을 때만) ──────────────────────────────────
+if has_org2:
+    d['peers']['peer0.org2.example.com'] = {
+        'url': 'grpcs://localhost:9051',
+        'tlsCACerts': {'pem': peer2_ca},
+        'grpcOptions': {
+            'ssl-target-name-override': 'peer0.org2.example.com',
+            'hostnameOverride':         'peer0.org2.example.com',
+            'request-timeout':          30000,
+            'grpc-wait-for-ready-timeout': 30000,
+        },
+    }
+
+# ── organizations ─────────────────────────────────────────
+if has_org2:
+    d['organizations']['Org2'] = {
+        'mspid': 'Org2MSP',
+        'peers': ['peer0.org2.example.com'],
+    }
+
+# ── orderers ─────────────────────────────────────────────
 d['orderers'] = {
     'orderer.example.com': {
         'url': 'grpcs://localhost:7050',
@@ -47,21 +76,32 @@ d['orderers'] = {
     }
 }
 
+# ── channels ─────────────────────────────────────────────
+channel_peers = {
+    'peer0.org1.example.com': {
+        'endorsingPeer': True,
+        'chaincodeQuery': True,
+        'ledgerQuery':    True,
+        'eventSource':    True,
+    }
+}
+if has_org2:
+    channel_peers['peer0.org2.example.com'] = {
+        'endorsingPeer': True,
+        'chaincodeQuery': False,
+        'ledgerQuery':    False,
+        'eventSource':    False,
+    }
+
 d['channels'] = {
     'channel1': {
         'orderers': ['orderer.example.com'],
-        'peers': {
-            'peer0.org1.example.com': {
-                'endorsingPeer': True,
-                'chaincodeQuery': True,
-                'ledgerQuery':    True,
-                'eventSource':    True,
-            }
-        },
+        'peers': channel_peers,
     }
 }
 
-d['certificateAuthorities']['ca.org1.example.com']['tlsCACerts']['pem'] = [peer_ca]
+# ── CA TLS ───────────────────────────────────────────────
+d['certificateAuthorities']['ca.org1.example.com']['tlsCACerts']['pem'] = [peer1_ca]
 
 json.dump(d, open(CCP, 'w'), indent=2)
 print('✅ connection-org1.json 업데이트 완료')
