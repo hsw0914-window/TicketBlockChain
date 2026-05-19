@@ -154,6 +154,55 @@ const SEED_GAMES = [
 
 // ─── 초기화 함수 ──────────────────────────────────────────
 
+const GOODS_SEED = [
+  ['kt-sign-ball', 1, 1, 'kt-goods', 'KT', 'KT 위즈 사인볼 파편', 'KT 위즈 공인구 사인볼 카드', '/goods/kt-sign-ball.png', 'KT 위즈 선수단의 공식 공인구 사인볼 완성 카드', '위즈 파크의 열기를 담은 공인구 사인볼 조각', 'HOT', '#c8102e', '#ff6b6b', 88, 14, 6, '위즈 파크 현장 직관 팬들 사이에서 빠르게 수요가 붙는 파편입니다.', [15200, 16400, 17800, 18500, 17900, 19200, 20500]],
+  ['nc-sticker', 2, 2, 'nc-goods', 'NC', 'NC 다이노스 스티커 파편', 'NC 다이노스 시즌 스티커 컬렉션 카드', '/goods/nc-sticker.png', 'NC 다이노스 팬만을 위한 시즌 한정 스티커 컬렉션', '창원 NC파크 한정 시즌 스티커 조각', 'RISING', '#0033a0', '#7ec8ff', 74, 14, 6, '창원 원정 팬들이 가장 많이 찾는 시즌 한정 파편입니다.', [11200, 11800, 12300, 12100, 13000, 13400, 14200]],
+  ['ssg-goods', 3, 3, 'ssg-goods', 'SSG', 'SSG 랜더스 개막 굿즈 파편', 'SSG 랜더스 개막 굿즈 카드', '/goods/ssg.png', 'SSG 랜더스 개막 시즌 공식 굿즈 완성 카드', '문학구장 개막 시리즈 기념 굿즈 조각', 'LIVE', '#ce1141', '#ff9d3b', 65, 14, 6, '개막 시즌 문학구장 기념 굿즈 파편으로 꾸준히 거래됩니다.', [8800, 9100, 9400, 9200, 9700, 10100, 10600]],
+  ['kia-sign-ball', 4, 4, 'kia-goods', 'KIA', 'KIA 나성범 사인볼 파편', 'KIA 나성범 친필 사인볼 카드', '/goods/kia-sign-ball.png', '나성범 선수의 친필 사인이 담긴 레전드 카드', '나성범 선수 친필 사인이 담긴 희귀 조각', 'HOT', '#ff5800', '#ffe100', 92, 8, 4, '나성범 선수 친필 사인이 담긴 초희귀 파편입니다.', [22000, 23500, 24800, 26200, 25700, 27400, 29800]],
+  ['doosan-uniform', 5, 5, 'doosan-goods', '두산', '두산 베어스 유니폼 파편', '두산 베어스 선수단 유니폼 카드', '/goods/doosan-uniform.png', '두산 베어스 공식 레플리카 유니폼 완성 카드', '잠실의 전통을 이어가는 베어스 유니폼 조각', 'RISING', '#131230', '#7ec8ff', 79, 12, 6, '잠실 베어스 레플리카 유니폼 파편으로 수집 수요가 높습니다.', [14100, 15200, 16000, 15700, 17100, 17900, 18800]],
+  ['lotte-bat', 6, 6, 'lotte-goods', '롯데', '롯데 자이언츠 야구배트 파편', '롯데 자이언츠 황금배트 카드', '/goods/lotte-bat.png', '롯데 자이언츠 시즌 황금배트 기념 완성 카드', '사직구장의 함성을 담은 황금배트 조각', 'LIVE', '#002d62', '#ff9d3b', 67, 12, 6, '사직구장 응원석의 뜨거운 배트 응원 장면을 담은 파편입니다.', [10500, 11200, 11800, 12400, 12000, 13100, 13800]],
+  ['samsung-fan', 7, 7, 'samsung-goods', '삼성', '삼성 라이온즈 응원 부채 파편', '삼성 라이온즈 여름 응원 부채 카드', '/goods/samsung-fan.png', '삼성 라이온즈 여름 한정 공식 응원 부채 카드', '대구 여름 직관의 필수템, 삼성 응원 부채 조각', 'STEADY', '#074ca1', '#ffe100', 55, 14, 6, '대구 여름 직관의 필수템, 삼성 응원 부채 파편입니다.', [6800, 7100, 7300, 7500, 7200, 7700, 8200]],
+  ['lg-bat', 8, 8, 'lg-goods', 'LG', 'LG 트윈스 야구배트 파편', 'LG 트윈스 레전드 기념배트 카드', '/goods/lg-bat.png', 'LG 트윈스 레전드 선수 기념 미니배트 완성 카드', '잠실의 레전드 트윈스 기념 미니배트 조각', 'RISING', '#c60c30', '#8d7cf6', 81, 10, 5, '잠실 레전드 트윈스의 기념 미니배트 파편입니다.', [16800, 17500, 18200, 19000, 18600, 20100, 21400]],
+  ['kiwoom-uniform', 9, 9, 'kiwoom-goods', '키움', '키움 히어로즈 유니폼 파편', '키움 히어로즈 홈 유니폼 카드', '/goods/kiwoom-uniform.png', '키움 히어로즈 홈 공식 유니폼 완성 카드', '고척돔을 가득 채운 히어로즈 유니폼 조각', 'STEADY', '#570514', '#ff9d3b', 58, 10, 6, '고척돔 히어로즈 홈 유니폼 파편으로 꾸준한 거래를 보입니다.', [7900, 8200, 8500, 8300, 8800, 9200, 9700]],
+  ['hanwha-sticker', 10, 10, 'hanwha-goods', '한화', '한화 이글스 포토 스티커 파편', '한화 이글스 팬 포토 스티커 카드', '/goods/hanwha-sticker.png', '한화 이글스 팬 한정 포토 스티커 컬렉션 카드', '대전 이글스파크 팬 한정 포토 스티커 조각', 'STEADY', '#ff6600', '#ffe100', 51, 12, 5, '대전 이글스파크 팬 전용 포토 스티커 파편입니다.', [5500, 5800, 6000, 6200, 6100, 6500, 7000]],
+];
+
+async function seedGoodsMarketData(conn) {
+  await conn.query(`DELETE FROM price_history`);
+  await conn.query(`DELETE FROM market_assets`);
+  await conn.query(`DELETE FROM box_reward_pool`);
+  await conn.query(`DELETE FROM combine_recipes`);
+  await conn.query(`DELETE FROM fragment_types`);
+  await conn.query(`DELETE FROM card_types`);
+
+  for (const item of GOODS_SEED) {
+    const [fragmentId, cardId, onchainId, family, team, fragmentName, cardName, image, cardNote, fragmentNote, tier, color, accent, demandScore, fragmentWeight, goodsWeight, marketDescription, prices] = item;
+    await conn.query(`INSERT INTO card_types (id, team, name, image_url, note) VALUES (?, ?, ?, ?, ?)`, [cardId, team, cardName, image, cardNote]);
+    await conn.query(
+      `INSERT INTO fragment_types (id, onchain_id, family, team, name, result_name, image_url, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [fragmentId, onchainId, family, team, fragmentName, cardName, image, fragmentNote]
+    );
+    await conn.query(`INSERT INTO combine_recipes (fragment_type_id, result_card_type_id, required_count) VALUES (?, ?, 2)`, [fragmentId, cardId]);
+    await conn.query(
+      `INSERT INTO box_reward_pool (type, fragment_type_id, card_type_id, weight, name, image_url, description) VALUES ('fragment', ?, NULL, ?, ?, ?, ?)`,
+      [fragmentId, fragmentWeight, fragmentName, image, `${fragmentName} 1개를 획득했습니다.`]
+    );
+    await conn.query(
+      `INSERT INTO box_reward_pool (type, fragment_type_id, card_type_id, weight, name, image_url, description) VALUES ('goods', NULL, ?, ?, ?, ?, ?)`,
+      [cardId, goodsWeight, cardName, image, `${cardName} 원본 굿즈 NFT를 획득했습니다!`]
+    );
+    await conn.query(
+      `INSERT INTO market_assets (id, fragment_type_id, idol, asset_name, tier, color, accent, demand_score, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [fragmentId, fragmentId, team, fragmentName, tier, color, accent, demandScore, marketDescription]
+    );
+    for (const [index, price] of prices.entries()) {
+      const daysAgo = prices.length - 1 - index;
+      const recordedDate = daysAgo === 0 ? 'CURDATE()' : `DATE_SUB(CURDATE(), INTERVAL ${daysAgo} DAY)`;
+      await conn.query(`INSERT INTO price_history (fragment_type_id, price, recorded_date) VALUES (?, ?, ${recordedDate})`, [fragmentId, price]);
+    }
+  }
+}
+
 async function initDB() {
   const conn = await mysql.createConnection(DB_CONFIG);
 
@@ -916,6 +965,8 @@ async function initDB() {
   `);
 
   // ─── 테스트 추첨 시드 (서버 재시작마다 복구) ─────────
+  await seedGoodsMarketData(conn);
+
   await conn.query(`
     INSERT INTO draws (id, game_id, status, winner_count, total_entries) VALUES
     ('draw-seed-0000-0001', 'G004', 'PENDING',   5, 0),
