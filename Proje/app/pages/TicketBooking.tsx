@@ -151,22 +151,35 @@ export function TicketBooking() {
   const { walletAddress, connectWallet } = useAppSettings();
   const accessStatus = useBookingAccess();
 
+  const [bookingOpenAt, setBookingOpenAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(new Date());
+
   // 로컬 이벤트 먼저 시도, 없으면 API에서 게임 정보 가져와서 템플릿으로 변환
   const [event, setEvent] = useState<TicketEvent | undefined>(() => getTicketEvent(eventId));
   const [eventLoading, setEventLoading] = useState(!getTicketEvent(eventId));
 
   useEffect(() => {
-    if (getTicketEvent(eventId)) return; // 로컬에 있으면 API 불필요
     fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games/${eventId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.data) {
-          setEvent(buildEventFromApiGame(data.data));
+          if (data.data.booking_open_at) {
+            setBookingOpenAt(new Date(data.data.booking_open_at));
+          }
+          if (!getTicketEvent(eventId)) {
+            setEvent(buildEventFromApiGame(data.data));
+          }
         }
       })
       .catch((err) => console.error("[TicketBooking] 경기 조회 실패:", err))
       .finally(() => setEventLoading(false));
   }, [eventId]);
+
+  // 1분마다 now 갱신
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const [currentStep, setCurrentStep] = useState(0);
   const [verificationCode, setVerificationCode] = useState(() => createVerificationCode());
@@ -274,6 +287,54 @@ export function TicketBooking() {
     agreements.officialOnly &&
     agreements.maxQuantity;
   const paymentReady = verificationPassed && agreements.refundPolicy && selectedTickets.length > 0;
+
+  // 예매 오픈 전 차단 화면
+  if (!eventLoading && bookingOpenAt && now < bookingOpenAt) {
+    const diff   = bookingOpenAt.getTime() - now.getTime();
+    const totalMin = Math.floor(diff / 60000);
+    const days   = Math.floor(totalMin / 1440);
+    const hours  = Math.floor((totalMin % 1440) / 60);
+    const mins   = totalMin % 60;
+    const openStr = bookingOpenAt.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })
+      + " " + bookingOpenAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+    return (
+      <div className="page-shell flex items-center justify-center min-h-[60vh]">
+        <div className="rounded-[28px] border px-10 py-12 text-center max-w-md w-full"
+          style={{ background: "#fff", borderColor: "#d7e0e8", boxShadow: "0 20px 48px rgba(17,40,73,0.08)" }}>
+          <div className="flex h-16 w-16 items-center justify-center rounded-full mx-auto mb-5"
+            style={{ background: "#eef4ff" }}>
+            <Clock3 className="h-8 w-8" style={{ color: "#1456a0" }} />
+          </div>
+          <h2 className="text-[1.25rem] font-black mb-2" style={{ color: "#14253f" }}>예매 오픈 전입니다</h2>
+          <p className="text-[0.9rem] mb-6" style={{ color: "#55657d" }}>
+            예매 오픈 일시: <strong style={{ color: "#1456a0" }}>{openStr}</strong>
+          </p>
+          <div className="flex justify-center gap-4 mb-6">
+            {[
+              { label: "일", value: days },
+              { label: "시간", value: hours },
+              { label: "분", value: mins },
+            ].map(({ label, value }) => (
+              <div key={label} className="rounded-[16px] px-5 py-4 min-w-[72px]"
+                style={{ background: "#eef4ff", border: "1px solid #bfdbfe" }}>
+                <p className="text-[1.8rem] font-black leading-none" style={{ color: "#1456a0" }}>
+                  {String(value).padStart(2, "0")}
+                </p>
+                <p className="text-[0.72rem] font-semibold mt-1" style={{ color: "#6d8aaa" }}>{label}</p>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => navigate("/tickets")}
+            className="rounded-[14px] px-6 py-3 text-[0.9rem] font-bold text-white"
+            style={{ background: "linear-gradient(135deg, #1456a0, #1e7fd0)" }}
+          >
+            경기 목록으로 돌아가기
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!event) {
     if (eventLoading) {

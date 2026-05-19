@@ -1,6 +1,6 @@
 import { Award, Check, ChevronLeft, Clock3, CreditCard, Lock, Star, Ticket } from "lucide-react";
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { FaBaseballBall, FaTrophy } from "react-icons/fa";
 import { GiBaseballBat, GiBaseballGlove } from "react-icons/gi";
 
@@ -200,6 +200,7 @@ type MembershipInfo = {
 };
 
 export function Membership() {
+  const navigate = useNavigate();
   const [earlyAccessCount, setEarlyAccessCount] = useState<number | null>(null);
   const [membership, setMembership] = useState<MembershipInfo | null>(null);
   const [tierUpLoading, setTierUpLoading] = useState(false);
@@ -364,6 +365,7 @@ export function Membership() {
                 {isRaffle && (
                   <button
                     disabled={!hasTicket}
+                    onClick={() => navigate("/mypage/raffle")}
                     className="mt-4 w-full rounded-[10px] py-2 text-[0.82rem] font-black transition-all"
                     style={{
                       background: hasTicket ? "linear-gradient(135deg, #2563eb, #10b981)" : "#e2e8f0",

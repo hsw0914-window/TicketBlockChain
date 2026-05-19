@@ -20,6 +20,7 @@ import { Register } from "./pages/Register";
 import { NoticeWrite } from "./pages/NoticeWrite";
 import { TicketResale } from "./pages/TicketResale";
 import { Exchange } from "./pages/Exchange";
+import { Raffle } from "./pages/Raffle";
 
 export const router = createBrowserRouter([
   {
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
       { path: "notice/write/:id", Component: NoticeWrite },
       { path: "mypage", Component: MyPage },
       { path: "mypage/membership", Component: Membership },
+      { path: "mypage/raffle", Component: Raffle },
       { path: "ticket-resale", Component: TicketResale },
       { path: "exchange", Component: Exchange },
       { path: "collection", Component: Collection },

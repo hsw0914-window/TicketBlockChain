@@ -364,7 +364,6 @@ export function MyPage() {
             style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" }}
           >
             <div className="mb-5 flex items-center gap-3">
-              <Wallet className="h-5 w-5" style={{ color: "#526183" }} />
               <div>
                 <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>지갑 연결</h2>
                 <p className="page-muted mt-1" style={{ color: "#6d7d90" }}>메타마스크를 연결해서 NFT 티켓과 팬 자산 거래를 인증합니다.</p>
@@ -437,7 +436,6 @@ export function MyPage() {
             style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" }}
           >
             <div className="mb-5 flex items-center gap-3">
-              <Fingerprint className="h-5 w-5" style={{ color: "#526183" }} />
               <div>
                 <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>DID 인증</h2>
                 <p className="page-muted mt-1" style={{ color: "#6d7d90" }}>MetaMask 서명으로 지갑 소유권을 검증하고 분산 신원을 등록합니다.</p>
@@ -528,7 +526,6 @@ export function MyPage() {
             style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17,40,73,0.05)" }}
           >
             <div className="mb-5 flex items-center gap-3">
-              <History className="h-5 w-5" style={{ color: "#526183" }} />
               <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>온체인 트랜잭션 이력</h2>
             </div>
             {txLoading ? (

@@ -145,6 +145,113 @@ async function initDB() {
       );
       console.log("✅ early-access-pass fragment_type 추가 완료");
     }
+    // game_raffle_entries 테이블 마이그레이션
+    const [raffleTable] = await conn.query(`SHOW TABLES LIKE 'game_raffle_entries'`);
+    if (raffleTable.length === 0) {
+      await conn.query(`
+        CREATE TABLE game_raffle_entries (
+          id           INT          PRIMARY KEY AUTO_INCREMENT,
+          user_id      VARCHAR(50)  NOT NULL,
+          game_id      VARCHAR(50)  NOT NULL,
+          tickets_used INT          NOT NULL DEFAULT 1,
+          status       ENUM('applied','won','lost') NOT NULL DEFAULT 'applied',
+          applied_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_user_game (user_id, game_id),
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+          FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+        )
+      `);
+      console.log("✅ game_raffle_entries 테이블 생성 완료");
+    } else {
+      // tickets_used 컬럼 마이그레이션
+      const [ticketsUsedCol] = await conn.query(`SHOW COLUMNS FROM game_raffle_entries LIKE 'tickets_used'`);
+      if (ticketsUsedCol.length === 0) {
+        await conn.query(`ALTER TABLE game_raffle_entries ADD COLUMN tickets_used INT NOT NULL DEFAULT 1 AFTER game_id`);
+        console.log("✅ game_raffle_entries.tickets_used 컬럼 추가 완료");
+      }
+    }
+    // booking_open_at 컬럼 마이그레이션
+    const [bookingCol] = await conn.query(`SHOW COLUMNS FROM games LIKE 'booking_open_at'`);
+    if (bookingCol.length === 0) {
+      await conn.query(`ALTER TABLE games ADD COLUMN booking_open_at DATETIME DEFAULT NULL`);
+      console.log("✅ booking_open_at 컬럼 추가 완료");
+    }
+    // raffle_open_at 컬럼 마이그레이션
+    const [raffleOpenCol] = await conn.query(`SHOW COLUMNS FROM games LIKE 'raffle_open_at'`);
+    if (raffleOpenCol.length === 0) {
+      await conn.query(`ALTER TABLE games ADD COLUMN raffle_open_at DATETIME DEFAULT NULL`);
+      console.log("✅ raffle_open_at 컬럼 추가 완료");
+    }
+    // raffle_winners_count 컬럼 마이그레이션
+    const [winnersCol] = await conn.query(`SHOW COLUMNS FROM games LIKE 'raffle_winners_count'`);
+    if (winnersCol.length === 0) {
+      await conn.query(`ALTER TABLE games ADD COLUMN raffle_winners_count INT NOT NULL DEFAULT 5`);
+      console.log("✅ raffle_winners_count 컬럼 추가 완료");
+    }
+    // 테스트용 경기 (항상 예매 가능)
+    const [[testGame]] = await conn.query(`SELECT id FROM games WHERE id = 'G_TEST'`);
+    if (!testGame) {
+      await conn.query(
+        `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at)
+         VALUES ('G_TEST', '테스트홈', '테스트어웨이', '2099-12-31', '18:30:00', 'jamsil', 'OPEN', 13000, '2020-01-01 00:00:00')`
+      );
+      console.log("✅ 테스트 경기 G_TEST 생성 완료");
+    }
+    // 경기 날짜 5월로 업데이트 + booking_open_at 설정
+    const gameUpdates = [
+      { id: "G001", date: "2026-05-20", time: "18:30:00", open: "2026-05-15 10:00:00", status: "OPEN",     winners: 5 },
+      { id: "G002", date: "2026-05-20", time: "18:30:00", open: "2026-05-15 10:00:00", status: "ALMOST",   winners: 5 },
+      { id: "G003", date: "2026-05-20", time: "14:00:00", open: "2026-05-15 10:00:00", status: "SOLDOUT",  winners: 5 },
+      { id: "G004", date: "2026-05-21", time: "18:30:00", open: "2026-05-19 10:00:00", status: "UPCOMING", winners: 5 },
+      { id: "G005", date: "2026-05-21", time: "18:30:00", open: "2026-05-19 10:00:00", status: "UPCOMING", winners: 5 },
+      { id: "G006", date: "2026-05-24", time: "14:00:00", open: "2026-05-22 10:00:00", status: "UPCOMING", winners: 5 },
+      { id: "G007", date: "2026-05-25", time: "18:30:00", open: "2026-05-22 10:00:00", status: "UPCOMING", winners: 5 },
+      { id: "G008", date: "2026-05-25", time: "18:30:00", open: "2026-05-22 10:00:00", status: "UPCOMING", winners: 5 },
+      { id: "G009", date: "2026-05-28", time: "18:30:00", open: "2026-05-26 10:00:00", status: "UPCOMING", winners: 5 },
+      { id: "G010", date: "2026-05-31", time: "14:00:00", open: "2026-05-28 10:00:00", status: "UPCOMING", winners: 5 },
+    ];
+    for (const g of gameUpdates) {
+      await conn.query(
+        `UPDATE games SET game_date=?, game_time=?, status=?, booking_open_at=?, raffle_winners_count=? WHERE id=?`,
+        [g.date, g.time, g.status, g.open, g.winners, g.id]
+      );
+    }
+    console.log("✅ 경기 날짜 5월 업데이트 + booking_open_at 설정 완료");
+    // raffle_open_at 설정 (booking_open_at - 2시간)
+    const raffleOpenUpdates = [
+      { id: "G001", open: "2026-05-15 08:00:00" },
+      { id: "G002", open: "2026-05-15 08:00:00" },
+      { id: "G003", open: "2026-05-15 08:00:00" },
+      { id: "G004", open: "2026-05-19 08:00:00" },
+      { id: "G005", open: "2026-05-19 08:00:00" },
+      { id: "G006", open: "2026-05-22 08:00:00" },
+      { id: "G007", open: "2026-05-22 08:00:00" },
+      { id: "G008", open: "2026-05-22 08:00:00" },
+      { id: "G009", open: "2026-05-26 08:00:00" },
+      { id: "G010", open: "2026-05-28 08:00:00" },
+    ];
+    for (const r of raffleOpenUpdates) {
+      await conn.query(`UPDATE games SET raffle_open_at = ? WHERE id = ?`, [r.open, r.id]);
+    }
+    // G_TEST: 서버 시작 기준 -1시간 → 항상 응모 창 오픈 상태
+    await conn.query(`UPDATE games SET raffle_open_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE id = 'G_TEST'`);
+    // G_TEST2: 즉시 결과 공개 전용 테스트 경기 (없으면 생성)
+    const [[testGame2]] = await conn.query(`SELECT id FROM games WHERE id = 'G_TEST2'`);
+    if (!testGame2) {
+      await conn.query(
+        `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at, raffle_open_at, raffle_winners_count)
+         VALUES ('G_TEST2', '[TEST] 응모결과', '[TEST] 즉시공개', '2099-12-31', '18:30:00', 'jamsil', 'OPEN', 13000, '2020-01-01 00:00:00', DATE_SUB(NOW(), INTERVAL 1 HOUR), 1)`
+      );
+      console.log("✅ 테스트 경기 G_TEST2 생성 완료");
+    } else {
+      // 매 서버 시작마다 raffle_open_at 갱신 + 당첨자 수 1명 고정 + 응모 내역 초기화
+      await conn.query(
+        `UPDATE games SET raffle_open_at = DATE_SUB(NOW(), INTERVAL 1 HOUR), raffle_winners_count = 1 WHERE id = 'G_TEST2'`
+      );
+      await conn.query(`DELETE FROM game_raffle_entries WHERE game_id = 'G_TEST2'`);
+      console.log("✅ G_TEST2 응모 내역 초기화 완료 (테스트용)");
+    }
+    console.log("✅ raffle_open_at 설정 완료");
     console.log("✅ 기존 DB 유지 (초기화 생략). RESET_DB=true 설정 시에만 재생성합니다.");
     await conn.end();
     return;

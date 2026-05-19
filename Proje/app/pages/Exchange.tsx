@@ -143,7 +143,7 @@ export function Exchange() {
 
       {/* ── 헤더 */}
       <header className="space-y-2">
-        <p className="text-[0.86rem] font-extrabold uppercase tracking-[0.22em]" style={{ color: accentBlue }}>Exchange</p>
+        <p className="page-eyebrow text-[#1456a0] mb-3">Exchange</p>
         <h1 className="text-[2.2rem] font-black leading-tight tracking-[-0.04em]" style={{ color: neutralText }}>교환소</h1>
         <p className="text-[0.98rem]" style={{ color: mutedText }}>실물 NFT 카드를 교환하거나, 포인트로 응모권을 교환하세요</p>
       </header>

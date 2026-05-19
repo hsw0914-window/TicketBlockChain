@@ -402,17 +402,263 @@ router.post('/claim-nft', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/auth/early-access-count — 보유 중인 응모권 수량 조회
+// GET /api/auth/early-access-count — 보유 중인 응모권 수량 + 티어 조회
 router.get('/early-access-count', requireAuth, async (req, res) => {
   try {
     const [[row]] = await _pool.query(
       "SELECT count FROM user_fragments WHERE user_id = ? AND fragment_type_id = 'early-access-pass'",
       [req.user.user_id]
     );
-    res.json({ success: true, count: row ? row.count : 0 });
+    const [[userRow]] = await _pool.query(
+      'SELECT membership_tier FROM users WHERE user_id = ?',
+      [req.user.user_id]
+    );
+    res.json({
+      success: true,
+      count: row ? row.count : 0,
+      tier: userRow?.membership_tier || '일반',
+    });
   } catch (err) {
     console.error('[early-access-count]', err);
     res.status(500).json({ error: '수량 조회 중 서버 오류가 발생했습니다.' });
+  }
+});
+
+// 티어별 최대 응모권 사용 수
+const TIER_MAX_TICKETS = { '일반': 1, '브론즈': 1, '실버': 2, '골드': 2 };
+
+// Pool 기반 추첨: 마감 후 전체 응모자 중 winners_count명 뽑기
+async function runRaffleDraw(pool, gameId) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 행 잠금 (동시 추첨 방지)
+    await conn.query(
+      `SELECT id FROM game_raffle_entries WHERE game_id = ? FOR UPDATE`,
+      [gameId]
+    );
+
+    // 이미 추첨됐는지 확인
+    const [[check]] = await conn.query(
+      `SELECT COUNT(*) AS cnt FROM game_raffle_entries WHERE game_id = ? AND status != 'applied'`,
+      [gameId]
+    );
+    if (check.cnt > 0) { await conn.rollback(); return; }
+
+    // 응모자 목록
+    const [entries] = await conn.query(
+      `SELECT id, user_id, tickets_used FROM game_raffle_entries WHERE game_id = ? AND status = 'applied'`,
+      [gameId]
+    );
+    if (entries.length === 0) { await conn.commit(); return; }
+
+    // 당첨자 수 조회
+    const [[game]] = await conn.query(
+      `SELECT raffle_winners_count FROM games WHERE id = ?`,
+      [gameId]
+    );
+    const maxWinners = Math.min(game?.raffle_winners_count || 5, entries.length);
+
+    // Pool 구성: tickets_used 만큼 슬롯 추가
+    const poolArr = [];
+    for (const entry of entries) {
+      const slots = Math.min(entry.tickets_used || 1, 2);
+      for (let i = 0; i < slots; i++) poolArr.push(entry.user_id);
+    }
+
+    // Fisher-Yates 셔플
+    for (let i = poolArr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [poolArr[i], poolArr[j]] = [poolArr[j], poolArr[i]];
+    }
+
+    // 중복 없이 maxWinners 명 추첨
+    const winners = new Set();
+    for (const userId of poolArr) {
+      if (winners.size >= maxWinners) break;
+      winners.add(userId);
+    }
+
+    // 결과 반영
+    for (const entry of entries) {
+      const status = winners.has(entry.user_id) ? 'won' : 'lost';
+      await conn.query(
+        `UPDATE game_raffle_entries SET status = ? WHERE id = ?`,
+        [status, entry.id]
+      );
+    }
+
+    await conn.commit();
+    console.log(`[raffle draw] ${gameId}: ${winners.size}명 당첨 / ${entries.length}명 응모 / pool ${poolArr.length}장`);
+  } catch (err) {
+    await conn.rollback();
+    console.error('[runRaffleDraw]', err);
+  } finally {
+    conn.release();
+  }
+}
+
+// POST /api/auth/raffle/apply — 경기 응모 (응모권 차감)
+router.post('/raffle/apply', requireAuth, async (req, res) => {
+  const { gameId, ticketsUsed: rawTickets } = req.body;
+  if (!gameId) return res.status(400).json({ error: '경기 ID가 필요합니다.' });
+  const userId     = req.user.user_id;
+  const ticketsUsed = Math.min(Math.max(1, parseInt(rawTickets) || 1), 2);
+  const conn = await _pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 경기 응모 창 확인
+    const [[game]] = await conn.query(
+      'SELECT raffle_open_at FROM games WHERE id = ?',
+      [gameId]
+    );
+    if (!game) {
+      await conn.rollback();
+      return res.status(404).json({ error: '경기를 찾을 수 없습니다.' });
+    }
+    if (!game.raffle_open_at) {
+      await conn.rollback();
+      return res.status(400).json({ error: '이 경기는 응모가 지원되지 않습니다.' });
+    }
+    const raffleOpenAt  = new Date(game.raffle_open_at);
+    const raffleCloseAt = new Date(raffleOpenAt.getTime() + 2 * 60 * 60 * 1000);
+    const nowMs = new Date();
+    if (nowMs < raffleOpenAt) {
+      await conn.rollback();
+      const diff = raffleOpenAt.getTime() - nowMs.getTime();
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      return res.status(400).json({ error: `아직 응모 시간이 아닙니다. ${h > 0 ? h + '시간 ' : ''}${m}분 후 오픈` });
+    }
+    if (nowMs >= raffleCloseAt) {
+      await conn.rollback();
+      return res.status(400).json({ error: '응모 시간이 마감되었습니다.' });
+    }
+
+    // 티어 확인 및 최대 응모권 검증
+    const [[userRow]] = await conn.query(
+      'SELECT membership_tier FROM users WHERE user_id = ?',
+      [userId]
+    );
+    const tier       = userRow?.membership_tier || '일반';
+    const maxTickets = TIER_MAX_TICKETS[tier] || 1;
+    if (ticketsUsed > maxTickets) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: `${tier} 등급은 경기당 최대 ${maxTickets}장까지 응모 가능합니다.`,
+      });
+    }
+
+    // 응모권 보유 확인
+    const [[frag]] = await conn.query(
+      "SELECT count FROM user_fragments WHERE user_id = ? AND fragment_type_id = 'early-access-pass'",
+      [userId]
+    );
+    if (!frag || frag.count < ticketsUsed) {
+      await conn.rollback();
+      return res.status(400).json({ error: `응모권이 부족합니다. (필요: ${ticketsUsed}장, 보유: ${frag?.count ?? 0}장)` });
+    }
+
+    // 중복 응모 확인
+    const [[existing]] = await conn.query(
+      "SELECT id FROM game_raffle_entries WHERE user_id = ? AND game_id = ?",
+      [userId, gameId]
+    );
+    if (existing) {
+      await conn.rollback();
+      return res.status(400).json({ error: '이미 응모한 경기입니다.' });
+    }
+
+    // 응모권 차감
+    await conn.query(
+      "UPDATE user_fragments SET count = count - ? WHERE user_id = ? AND fragment_type_id = 'early-access-pass'",
+      [ticketsUsed, userId]
+    );
+
+    // 응모 기록 저장 (결과는 창 마감 후 pool 추첨으로 결정)
+    await conn.query(
+      "INSERT INTO game_raffle_entries (user_id, game_id, tickets_used, status) VALUES (?, ?, ?, 'applied')",
+      [userId, gameId, ticketsUsed]
+    );
+
+    await conn.commit();
+
+    // G_TEST2: 즉시 추첨 실행 (테스트용)
+    if (gameId === 'G_TEST2') {
+      await runRaffleDraw(_pool, gameId);
+    }
+
+    res.json({ success: true, message: '응모 완료', raffle_close_at: raffleCloseAt.toISOString() });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[raffle/apply]', err);
+    res.status(500).json({ error: '응모 처리 중 서버 오류가 발생했습니다.' });
+  } finally {
+    conn.release();
+  }
+});
+
+// GET /api/auth/raffle/my-entries — 내 응모 내역 조회
+router.get('/raffle/my-entries', requireAuth, async (req, res) => {
+  try {
+    const fetchEntries = () => _pool.query(
+      `SELECT e.id, e.game_id, e.status, e.tickets_used, e.applied_at,
+              g.home_team, g.away_team,
+              DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
+              TIME_FORMAT(g.game_time, '%H:%i') AS game_time,
+              s.name AS stadium_name,
+              g.raffle_open_at,
+              g.booking_open_at,
+              g.raffle_winners_count
+       FROM game_raffle_entries e
+       JOIN games g ON e.game_id = g.id
+       JOIN stadiums s ON g.stadium_id = s.id
+       WHERE e.user_id = ?
+       ORDER BY e.applied_at DESC`,
+      [req.user.user_id]
+    );
+
+    const [rows] = await fetchEntries();
+    const now = new Date();
+
+    // 창이 마감됐는데 아직 'applied' 상태인 경기 → pool 추첨 실행
+    const gamesToDraw = new Set();
+    for (const row of rows) {
+      if (row.status !== 'applied') continue;
+      if (row.game_id === 'G_TEST2') continue; // apply 시점에 이미 추첨
+      const closeAt = row.raffle_open_at
+        ? new Date(new Date(row.raffle_open_at).getTime() + 2 * 60 * 60 * 1000)
+        : null;
+      if (closeAt && now >= closeAt) gamesToDraw.add(row.game_id);
+    }
+
+    // 추첨 실행 (순차, 각 경기 독립 트랜잭션)
+    for (const gameId of gamesToDraw) {
+      await runRaffleDraw(_pool, gameId);
+    }
+
+    // 추첨이 있었으면 재조회
+    const [finalRows] = gamesToDraw.size > 0 ? await fetchEntries() : [rows];
+
+    const data = finalRows.map(row => {
+      const raffleCloseAt = row.raffle_open_at
+        ? new Date(new Date(row.raffle_open_at).getTime() + 2 * 60 * 60 * 1000)
+        : null;
+      const resultVisible = row.game_id === 'G_TEST2'
+        || (raffleCloseAt ? now >= raffleCloseAt : true);
+      return {
+        ...row,
+        status: resultVisible ? row.status : 'applied',
+        result_visible: resultVisible,
+        raffle_close_at: raffleCloseAt ? raffleCloseAt.toISOString() : null,
+      };
+    });
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[raffle/my-entries]', err);
+    res.status(500).json({ error: '조회 중 서버 오류가 발생했습니다.' });
   }
 });
 

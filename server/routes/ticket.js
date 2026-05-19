@@ -38,12 +38,21 @@ router.get("/games", async (req, res) => {
     const [games] = await _pool.query(`
       SELECT g.id, g.home_team, g.away_team,
         DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
-        g.game_time, g.stadium_id, g.status, g.base_price,
+        TIME_FORMAT(g.game_time, '%H:%i') AS game_time,
+        g.stadium_id, g.base_price,
+        g.booking_open_at,
+        g.raffle_open_at,
+        g.raffle_winners_count,
         s.name AS stadium_name, s.location,
-        ELT(WEEKDAY(g.game_date)+1, '월','화','수','목','금','토','일') AS day_of_week
+        ELT(WEEKDAY(g.game_date)+1, '월','화','수','목','금','토','일') AS day_of_week,
+        CASE
+          WHEN TIMESTAMP(g.game_date, g.game_time) < NOW() THEN 'ENDED'
+          WHEN g.booking_open_at IS NOT NULL AND g.booking_open_at > NOW() THEN 'UPCOMING'
+          ELSE g.status
+        END AS status
       FROM games g
       JOIN stadiums s ON g.stadium_id = s.id
-      ORDER BY g.game_date ASC
+      ORDER BY g.game_date ASC, g.game_time ASC
     `);
     res.json({ success: true, data: games });
   } catch (err) {
@@ -59,9 +68,15 @@ router.get("/games/:id", async (req, res) => {
     const [rows] = await _pool.query(
       `SELECT g.id, g.home_team, g.away_team,
          DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
-         TIME_FORMAT(g.game_time, '%H:%i:%s') AS game_time,
-         g.stadium_id, g.status, g.base_price,
-         s.name AS stadium_name, s.location, s.capacity
+         TIME_FORMAT(g.game_time, '%H:%i') AS game_time,
+         g.stadium_id, g.base_price,
+         g.booking_open_at,
+         s.name AS stadium_name, s.location, s.capacity,
+         CASE
+           WHEN TIMESTAMP(g.game_date, g.game_time) < NOW() THEN 'ENDED'
+           WHEN g.booking_open_at IS NOT NULL AND g.booking_open_at > NOW() THEN 'UPCOMING'
+           ELSE g.status
+         END AS status
        FROM games g
        JOIN stadiums s ON g.stadium_id = s.id
        WHERE g.id = ?`,
