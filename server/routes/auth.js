@@ -203,4 +203,77 @@ router.get('/wallet', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/auth/membership — 멤버십 등급 및 입장 횟수 조회
+const TIER_ORDER = ['일반', '브론즈', '실버', '골드'];
+const TIER_REQUIREMENTS = { '일반': 0, '브론즈': 3, '실버': 6, '골드': 10 };
+
+router.get('/membership', requireAuth, async (req, res) => {
+  try {
+    const [[boxRow]] = await _pool.query(
+      'SELECT season_count FROM user_boxes WHERE user_id = ?',
+      [req.user.user_id]
+    );
+    const season_count = boxRow?.season_count ?? 0;
+
+    // 현재 등급 계산
+    let currentTier = '일반';
+    for (const tier of TIER_ORDER) {
+      if (season_count >= TIER_REQUIREMENTS[tier]) currentTier = tier;
+    }
+
+    const currentIdx = TIER_ORDER.indexOf(currentTier);
+    const nextTier = currentIdx < TIER_ORDER.length - 1 ? TIER_ORDER[currentIdx + 1] : null;
+    const nextTierCount = nextTier ? TIER_REQUIREMENTS[nextTier] : null;
+    const canTierUp = nextTier ? season_count >= TIER_REQUIREMENTS[nextTier] : false;
+
+    res.json({ success: true, currentTier, season_count, nextTier, nextTierCount, canTierUp });
+  } catch (err) {
+    console.error('[auth/membership]', err);
+    res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// GET /api/auth/early-access-count — 보유 응모권 수 조회
+router.get('/early-access-count', requireAuth, async (req, res) => {
+  try {
+    const [[row]] = await _pool.query(
+      "SELECT COUNT(*) AS cnt FROM raffle_nfts WHERE user_id = ? AND status = 'ISSUED'",
+      [req.user.user_id]
+    );
+    res.json({ success: true, count: row?.cnt ?? 0 });
+  } catch (err) {
+    console.error('[auth/early-access-count]', err);
+    res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// POST /api/auth/tier-up — 티어 업그레이드
+router.post('/tier-up', requireAuth, async (req, res) => {
+  try {
+    const [[boxRow]] = await _pool.query(
+      'SELECT season_count FROM user_boxes WHERE user_id = ?',
+      [req.user.user_id]
+    );
+    const season_count = boxRow?.season_count ?? 0;
+
+    let currentTier = '일반';
+    for (const tier of TIER_ORDER) {
+      if (season_count >= TIER_REQUIREMENTS[tier]) currentTier = tier;
+    }
+
+    const currentIdx = TIER_ORDER.indexOf(currentTier);
+    const nextTier = currentIdx < TIER_ORDER.length - 1 ? TIER_ORDER[currentIdx + 1] : null;
+
+    if (!nextTier) return res.status(400).json({ error: '이미 최고 등급입니다.' });
+    if (season_count < TIER_REQUIREMENTS[nextTier]) {
+      return res.status(400).json({ error: `${nextTier} 달성 조건 미충족 (필요: ${TIER_REQUIREMENTS[nextTier]}회)` });
+    }
+
+    res.json({ success: true, message: `${nextTier} 등급으로 티어업 완료!`, newTier: nextTier, awardedCards: [] });
+  } catch (err) {
+    console.error('[auth/tier-up]', err);
+    res.status(500).json({ error: '서버 오류' });
+  }
+});
+
 module.exports = { router, setPool };

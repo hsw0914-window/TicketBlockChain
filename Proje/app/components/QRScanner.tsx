@@ -33,9 +33,12 @@ export function QRScanner({ onScan, onError }: QRScannerProps) {
   }, []);
 
   return (
-    <div
-      id="qr-scanner-container"
-      style={{ width: "100%", maxWidth: 360, margin: "0 auto" }}
-    />
+    <>
+      <style>{`#qr-scanner-container img { display: none !important; }`}</style>
+      <div
+        id="qr-scanner-container"
+        style={{ width: "100%", maxWidth: 360, margin: "0 auto" }}
+      />
+    </>
   );
 }
