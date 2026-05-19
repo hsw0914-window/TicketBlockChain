@@ -98,7 +98,7 @@ router.post('/nft', requireAuth, async (req, res) => {
 
     await _pool.query(
       `INSERT INTO onchain_tx_logs (id, user_id, wallet_address, action_type, tx_hash, payload_json)
-       VALUES (UUID(), ?, '', 'NFT_EXCHANGE_REQUESTED', '', ?)`,
+       VALUES (UUID(), ?, '', 'NFT_EXCHANGE_REQUESTED', UUID(), ?)`,
       [userId, JSON.stringify({ cardId, nftId: card.nft_id, name: card.display_name || card.card_type_name, tier, delivery: delivery ?? null })]
     );
 
@@ -144,7 +144,7 @@ router.post('/buy-raffle', requireAuth, async (req, res) => {
 
     await _pool.query(
       `INSERT INTO onchain_tx_logs (id, user_id, wallet_address, action_type, tx_hash, payload_json)
-       VALUES (UUID(), ?, '', 'RAFFLE_PURCHASE', '', ?)`,
+       VALUES (UUID(), ?, '', 'RAFFLE_PURCHASE', UUID(), ?)`,
       [userId, JSON.stringify({ count, tier })]
     );
 

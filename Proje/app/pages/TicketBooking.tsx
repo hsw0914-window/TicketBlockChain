@@ -16,9 +16,10 @@ import {
   RefreshCw,
   ShieldCheck,
   Ticket,
+  Trophy,
   Wallet,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Button } from "../components/ui/button";
 import {
   buildEventFromApiGame,
@@ -145,6 +146,10 @@ const blockFlowMeta: Record<string, { startLabel: string; endLabel: string }> = 
   "incheon-navy": { startLabel: "중앙 왼쪽", endLabel: "중앙 오른쪽" },
 };
 
+const PRIORITY_GRADE_ID = "jamsil-table";
+const PRIORITY_ROW = 5;
+const PRIORITY_SEAT_NUMS = new Set([2, 3, 4, 5, 6]);
+
 export function TicketBooking() {
   const { eventId = "" } = useParams();
   const navigate = useNavigate();
@@ -153,6 +158,10 @@ export function TicketBooking() {
 
   const [bookingOpenAt, setBookingOpenAt] = useState<Date | null>(null);
   const [now, setNow] = useState(new Date());
+  const [searchParams] = useSearchParams();
+  const isPriorityMode = searchParams.get("mode") === "priority";
+  // ?mode=priority로 진입하면 우선 예매 좌석 제한 적용
+  const isPriorityWindow = isPriorityMode;
 
   // 로컬 이벤트 먼저 시도, 없으면 API에서 게임 정보 가져와서 템플릿으로 변환
   const [event, setEvent] = useState<TicketEvent | undefined>(() => getTicketEvent(eventId));
@@ -226,6 +235,16 @@ export function TicketBooking() {
     });
   }, [selectedSeatKeys]);
 
+  // 우선 예매 모드: 중앙 테이블석 자동 선택
+  useEffect(() => {
+    if (!isPriorityWindow || !event) return;
+    const tableGrade = event.seatGrades.find(g => g.id === PRIORITY_GRADE_ID);
+    if (!tableGrade) return;
+    setSelectedGradeId(PRIORITY_GRADE_ID);
+    setSelectedBlockId(tableGrade.blocks[0]?.id ?? null);
+    setSelectedSeatKeys([]);
+  }, [isPriorityWindow]);
+
   const selectedGrade = useMemo(
     () => event?.seatGrades.find((grade) => grade.id === selectedGradeId) ?? null,
     [event, selectedGradeId],
@@ -288,8 +307,8 @@ export function TicketBooking() {
     agreements.maxQuantity;
   const paymentReady = verificationPassed && agreements.refundPolicy && selectedTickets.length > 0;
 
-  // 예매 오픈 전 차단 화면
-  if (!eventLoading && bookingOpenAt && now < bookingOpenAt) {
+  // 예매 오픈 전 차단 화면 (우선 예매 당첨자는 통과)
+  if (!eventLoading && bookingOpenAt && now < bookingOpenAt && !isPriorityMode) {
     const diff   = bookingOpenAt.getTime() - now.getTime();
     const totalMin = Math.floor(diff / 60000);
     const days   = Math.floor(totalMin / 1440);
@@ -363,6 +382,7 @@ export function TicketBooking() {
   };
 
   const handleSelectGrade = (grade: SeatGrade) => {
+    if (isPriorityWindow && grade.id !== PRIORITY_GRADE_ID) return;
     setSelectedGradeId(grade.id);
     setSelectedBlockId(grade.blocks[0]?.id ?? null);
     setSelectedSeatKeys([]);
@@ -378,6 +398,10 @@ export function TicketBooking() {
 
     const compoundKey = `${selectedBlock.label}:${seatKey}`;
     if (takenSeatKeys.has(compoundKey)) return;
+    if (isPriorityWindow) {
+      const { row, seatNumber } = parseSeatKey(seatKey);
+      if (!(row === PRIORITY_ROW && PRIORITY_SEAT_NUMS.has(seatNumber))) return;
+    }
 
     setSelectedSeatKeys((previous) => {
       if (previous.includes(seatKey)) {
@@ -686,6 +710,26 @@ export function TicketBooking() {
               );
             })}
           </section>
+
+          {isPriorityWindow && (
+            <div className="rounded-[20px] border px-6 py-4 flex items-center gap-4"
+              style={{ background: "linear-gradient(135deg, #fffbeb, #fff7ed)", borderColor: "#fde68a", boxShadow: "0 4px 16px rgba(245,158,11,0.12)" }}>
+              <div className="h-10 w-10 rounded-[12px] flex items-center justify-center flex-shrink-0"
+                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)" }}>
+                <Trophy className="h-5 w-5 text-white" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="rounded-full px-2.5 py-0.5 text-[0.68rem] font-black text-white" style={{ background: "#f59e0b" }}>우선 예매</span>
+                  <span className="text-[0.8rem] font-semibold" style={{ color: "#92400e" }}>당첨자 전용 좌석 선택</span>
+                </div>
+                <p className="text-[0.82rem]" style={{ color: "#b45309" }}>
+                  중앙 테이블석 T1·T2블록 5열 2~6번 좌석을 우선 선택할 수 있습니다.
+                  예매 오픈 후에는 남은 좌석이 일반 예매로 전환됩니다.
+                </p>
+              </div>
+            </div>
+          )}
 
           {currentStep === 0 && (
             <section
@@ -1045,19 +1089,28 @@ export function TicketBooking() {
                 <div className="mt-5 grid gap-3">
                   {event.seatGrades.map((grade) => {
                     const active = selectedGradeId === grade.id;
+                    const isRestricted = isPriorityWindow && grade.id !== PRIORITY_GRADE_ID;
                     return (
                       <div
                         key={grade.id}
-                        className="rounded-[22px] border px-4 py-4 text-left transition"
+                        className="rounded-[22px] border px-4 py-4 text-left transition relative overflow-hidden"
                         style={{
-                          background: active ? "#ffffff" : "#f1f5f8",
-                          borderColor: active ? grade.color : "#dde4eb",
-                          boxShadow: active ? "0 12px 24px rgba(17,40,73,0.07)" : "none",
+                          background: isRestricted ? "#f8fafc" : active ? "#ffffff" : "#f1f5f8",
+                          borderColor: isRestricted ? "#e2eaf2" : active ? grade.color : "#dde4eb",
+                          boxShadow: active && !isRestricted ? "0 12px 24px rgba(17,40,73,0.07)" : "none",
+                          opacity: isRestricted ? 0.55 : 1,
                         }}
                       >
+                        {isRestricted && (
+                          <div className="absolute top-3 right-3 rounded-full px-2.5 py-0.5 text-[0.65rem] font-bold"
+                            style={{ background: "#e2eaf2", color: "#94a3b8" }}>
+                            본 예매 전용
+                          </div>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleSelectGrade(grade)}
+                          disabled={isRestricted}
                           className="w-full text-left"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1193,6 +1246,12 @@ export function TicketBooking() {
                   <span className="h-3 w-3 rounded-full bg-[#b7c3cf]" />
                   판매 완료
                 </span>
+                {isPriorityWindow && (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full" style={{ background: "#fef3c7", border: "1px solid #fde68a" }} />
+                    우선 예매 외 좌석
+                  </span>
+                )}
               </div>
 
               <div className="mt-6 overflow-x-auto rounded-[24px] border bg-white p-4" style={{ borderColor: "#dbe3ea" }}>
@@ -1219,20 +1278,35 @@ export function TicketBooking() {
                             const seatKey = `${row}-${seatNumber}`;
                             const compoundKey = `${selectedBlock.label}:${seatKey}`;
                             const sold = takenSeatKeys.has(compoundKey);
+                            const isPriorityRestricted = isPriorityWindow && !(row === PRIORITY_ROW && PRIORITY_SEAT_NUMS.has(seatNumber));
+                            const isDisabled = sold || isPriorityRestricted;
                             const selected = selectedSeatKeys.includes(seatKey);
+
+                            let bgColor: string;
+                            let textColor: string;
+                            let borderColor: string;
+                            if (selected) {
+                              bgColor = "#1456a0"; textColor = "#ffffff"; borderColor = "#1456a0";
+                            } else if (sold) {
+                              bgColor = "#b8c3ce"; textColor = "#f7fafc"; borderColor = "#b8c3ce";
+                            } else if (isPriorityRestricted) {
+                              bgColor = "#fef3c7"; textColor = "#d97706"; borderColor = "#fde68a";
+                            } else {
+                              bgColor = "#eef3f7"; textColor = "#4e6178"; borderColor = "#d7dfe7";
+                            }
 
                             return (
                               <button
                                 key={seatKey}
                                 type="button"
                                 onClick={() => toggleSeat(seatKey)}
-                                disabled={sold}
+                                disabled={isDisabled}
                                 className="h-8 rounded-md text-[0.72rem] font-semibold transition"
                                 style={{
-                                  background: sold ? "#b8c3ce" : selected ? "#1456a0" : "#eef3f7",
-                                  color: sold ? "#f7fafc" : selected ? "#ffffff" : "#4e6178",
-                                  border: sold ? "1px solid #b8c3ce" : selected ? "1px solid #1456a0" : "1px solid #d7dfe7",
-                                  opacity: sold ? 0.9 : 1,
+                                  background: bgColor,
+                                  color: textColor,
+                                  border: `1px solid ${borderColor}`,
+                                  opacity: isDisabled ? 0.9 : 1,
                                 }}
                               >
                                 {seatNumber}

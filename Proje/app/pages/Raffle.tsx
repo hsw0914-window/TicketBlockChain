@@ -350,7 +350,7 @@ export function Raffle() {
                   </span>
                   {visibleStatus === "won" && (
                     <button
-                      onClick={() => entryUnlocked && navigate(`/tickets/${entry.game_id}/booking`)}
+                      onClick={() => entryUnlocked && navigate(`/tickets/${entry.game_id}/booking?mode=priority`)}
                       disabled={!entryUnlocked}
                       className="flex items-center gap-1.5 rounded-[12px] px-4 py-2 text-[0.8rem] font-black transition-all"
                       style={{
@@ -427,7 +427,7 @@ export function Raffle() {
                   </div>
                 </div>
                 <button
-                  onClick={() => isSeatUnlocked && navigate(`/tickets/${selected.id}/booking`)}
+                  onClick={() => isSeatUnlocked && navigate(`/tickets/${selected.id}/booking?mode=priority`)}
                   disabled={!isSeatUnlocked}
                   className="flex-shrink-0 flex items-center justify-center gap-2 rounded-[16px] px-6 py-3.5 text-[0.9rem] font-black transition-all"
                   style={{
