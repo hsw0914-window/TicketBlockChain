@@ -24,6 +24,7 @@ const Collection     = lazy(() => import("./pages/Collection").then((m) => ({ de
 const MemeInfo       = lazy(() => import("./pages/MemeInfo").then((m) => ({ default: m.MemeInfo })));
 const Attendance     = lazy(() => import("./pages/Attendance").then((m) => ({ default: m.Attendance })));
 const Detail         = lazy(() => import("./pages/Detail").then((m) => ({ default: m.Detail })));
+const Exchange       = lazy(() => import("./pages/Exchange").then((m) => ({ default: m.Exchange })));
 
 function withSuspense(Component: React.ComponentType) {
   return function LazyRoute() {
@@ -69,6 +70,7 @@ export const router = createBrowserRouter([
       { path: "meme-info",                Component: withSuspense(MemeInfo) },
       { path: "attendance",               Component: withSuspense(Attendance) },
       { path: "detail/:id",               Component: withSuspense(Detail) },
+      { path: "exchange",                  Component: withSuspense(Exchange) },
     ],
   },
   {
