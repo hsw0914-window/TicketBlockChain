@@ -106,16 +106,16 @@ const SEED_STADIUMS = [
 ];
 
 const SEED_GAMES = [
-  { id: "G001", home_team: "두산", away_team: "LG",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
-  { id: "G002", home_team: "삼성", away_team: "KT",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "munhak",  status: "ALMOST",   base_price: 13000 },
-  { id: "G003", home_team: "롯데", away_team: "NC",  game_date: "2026-04-12", game_time: "14:00:00", stadium_id: "sajik",   status: "SOLDOUT",  base_price: 13000 },
-  { id: "G004", home_team: "삼성", away_team: "LG",  game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
-  { id: "G005", home_team: "키움", away_team: "한화", game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "gochuck", status: "OPEN",     base_price: 13000 },
-  { id: "G006", home_team: "KIA",  away_team: "두산", game_date: "2026-04-15", game_time: "18:30:00", stadium_id: "gwangju", status: "UPCOMING", base_price: 13000 },
-  { id: "G007", home_team: "LG",   away_team: "NC",  game_date: "2026-04-19", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
-  { id: "G008", home_team: "한화", away_team: "SSG", game_date: "2026-04-19", game_time: "14:00:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000 },
-  { id: "G009", home_team: "두산", away_team: "키움", game_date: "2026-04-22", game_time: "18:30:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
-  { id: "G010", home_team: "KIA",  away_team: "롯데", game_date: "2026-04-22", game_time: "18:30:00", stadium_id: "sajik",   status: "UPCOMING", base_price: 13000 },
+  { id: "G001", home_team: "두산", away_team: "LG",   game_date: "2026-05-20", game_time: "18:30:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000, booking_open_at: "2026-05-15 10:00:00", raffle_open_at: "2026-05-15 08:00:00", raffle_winners_count: 5 },
+  { id: "G002", home_team: "삼성", away_team: "KT",   game_date: "2026-05-20", game_time: "18:30:00", stadium_id: "munhak",  status: "ALMOST",   base_price: 13000, booking_open_at: "2026-05-15 10:00:00", raffle_open_at: "2026-05-15 08:00:00", raffle_winners_count: 5 },
+  { id: "G003", home_team: "롯데", away_team: "NC",   game_date: "2026-05-20", game_time: "14:00:00", stadium_id: "sajik",   status: "SOLDOUT",  base_price: 13000, booking_open_at: "2026-05-15 10:00:00", raffle_open_at: "2026-05-15 08:00:00", raffle_winners_count: 5 },
+  { id: "G004", home_team: "삼성", away_team: "LG",   game_date: "2026-05-21", game_time: "18:30:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000, booking_open_at: "2026-05-19 10:00:00", raffle_open_at: "2026-05-19 08:00:00", raffle_winners_count: 5 },
+  { id: "G005", home_team: "키움", away_team: "한화", game_date: "2026-05-21", game_time: "18:30:00", stadium_id: "gochuck", status: "UPCOMING", base_price: 13000, booking_open_at: "2026-05-19 10:00:00", raffle_open_at: "2026-05-19 08:00:00", raffle_winners_count: 5 },
+  { id: "G006", home_team: "KIA",  away_team: "두산", game_date: "2026-05-24", game_time: "14:00:00", stadium_id: "gwangju", status: "UPCOMING", base_price: 13000, booking_open_at: "2026-05-22 10:00:00", raffle_open_at: "2026-05-22 08:00:00", raffle_winners_count: 5 },
+  { id: "G007", home_team: "LG",   away_team: "NC",   game_date: "2026-05-25", game_time: "18:30:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000, booking_open_at: "2026-05-22 10:00:00", raffle_open_at: "2026-05-22 08:00:00", raffle_winners_count: 5 },
+  { id: "G008", home_team: "한화", away_team: "SSG",  game_date: "2026-05-25", game_time: "18:30:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000, booking_open_at: "2026-05-22 10:00:00", raffle_open_at: "2026-05-22 08:00:00", raffle_winners_count: 5 },
+  { id: "G009", home_team: "두산", away_team: "키움", game_date: "2026-05-28", game_time: "18:30:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000, booking_open_at: "2026-05-26 10:00:00", raffle_open_at: "2026-05-26 08:00:00", raffle_winners_count: 5 },
+  { id: "G010", home_team: "KIA",  away_team: "롯데", game_date: "2026-05-31", game_time: "14:00:00", stadium_id: "sajik",   status: "UPCOMING", base_price: 13000, booking_open_at: "2026-05-28 10:00:00", raffle_open_at: "2026-05-28 08:00:00", raffle_winners_count: 5 },
 ];
 
 // ─── 초기화 함수 ──────────────────────────────────────────
@@ -399,14 +399,17 @@ async function initDB() {
 
   await conn.query(`
     CREATE TABLE games (
-      id         VARCHAR(50)  PRIMARY KEY,
-      home_team  VARCHAR(50)  NOT NULL,
-      away_team  VARCHAR(50)  NOT NULL,
-      game_date  DATE         NOT NULL,
-      game_time  TIME,
-      stadium_id VARCHAR(50)  NOT NULL,
-      status     ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED') NOT NULL DEFAULT 'OPEN',
-      base_price DECIMAL(10,2) DEFAULT NULL,
+      id                   VARCHAR(50)  PRIMARY KEY,
+      home_team            VARCHAR(50)  NOT NULL,
+      away_team            VARCHAR(50)  NOT NULL,
+      game_date            DATE         NOT NULL,
+      game_time            TIME,
+      stadium_id           VARCHAR(50)  NOT NULL,
+      status               ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED') NOT NULL DEFAULT 'OPEN',
+      base_price           DECIMAL(10,2) DEFAULT NULL,
+      booking_open_at      DATETIME     DEFAULT NULL,
+      raffle_open_at       DATETIME     DEFAULT NULL,
+      raffle_winners_count INT          NOT NULL DEFAULT 5,
       FOREIGN KEY (stadium_id) REFERENCES stadiums(id)
     )
   `);
@@ -441,6 +444,20 @@ async function initDB() {
       status         ENUM('confirmed','used','listed','sold') NOT NULL DEFAULT 'confirmed',
       booked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (game_id) REFERENCES games(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE game_raffle_entries (
+      id           INT          PRIMARY KEY AUTO_INCREMENT,
+      user_id      VARCHAR(50)  NOT NULL,
+      game_id      VARCHAR(50)  NOT NULL,
+      tickets_used INT          NOT NULL DEFAULT 1,
+      status       ENUM('applied','won','lost') NOT NULL DEFAULT 'applied',
+      applied_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_user_game (user_id, game_id),
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
     )
   `);
 
@@ -767,10 +784,21 @@ async function initDB() {
 
   for (const g of SEED_GAMES) {
     await conn.query(
-      "INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price]
+      `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at, raffle_open_at, raffle_winners_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price, g.booking_open_at, g.raffle_open_at, g.raffle_winners_count]
     );
   }
+
+  // 테스트용 경기 (항상 예매/응모 가능)
+  await conn.query(
+    `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at, raffle_open_at, raffle_winners_count)
+     VALUES ('G_TEST', '테스트홈', '테스트어웨이', '2099-12-31', '18:30:00', 'jamsil', 'OPEN', 13000, '2020-01-01 00:00:00', DATE_SUB(NOW(), INTERVAL 1 HOUR), 5)`
+  );
+  await conn.query(
+    `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at, raffle_open_at, raffle_winners_count)
+     VALUES ('G_TEST2', '[TEST] 응모결과', '[TEST] 즉시공개', '2099-12-31', '18:30:00', 'jamsil', 'OPEN', 13000, '2020-01-01 00:00:00', DATE_SUB(NOW(), INTERVAL 1 HOUR), 1)`
+  );
 
   // ─── combine/market 시드 데이터 ──────────────────────
 
