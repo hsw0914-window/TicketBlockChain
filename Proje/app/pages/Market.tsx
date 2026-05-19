@@ -616,11 +616,11 @@ export function Market() {
                   <div className="flex items-center gap-2"><SlidersHorizontal className="w-3.5 h-3.5" style={{ color: mutedText }} /><span className="text-[0.78rem]" style={{ color: mutedText }}>최저가순</span></div>
                 </div>
 
-                <div className="grid md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
                   {filteredFragments.map((fragment, index) => (
                     <motion.button key={fragment.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }} onClick={() => openMarketDetail(fragment)}
                       className="text-left rounded-[22px] overflow-hidden transition-all hover:-translate-y-1 hover:shadow-md" style={panelStyle}>
-                      <div className="w-full h-[160px] overflow-hidden relative" style={{ background: fragment.imageUrl ? "transparent" : `linear-gradient(135deg, ${fragment.color}22, ${fragment.color}08)` }}>
+                      <div className="w-full h-[280px] overflow-hidden relative" style={{ background: fragment.imageUrl ? "transparent" : `linear-gradient(135deg, ${fragment.color}22, ${fragment.color}08)` }}>
                         {fragment.imageUrl ? (
                           <img src={fragment.imageUrl} alt={fragment.fragmentName} className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
                         ) : (
@@ -628,23 +628,14 @@ export function Market() {
                             <div className="rounded-full w-16 h-16 flex items-center justify-center text-[1.6rem] font-black" style={{ background: `${fragment.color}28`, color: fragment.color }}>{fragment.idol.slice(0, 1)}</div>
                           </div>
                         )}
-                        {fragment.listings.length > 0 && <span className="absolute top-2.5 right-2.5 rounded-full px-2.5 py-1 text-[0.64rem] font-bold" style={{ background: "rgba(255,255,255,0.92)", border: "1px solid #cbe1d3", color: priceGreen }}>{fragment.listings.length}명 판매 중</span>}
+                        <span className="absolute top-2.5 left-2.5 rounded-full px-2 py-0.5 text-[0.62rem] font-bold" style={{ background: `${fragment.color}dd`, color: "#fff" }}>{fragment.idol}</span>
+                        {fragment.listings.length > 0 && <span className="absolute top-2.5 right-2.5 rounded-full px-2 py-0.5 text-[0.62rem] font-bold" style={{ background: "rgba(255,255,255,0.92)", border: "1px solid #cbe1d3", color: priceGreen }}>{fragment.listings.length}명</span>}
                       </div>
-                      <div className="p-4">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[0.64rem] font-bold" style={{ background: `${fragment.color}18`, border: `1px solid ${fragment.color}33`, color: fragment.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: fragment.color }} />{fragment.idol}</span>
-                          <span className="rounded-full px-2.5 py-0.5 text-[0.64rem] font-bold" style={{ background: "#edf7f1", border: "1px solid #cbe1d3", color: priceGreen }}>조합 재료</span>
-                        </div>
-                        <h3 className="mt-2.5 text-[1rem] font-bold tracking-[-0.03em] leading-snug" style={{ color: neutralText }}>{fragment.fragmentName}</h3>
-                        <p className="mt-1 text-[0.78rem] leading-5 line-clamp-2" style={{ color: mutedText }}>{fragment.description}</p>
-                        <p className="mt-2 text-[0.72rem] font-semibold" style={{ color: actionBlue }}>조합 결과 · {getFragmentResultName(fragment)}</p>
-                        <div className="mt-3 flex items-end justify-between gap-3">
-                          <div><p className="text-[0.64rem]" style={{ color: mutedText }}>최저가</p><p className="text-[1.08rem] font-bold" style={{ color: priceGreen }}>{formatPrice(fragment.floorPrice)}</p></div>
-                          <div className="text-right"><p className="text-[0.64rem]" style={{ color: mutedText }}>내 보유</p><p className="text-[0.9rem] font-semibold" style={{ color: neutralText }}>{getOwnedCount(fragment)}개</p></div>
-                        </div>
-                        <div className="mt-3 pt-3 flex items-center justify-between gap-2" style={{ borderTop: `1px solid ${lineColor}` }}>
-                          <p className="text-[0.7rem]" style={{ color: mutedText }}>최근 {formatPrice(fragment.lastPrice)} 체결</p>
-                          <span className="inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-[0.72rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>구매하기 <ArrowRight className="w-3 h-3" /></span>
+                      <div className="px-3 py-2.5">
+                        <h3 className="text-[0.82rem] font-bold leading-snug line-clamp-1" style={{ color: neutralText }}>{fragment.fragmentName}</h3>
+                        <div className="mt-1.5 flex items-center justify-between gap-2">
+                          <p className="text-[0.92rem] font-bold" style={{ color: priceGreen }}>{formatPrice(fragment.floorPrice)}</p>
+                          <span className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[0.68rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>구매 <ArrowRight className="w-2.5 h-2.5" /></span>
                         </div>
                       </div>
                     </motion.button>
