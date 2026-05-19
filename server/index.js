@@ -81,24 +81,6 @@ async function start() {
   }
   console.log(`[Seed] 포인트 시드 완료: ${seedWallets.join(', ')}`);
 
-  // real 모드: Fabric 원장에 포인트 직접 시드
-  if ((process.env.FABRIC_MODE || 'mock').trim().toLowerCase() === 'real') {
-    for (const walletAddress of seedWallets) {
-      try {
-        const userDidHash = mockFabric.hashDid(walletAddress);
-        const pointData   = await mockFabric.getPointBalance({ userDidHash });
-        if (Number(pointData.balance) < 1000) {
-          await mockFabric.earnPointFromTrade({ userDidHash, amount: 10000, rate: 1.0 });
-          console.log(`[Seed] Fabric 포인트 10000P 시드: ${walletAddress}`);
-        } else {
-          console.log(`[Seed] Fabric 포인트 이미 보유 (${pointData.balance}P): ${walletAddress}`);
-        }
-      } catch (e) {
-        console.warn(`[Seed] Fabric 포인트 시드 실패 (${walletAddress}):`, e.message);
-      }
-    }
-  }
-
   // pool 주입
   authMiddleware.setPool(pool);
   authRoute.setPool(pool);
