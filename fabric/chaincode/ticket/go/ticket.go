@@ -21,7 +21,7 @@ type TicketRecord struct {
 	UserDidHash   string  `json:"userDidHash"`
 	WalletAddress string  `json:"walletAddress"`
 	Status        string  `json:"status"` // ACTIVE, USED, REFUND_PROCESSING, REFUNDED
-	PurchaseType  string  `json:"purchaseType"` // PRIMARY, TRANSFERRED
+	PurchaseType  string  `json:"purchaseType"` // PRIMARY, TRANSFERRED, PRESALE
 	Price         float64 `json:"price"`
 	PointUsed     float64 `json:"pointUsed"`
 	GameDate      string  `json:"gameDate"` // YYYY-MM-DD
@@ -43,6 +43,7 @@ type MembershipRecord struct {
 	EntryCount                 int    `json:"entryCount"`
 	MonthlyRaffleExchangeCount int    `json:"monthlyRaffleExchangeCount"`
 	MonthlyCardExchangeCount   int    `json:"monthlyCardExchangeCount"`
+	MonthlyRaffleSubmitCount   int    `json:"monthlyRaffleSubmitCount"` // 우선 예매 응모권 제출 횟수
 	LastResetMonth             string `json:"lastResetMonth"`
 	UpdatedAt                  string `json:"updatedAt"`
 }
@@ -121,6 +122,42 @@ type HistoryRecord struct {
 	IsDelete  bool            `json:"isDelete"`
 }
 
+// ─── 우선 예매 추첨 구조체 ────────────────────────────────
+
+type PreSaleConfig struct {
+	MatchId          string   `json:"matchId"`
+	PreSaleSeatCount int      `json:"preSaleSeatCount"`
+	PreSaleSeatList  []string `json:"preSaleSeatList"`
+	ApplyStartTime   string   `json:"applyStartTime"`   // 응모 시작 (RFC3339)
+	ApplyEndTime     string   `json:"applyEndTime"`     // 응모 마감 (RFC3339)
+	DrawTime         string   `json:"drawTime"`         // 추첨 실행 가능 시각 (RFC3339)
+	PreSaleStartTime string   `json:"preSaleStartTime"` // 우선 예매 시작 = 일반 예매 2시간 전 (RFC3339)
+	PreSaleEndTime   string   `json:"preSaleEndTime"`   // 우선 예매 종료 = 일반 예매 시작 (RFC3339)
+	Status           string   `json:"status"`           // OPEN, DRAW_PENDING, DRAW_COMPLETED, CLOSED
+	CreatedAt        string   `json:"createdAt"`
+	UpdatedAt        string   `json:"updatedAt"`
+}
+
+type PreSaleEntry struct {
+	EntryId      string   `json:"entryId"`
+	MatchId      string   `json:"matchId"`
+	UserDidHash  string   `json:"userDidHash"`
+	RaffleNftIds []string `json:"raffleNftIds"` // 제출한 응모권 ID 목록
+	SubmitCount  int      `json:"submitCount"`   // 제출 수 = 가중치
+	SubmittedAt  string   `json:"submittedAt"`
+}
+
+type PreSaleRight struct {
+	RightId          string `json:"rightId"`
+	MatchId          string `json:"matchId"`
+	UserDidHash      string `json:"userDidHash"`
+	RightStatus      string `json:"rightStatus"`      // GRANTED, USED, EXPIRED, CANCELLED
+	PreSaleStartTime string `json:"preSaleStartTime"`
+	PreSaleEndTime   string `json:"preSaleEndTime"`
+	GrantedAt        string `json:"grantedAt"`
+	UpdatedAt        string `json:"updatedAt"`
+}
+
 // ─── 체인코드 구조체 ───────────────────────────────────────
 
 type TicketChaincode struct {
@@ -140,6 +177,10 @@ const (
 	keyPrefixDraw        = "DRAW:"
 	keyPrefixReservation = "RESERVATION:"
 	keyPrefixSeat        = "SEAT:"
+
+	keyPrefixPreSaleConfig = "PRESALE_CONFIG:"
+	keyPrefixPreSaleEntry  = "PRESALE_ENTRY:"
+	keyPrefixPreSaleRight  = "PRESALE_RIGHT:"
 )
 
 // ─── 유틸 함수 ────────────────────────────────────────────
@@ -192,6 +233,30 @@ func exchangeCost(itemType string) (float64, error) {
 		return c, nil
 	}
 	return 0, fmt.Errorf("INVALID_ITEM_TYPE: %s", itemType)
+}
+
+func txNow(ctx contractapi.TransactionContextInterface) time.Time {
+	ts, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return time.Now().UTC()
+	}
+	return time.Unix(ts.Seconds, int64(ts.Nanos)).UTC()
+}
+
+func resetMonthlyIfNeeded(m *MembershipRecord, month string) {
+	if m.LastResetMonth != month {
+		m.MonthlyRaffleExchangeCount = 0
+		m.MonthlyCardExchangeCount = 0
+		m.MonthlyRaffleSubmitCount = 0
+		m.LastResetMonth = month
+	}
+}
+
+func preSaleMonthlySubmitLimit(grade string) int {
+	if grade == "SILVER" || grade == "GOLD" {
+		return 2
+	}
+	return 1
 }
 
 func exchangeMonthlyLimit(grade, itemType string) int {
@@ -413,11 +478,7 @@ func (t *TicketChaincode) VerifyEntry(
 	}
 
 	// 월 초기화
-	if membership.LastResetMonth != currentMonth(ctx) {
-		membership.MonthlyRaffleExchangeCount = 0
-		membership.MonthlyCardExchangeCount = 0
-		membership.LastResetMonth = currentMonth(ctx)
-	}
+	resetMonthlyIfNeeded(membership, currentMonth(ctx))
 
 	earnedPoint := math.Floor(ticket.Price * getEarnRate(membership.Grade))
 	point.Balance += earnedPoint
@@ -506,11 +567,7 @@ func (t *TicketChaincode) ExchangePointItem(
 		return "", err
 	}
 
-	if membership.LastResetMonth != currentMonth(ctx) {
-		membership.MonthlyRaffleExchangeCount = 0
-		membership.MonthlyCardExchangeCount = 0
-		membership.LastResetMonth = currentMonth(ctx)
-	}
+	resetMonthlyIfNeeded(membership, currentMonth(ctx))
 
 	limit := exchangeMonthlyLimit(membership.Grade, itemType)
 	if itemType == "RAFFLE_NFT" && membership.MonthlyRaffleExchangeCount >= limit {
@@ -836,6 +893,9 @@ func (t *TicketChaincode) TransferTicket(
 	}
 	if ticket.Status != "ACTIVE" {
 		return "", fmt.Errorf("TRANSFER_DENIED: 티켓 상태가 ACTIVE가 아닙니다 (%s)", ticket.Status)
+	}
+	if ticket.PurchaseType == "PRESALE" {
+		return "", fmt.Errorf("TRANSFER_DENIED: 우선 예매 티켓은 2차 거래가 불가합니다")
 	}
 	if strings.ToLower(ticket.WalletAddress) != strings.ToLower(fromWalletAddress) {
 		return "", fmt.Errorf("NOT_OWNER: 티켓 소유자가 아닙니다")
@@ -1486,6 +1546,669 @@ func (t *TicketChaincode) GetAllDraws(
 		draws = append(draws, rec)
 	}
 	out, _ := json.Marshal(draws)
+	return string(out), nil
+}
+
+// ─── 25. RegisterPreSaleConfig ───────────────────────────
+
+func (t *TicketChaincode) RegisterPreSaleConfig(
+	ctx contractapi.TransactionContextInterface,
+	matchId string,
+	preSaleSeatCount int,
+	preSaleSeatListJSON string,
+	applyStartTime, applyEndTime, drawTime, preSaleStartTime, preSaleEndTime string,
+) error {
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
+	if matchId == "" {
+		return fmt.Errorf("INVALID_PARAM: matchId는 필수입니다")
+	}
+	if preSaleSeatCount <= 0 {
+		return fmt.Errorf("INVALID_PARAM: preSaleSeatCount는 1 이상이어야 합니다")
+	}
+
+	var seatList []string
+	if err := json.Unmarshal([]byte(preSaleSeatListJSON), &seatList); err != nil {
+		return fmt.Errorf("INVALID_PARAM: preSaleSeatListJSON 파싱 실패: %s", err)
+	}
+	if len(seatList) < preSaleSeatCount {
+		return fmt.Errorf("INVALID_PARAM: 좌석 목록 수(%d)가 우선 예매 좌석 수(%d)보다 작습니다", len(seatList), preSaleSeatCount)
+	}
+
+	timeFields := []string{applyStartTime, applyEndTime, drawTime, preSaleStartTime, preSaleEndTime}
+	for _, tf := range timeFields {
+		if _, err := time.Parse(time.RFC3339, tf); err != nil {
+			return fmt.Errorf("INVALID_PARAM: 시간 형식 오류 (%s) — RFC3339 필요", tf)
+		}
+	}
+
+	existing, err := ctx.GetStub().GetState(keyPrefixPreSaleConfig + matchId)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return fmt.Errorf("PRESALE_CONFIG_ALREADY_EXISTS: %s", matchId)
+	}
+
+	config := PreSaleConfig{
+		MatchId:          matchId,
+		PreSaleSeatCount: preSaleSeatCount,
+		PreSaleSeatList:  seatList,
+		ApplyStartTime:   applyStartTime,
+		ApplyEndTime:     applyEndTime,
+		DrawTime:         drawTime,
+		PreSaleStartTime: preSaleStartTime,
+		PreSaleEndTime:   preSaleEndTime,
+		Status:           "OPEN",
+		CreatedAt:        nowISO(ctx),
+		UpdatedAt:        nowISO(ctx),
+	}
+	b, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return ctx.GetStub().PutState(keyPrefixPreSaleConfig+matchId, b)
+}
+
+// ─── 26. SubmitRaffleNFTs ────────────────────────────────
+// 사용자가 응모권 1~N장을 한 경기 추첨에 제출한다.
+// - 멤버십 등급별 월간 제출 한도 검증 (BASIC/BRONZE: 1장, SILVER/GOLD: 2장)
+// - 한 경기에 중복 제출 불가
+// - 각 NFT는 본인 소유 + ISSUED 상태여야 함
+
+func (t *TicketChaincode) SubmitRaffleNFTs(
+	ctx contractapi.TransactionContextInterface,
+	matchId, userDidHash, raffleNftIdsJSON string,
+) (string, error) {
+	var raffleNftIds []string
+	if err := json.Unmarshal([]byte(raffleNftIdsJSON), &raffleNftIds); err != nil {
+		return "", fmt.Errorf("INVALID_PARAM: raffleNftIdsJSON 파싱 실패: %s", err)
+	}
+	if len(raffleNftIds) == 0 {
+		return "", fmt.Errorf("INVALID_PARAM: 응모권을 1개 이상 제출해야 합니다")
+	}
+
+	// PreSaleConfig 조회 및 응모 기간 검증
+	configB, err := ctx.GetStub().GetState(keyPrefixPreSaleConfig + matchId)
+	if err != nil {
+		return "", err
+	}
+	if configB == nil {
+		return "", fmt.Errorf("PRESALE_CONFIG_NOT_FOUND: %s", matchId)
+	}
+	var config PreSaleConfig
+	if err = json.Unmarshal(configB, &config); err != nil {
+		return "", err
+	}
+	if config.Status != "OPEN" {
+		return "", fmt.Errorf("PRESALE_NOT_OPEN: 응모 가능 상태가 아닙니다 (%s)", config.Status)
+	}
+
+	now := txNow(ctx)
+	applyStart, _ := time.Parse(time.RFC3339, config.ApplyStartTime)
+	applyEnd, _ := time.Parse(time.RFC3339, config.ApplyEndTime)
+	if now.Before(applyStart) {
+		return "", fmt.Errorf("APPLY_NOT_STARTED: 응모 시작 전입니다")
+	}
+	if now.After(applyEnd) {
+		return "", fmt.Errorf("APPLY_ENDED: 응모 마감되었습니다")
+	}
+
+	// 멤버십 조회 및 월간 제출 한도 검증
+	membership, err := getOrCreateMembership(ctx, userDidHash)
+	if err != nil {
+		return "", err
+	}
+	resetMonthlyIfNeeded(membership, currentMonth(ctx))
+
+	limit := preSaleMonthlySubmitLimit(membership.Grade)
+	if membership.MonthlyRaffleSubmitCount+len(raffleNftIds) > limit {
+		return "", fmt.Errorf("SUBMIT_LIMIT_EXCEEDED: 월간 제출 한도(%d장) 초과 (현재 %d장 사용)", limit, membership.MonthlyRaffleSubmitCount)
+	}
+
+	// 이 경기에 이미 제출했는지 확인
+	entryLookupKey, err := ctx.GetStub().CreateCompositeKey("PRESALE_ENTRY_USER", []string{matchId, userDidHash})
+	if err != nil {
+		return "", err
+	}
+	if existing, err2 := ctx.GetStub().GetState(entryLookupKey); err2 != nil {
+		return "", err2
+	} else if existing != nil {
+		return "", fmt.Errorf("ALREADY_SUBMITTED: 이미 이 경기에 응모했습니다")
+	}
+
+	// 각 응모권 유효성 검증: 소유자 + ISSUED 상태
+	for _, nftId := range raffleNftIds {
+		rb, err2 := ctx.GetStub().GetState(keyPrefixRaffleNFT + nftId)
+		if err2 != nil {
+			return "", err2
+		}
+		if rb == nil {
+			return "", fmt.Errorf("RAFFLE_NFT_NOT_FOUND: %s", nftId)
+		}
+		var raffle RaffleNFTRecord
+		if err2 = json.Unmarshal(rb, &raffle); err2 != nil {
+			return "", err2
+		}
+		if raffle.UserDidHash != userDidHash {
+			return "", fmt.Errorf("NOT_OWNER: 응모권 %s의 소유자가 아닙니다", nftId)
+		}
+		if raffle.Status != "ISSUED" {
+			return "", fmt.Errorf("RAFFLE_NFT_NOT_AVAILABLE: %s 상태가 ISSUED가 아닙니다 (%s)", nftId, raffle.Status)
+		}
+	}
+
+	// 응모권 상태 → ENTERED
+	for _, nftId := range raffleNftIds {
+		rb, _ := ctx.GetStub().GetState(keyPrefixRaffleNFT + nftId)
+		var raffle RaffleNFTRecord
+		json.Unmarshal(rb, &raffle)
+		raffle.Status = "ENTERED"
+		raffle.DrawId = matchId
+		raffle.UpdatedAt = nowISO(ctx)
+		rb2, _ := json.Marshal(raffle)
+		if err2 := ctx.GetStub().PutState(keyPrefixRaffleNFT+nftId, rb2); err2 != nil {
+			return "", err2
+		}
+	}
+
+	// PreSaleEntry 저장
+	entryId := "psentry-" + ctx.GetStub().GetTxID()[:12]
+	entry := PreSaleEntry{
+		EntryId:      entryId,
+		MatchId:      matchId,
+		UserDidHash:  userDidHash,
+		RaffleNftIds: raffleNftIds,
+		SubmitCount:  len(raffleNftIds),
+		SubmittedAt:  nowISO(ctx),
+	}
+	entryB, err := json.Marshal(entry)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixPreSaleEntry+entryId, entryB); err != nil {
+		return "", err
+	}
+	// 역조회 키: {matchId, userDidHash} → entryId
+	if err = ctx.GetStub().PutState(entryLookupKey, []byte(entryId)); err != nil {
+		return "", err
+	}
+
+	// 월간 제출 횟수 업데이트
+	membership.MonthlyRaffleSubmitCount += len(raffleNftIds)
+	if err = putMembership(ctx, membership); err != nil {
+		return "", err
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"entryId":          entryId,
+		"matchId":          matchId,
+		"submitCount":      len(raffleNftIds),
+		"monthlyRemaining": limit - membership.MonthlyRaffleSubmitCount,
+	})
+	return string(out), nil
+}
+
+// ─── 27. ExecutePreSaleDraw ──────────────────────────────
+// 가중치 기반 사용자 단위 추첨을 실행하고 당첨자에게 우선 예매 권리를 부여한다.
+// - 응모권 수 = 가중치 (확률 증가)
+// - 최종 당첨은 사용자 단위 (중복 당첨 없음)
+// - 좌석 수만큼 서로 다른 사용자 선정
+
+func (t *TicketChaincode) ExecutePreSaleDraw(
+	ctx contractapi.TransactionContextInterface,
+	matchId string,
+) (string, error) {
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
+
+	configB, err := ctx.GetStub().GetState(keyPrefixPreSaleConfig + matchId)
+	if err != nil {
+		return "", err
+	}
+	if configB == nil {
+		return "", fmt.Errorf("PRESALE_CONFIG_NOT_FOUND: %s", matchId)
+	}
+	var config PreSaleConfig
+	if err = json.Unmarshal(configB, &config); err != nil {
+		return "", err
+	}
+	if config.Status != "OPEN" && config.Status != "DRAW_PENDING" {
+		return "", fmt.Errorf("DRAW_INVALID_STATUS: 추첨 가능 상태가 아닙니다 (%s)", config.Status)
+	}
+
+	now := txNow(ctx)
+	drawTime, _ := time.Parse(time.RFC3339, config.DrawTime)
+	if now.Before(drawTime) {
+		return "", fmt.Errorf("DRAW_TOO_EARLY: 추첨 시각 이전입니다")
+	}
+
+	// 이 경기의 응모 목록 전체 수집
+	iter, err := ctx.GetStub().GetStateByPartialCompositeKey("PRESALE_ENTRY_USER", []string{matchId})
+	if err != nil {
+		return "", err
+	}
+	defer iter.Close()
+
+	var entries []PreSaleEntry
+	for iter.HasNext() {
+		kv, err2 := iter.Next()
+		if err2 != nil {
+			continue
+		}
+		entryId := string(kv.Value)
+		entryB, err2 := ctx.GetStub().GetState(keyPrefixPreSaleEntry + entryId)
+		if err2 != nil || entryB == nil {
+			continue
+		}
+		var entry PreSaleEntry
+		if err2 = json.Unmarshal(entryB, &entry); err2 != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("NO_ENTRIES: 응모자가 없습니다")
+	}
+
+	// 가중 풀 구성: userDidHash를 submitCount만큼 반복 추가
+	var pool []string
+	for _, e := range entries {
+		for i := 0; i < e.SubmitCount; i++ {
+			pool = append(pool, e.UserDidHash)
+		}
+	}
+
+	// txId 해시를 시드로 결정적 랜덤 생성
+	txId := ctx.GetStub().GetTxID()
+	baseHash := sha256.Sum256([]byte(txId))
+
+	winners := make([]string, 0, config.PreSaleSeatCount)
+	wonSet := make(map[string]bool)
+
+	for step := 0; len(winners) < config.PreSaleSeatCount && len(pool) > 0; step++ {
+		stepInput := make([]byte, 34)
+		copy(stepInput, baseHash[:])
+		stepInput[32] = byte(step)
+		stepInput[33] = byte(step >> 8)
+		h := sha256.Sum256(stepInput)
+
+		idx := (int(h[0]) | int(h[1])<<8 | int(h[2])<<16) % len(pool)
+		picked := pool[idx]
+
+		// 해당 유저의 모든 항목을 풀에서 제거
+		newPool := make([]string, 0, len(pool))
+		for _, u := range pool {
+			if u != picked {
+				newPool = append(newPool, u)
+			}
+		}
+		pool = newPool
+
+		if !wonSet[picked] {
+			wonSet[picked] = true
+			winners = append(winners, picked)
+		}
+	}
+
+	// 당첨자에게 PreSaleRight(GRANTED) 부여
+	rightIds := make([]string, 0, len(winners))
+	for i, winner := range winners {
+		rightId := fmt.Sprintf("psright-%s-%d", txId[:12], i)
+		right := PreSaleRight{
+			RightId:          rightId,
+			MatchId:          matchId,
+			UserDidHash:      winner,
+			RightStatus:      "GRANTED",
+			PreSaleStartTime: config.PreSaleStartTime,
+			PreSaleEndTime:   config.PreSaleEndTime,
+			GrantedAt:        nowISO(ctx),
+			UpdatedAt:        nowISO(ctx),
+		}
+		rightB, err2 := json.Marshal(right)
+		if err2 != nil {
+			return "", err2
+		}
+		if err2 = ctx.GetStub().PutState(keyPrefixPreSaleRight+rightId, rightB); err2 != nil {
+			return "", err2
+		}
+		// 역조회: {userDidHash, rightId}
+		ck1, err2 := ctx.GetStub().CreateCompositeKey("PRESALE_RIGHT_USER", []string{winner, rightId})
+		if err2 != nil {
+			return "", err2
+		}
+		if err2 = ctx.GetStub().PutState(ck1, []byte{0x00}); err2 != nil {
+			return "", err2
+		}
+		// 역조회: {matchId, rightId}
+		ck2, err2 := ctx.GetStub().CreateCompositeKey("PRESALE_RIGHT_MATCH", []string{matchId, rightId})
+		if err2 != nil {
+			return "", err2
+		}
+		if err2 = ctx.GetStub().PutState(ck2, []byte{0x00}); err2 != nil {
+			return "", err2
+		}
+		rightIds = append(rightIds, rightId)
+	}
+
+	// 응모권 상태 업데이트: 당첨자 → WINNER, 낙첨자 → LOST
+	for _, e := range entries {
+		isWinner := wonSet[e.UserDidHash]
+		for _, nftId := range e.RaffleNftIds {
+			rb, err2 := ctx.GetStub().GetState(keyPrefixRaffleNFT + nftId)
+			if err2 != nil || rb == nil {
+				continue
+			}
+			var raffle RaffleNFTRecord
+			if err2 = json.Unmarshal(rb, &raffle); err2 != nil {
+				continue
+			}
+			if isWinner {
+				raffle.Status = "WINNER"
+			} else {
+				raffle.Status = "LOST"
+			}
+			raffle.UpdatedAt = nowISO(ctx)
+			rb2, _ := json.Marshal(raffle)
+			ctx.GetStub().PutState(keyPrefixRaffleNFT+nftId, rb2)
+		}
+	}
+
+	// PreSaleConfig 상태 → DRAW_COMPLETED
+	config.Status = "DRAW_COMPLETED"
+	config.UpdatedAt = nowISO(ctx)
+	configB2, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixPreSaleConfig+matchId, configB2); err != nil {
+		return "", err
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"matchId":      matchId,
+		"totalEntries": len(entries),
+		"winnerCount":  len(winners),
+		"winners":      winners,
+		"rightIds":     rightIds,
+	})
+	return string(out), nil
+}
+
+// ─── 28. UsePreSaleRight ─────────────────────────────────
+// 우선 예매 당첨자가 권리를 사용해 좌석을 예매한다.
+// 검증: 권리 소유 + GRANTED 상태 + 예매 시간 범위 + 대상 좌석 + 미점유 + 1인 1좌석
+
+func (t *TicketChaincode) UsePreSaleRight(
+	ctx contractapi.TransactionContextInterface,
+	rightId, userDidHash, seatId string,
+) (string, error) {
+	rightB, err := ctx.GetStub().GetState(keyPrefixPreSaleRight + rightId)
+	if err != nil {
+		return "", err
+	}
+	if rightB == nil {
+		return "", fmt.Errorf("PRESALE_RIGHT_NOT_FOUND: %s", rightId)
+	}
+	var right PreSaleRight
+	if err = json.Unmarshal(rightB, &right); err != nil {
+		return "", err
+	}
+
+	if right.RightStatus != "GRANTED" {
+		return "", fmt.Errorf("RIGHT_NOT_GRANTED: 현재 상태 %s", right.RightStatus)
+	}
+	if right.UserDidHash != userDidHash {
+		return "", fmt.Errorf("NOT_OWNER: 우선 예매 권리 소유자가 아닙니다")
+	}
+
+	now := txNow(ctx)
+	preSaleStart, _ := time.Parse(time.RFC3339, right.PreSaleStartTime)
+	preSaleEnd, _ := time.Parse(time.RFC3339, right.PreSaleEndTime)
+	if now.Before(preSaleStart) {
+		return "", fmt.Errorf("PRESALE_NOT_STARTED: 우선 예매 시작 전입니다")
+	}
+	if now.After(preSaleEnd) {
+		return "", fmt.Errorf("PRESALE_ENDED: 우선 예매 시간이 종료되었습니다. 일반 예매를 이용하세요")
+	}
+
+	// 우선 예매 설정에서 좌석 목록 검증
+	configB, err := ctx.GetStub().GetState(keyPrefixPreSaleConfig + right.MatchId)
+	if err != nil {
+		return "", err
+	}
+	if configB == nil {
+		return "", fmt.Errorf("PRESALE_CONFIG_NOT_FOUND: %s", right.MatchId)
+	}
+	var config PreSaleConfig
+	if err = json.Unmarshal(configB, &config); err != nil {
+		return "", err
+	}
+
+	seatAllowed := false
+	for _, s := range config.PreSaleSeatList {
+		if s == seatId {
+			seatAllowed = true
+			break
+		}
+	}
+	if !seatAllowed {
+		return "", fmt.Errorf("SEAT_NOT_IN_PRESALE: 좌석 %s은 우선 예매 대상 좌석이 아닙니다", seatId)
+	}
+
+	// 좌석 점유 여부 확인
+	seatKey, err := ctx.GetStub().CreateCompositeKey("PRESALE_SEAT", []string{right.MatchId, seatId})
+	if err != nil {
+		return "", err
+	}
+	if seatData, err2 := ctx.GetStub().GetState(seatKey); err2 != nil {
+		return "", err2
+	} else if seatData != nil {
+		return "", fmt.Errorf("SEAT_ALREADY_TAKEN: 좌석 %s은 이미 예매되었습니다", seatId)
+	}
+
+	// 권리 상태 → USED + 좌석 점유
+	right.RightStatus = "USED"
+	right.UpdatedAt = nowISO(ctx)
+	rightB2, err := json.Marshal(right)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(keyPrefixPreSaleRight+rightId, rightB2); err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutState(seatKey, []byte(rightId)); err != nil {
+		return "", err
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"rightId": rightId,
+		"matchId": right.MatchId,
+		"seatId":  seatId,
+		"status":  "USED",
+		"message": "우선 예매 완료. 티켓 발권을 진행하세요.",
+	})
+	return string(out), nil
+}
+
+// ─── 29. ExpirePreSaleRights ─────────────────────────────
+// preSaleEndTime이 지난 GRANTED 권리를 EXPIRED로 처리한다.
+// 해당 좌석은 별도 점유 기록이 없으므로 자동으로 일반 예매 전환된다.
+
+func (t *TicketChaincode) ExpirePreSaleRights(
+	ctx contractapi.TransactionContextInterface,
+	matchId string,
+) (string, error) {
+	if err := requireMSP(ctx, "Org1MSP", "Org2MSP"); err != nil {
+		return "", err
+	}
+
+	now := txNow(ctx)
+
+	iter, err := ctx.GetStub().GetStateByPartialCompositeKey("PRESALE_RIGHT_MATCH", []string{matchId})
+	if err != nil {
+		return "", err
+	}
+	defer iter.Close()
+
+	expiredCount := 0
+	expiredRightIds := make([]string, 0)
+
+	for iter.HasNext() {
+		kv, err2 := iter.Next()
+		if err2 != nil {
+			continue
+		}
+		_, parts, err2 := ctx.GetStub().SplitCompositeKey(kv.Key)
+		if err2 != nil || len(parts) < 2 {
+			continue
+		}
+		rightId := parts[1]
+
+		rightB, err2 := ctx.GetStub().GetState(keyPrefixPreSaleRight + rightId)
+		if err2 != nil || rightB == nil {
+			continue
+		}
+		var right PreSaleRight
+		if err2 = json.Unmarshal(rightB, &right); err2 != nil {
+			continue
+		}
+		if right.RightStatus != "GRANTED" {
+			continue
+		}
+
+		preSaleEnd, err2 := time.Parse(time.RFC3339, right.PreSaleEndTime)
+		if err2 != nil {
+			continue
+		}
+		if now.After(preSaleEnd) {
+			right.RightStatus = "EXPIRED"
+			right.UpdatedAt = nowISO(ctx)
+			rightB2, _ := json.Marshal(right)
+			ctx.GetStub().PutState(keyPrefixPreSaleRight+rightId, rightB2)
+			expiredCount++
+			expiredRightIds = append(expiredRightIds, rightId)
+		}
+	}
+
+	// 만료 처리된 권리가 있으면 PreSaleConfig → CLOSED
+	if expiredCount > 0 {
+		configB, err2 := ctx.GetStub().GetState(keyPrefixPreSaleConfig + matchId)
+		if err2 == nil && configB != nil {
+			var config PreSaleConfig
+			if json.Unmarshal(configB, &config) == nil && config.Status == "DRAW_COMPLETED" {
+				config.Status = "CLOSED"
+				config.UpdatedAt = nowISO(ctx)
+				configB2, _ := json.Marshal(config)
+				ctx.GetStub().PutState(keyPrefixPreSaleConfig+matchId, configB2)
+			}
+		}
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"matchId":         matchId,
+		"expiredCount":    expiredCount,
+		"expiredRightIds": expiredRightIds,
+		"message":         "만료된 좌석은 일반 예매 전환 가능합니다",
+	})
+	return string(out), nil
+}
+
+// ─── 30. 조회 함수 (PreSale) ─────────────────────────────
+
+func (t *TicketChaincode) GetPreSaleConfig(
+	ctx contractapi.TransactionContextInterface,
+	matchId string,
+) (string, error) {
+	b, err := ctx.GetStub().GetState(keyPrefixPreSaleConfig + matchId)
+	if err != nil {
+		return "", err
+	}
+	if b == nil {
+		return "", fmt.Errorf("PRESALE_CONFIG_NOT_FOUND: %s", matchId)
+	}
+	return string(b), nil
+}
+
+func (t *TicketChaincode) GetPreSaleRight(
+	ctx contractapi.TransactionContextInterface,
+	rightId string,
+) (string, error) {
+	b, err := ctx.GetStub().GetState(keyPrefixPreSaleRight + rightId)
+	if err != nil {
+		return "", err
+	}
+	if b == nil {
+		return "", fmt.Errorf("PRESALE_RIGHT_NOT_FOUND: %s", rightId)
+	}
+	return string(b), nil
+}
+
+func (t *TicketChaincode) GetUserPreSaleRights(
+	ctx contractapi.TransactionContextInterface,
+	userDidHash string,
+) (string, error) {
+	iter, err := ctx.GetStub().GetStateByPartialCompositeKey("PRESALE_RIGHT_USER", []string{userDidHash})
+	if err != nil {
+		return "", err
+	}
+	defer iter.Close()
+
+	rights := make([]PreSaleRight, 0)
+	for iter.HasNext() {
+		kv, err2 := iter.Next()
+		if err2 != nil {
+			continue
+		}
+		_, parts, err2 := ctx.GetStub().SplitCompositeKey(kv.Key)
+		if err2 != nil || len(parts) < 2 {
+			continue
+		}
+		rightId := parts[1]
+		rightB, err2 := ctx.GetStub().GetState(keyPrefixPreSaleRight + rightId)
+		if err2 != nil || rightB == nil {
+			continue
+		}
+		var right PreSaleRight
+		if err2 = json.Unmarshal(rightB, &right); err2 != nil {
+			continue
+		}
+		rights = append(rights, right)
+	}
+	out, _ := json.Marshal(rights)
+	return string(out), nil
+}
+
+func (t *TicketChaincode) GetPreSaleEntries(
+	ctx contractapi.TransactionContextInterface,
+	matchId string,
+) (string, error) {
+	iter, err := ctx.GetStub().GetStateByPartialCompositeKey("PRESALE_ENTRY_USER", []string{matchId})
+	if err != nil {
+		return "", err
+	}
+	defer iter.Close()
+
+	entries := make([]PreSaleEntry, 0)
+	for iter.HasNext() {
+		kv, err2 := iter.Next()
+		if err2 != nil {
+			continue
+		}
+		entryId := string(kv.Value)
+		entryB, err2 := ctx.GetStub().GetState(keyPrefixPreSaleEntry + entryId)
+		if err2 != nil || entryB == nil {
+			continue
+		}
+		var entry PreSaleEntry
+		if err2 = json.Unmarshal(entryB, &entry); err2 != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	out, _ := json.Marshal(entries)
 	return string(out), nil
 }
 
