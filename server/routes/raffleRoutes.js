@@ -204,14 +204,24 @@ router.post('/draw/execute', requireAuth, async (req, res) => {
     if (!draw) return res.status(404).json({ error: '추첨을 찾을 수 없습니다' });
     if (draw.status === 'COMPLETED') return res.status(400).json({ error: '이미 완료된 추첨입니다' });
 
+    // 참여한 응모권 목록 조회
+    const [enteredNfts] = await _pool.query(
+      "SELECT id FROM raffle_nfts WHERE draw_id = ? AND status = 'ENTERED'",
+      [drawId]
+    );
+    const entryIds = enteredNfts.map(n => n.id);
+    if (entryIds.length === 0) {
+      return res.status(400).json({ error: '참여한 응모권이 없습니다' });
+    }
+
     // Fabric 원장에 draw가 없으면 (DB 시드 데이터 등) 먼저 생성
     let fabricResult;
     try {
-      fabricResult = await fabricService.executeDraw({ drawId });
+      fabricResult = await fabricService.executeDraw({ drawId, entryIds });
     } catch (execErr) {
       if (execErr.message && execErr.message.includes('DRAW_NOT_FOUND')) {
         await fabricService.createDraw({ drawId: draw.id, gameId: draw.game_id, winnerCount: draw.winner_count });
-        fabricResult = await fabricService.executeDraw({ drawId });
+        fabricResult = await fabricService.executeDraw({ drawId, entryIds });
       } else {
         throw execErr;
       }
