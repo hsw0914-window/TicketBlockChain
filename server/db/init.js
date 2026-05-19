@@ -197,42 +197,29 @@ async function initDB() {
       );
       console.log("✅ 테스트 경기 G_TEST 생성 완료");
     }
-    // 경기 날짜 5월로 업데이트 + booking_open_at 설정
-    const gameUpdates = [
-      { id: "G001", date: "2026-05-20", time: "18:30:00", open: "2026-05-15 10:00:00", status: "OPEN",     winners: 5 },
-      { id: "G002", date: "2026-05-20", time: "18:30:00", open: "2026-05-15 10:00:00", status: "ALMOST",   winners: 5 },
-      { id: "G003", date: "2026-05-20", time: "14:00:00", open: "2026-05-15 10:00:00", status: "SOLDOUT",  winners: 5 },
-      { id: "G004", date: "2026-05-21", time: "18:30:00", open: "2026-05-19 10:00:00", status: "UPCOMING", winners: 5 },
-      { id: "G005", date: "2026-05-21", time: "18:30:00", open: "2026-05-19 10:00:00", status: "UPCOMING", winners: 5 },
-      { id: "G006", date: "2026-05-24", time: "14:00:00", open: "2026-05-22 10:00:00", status: "UPCOMING", winners: 5 },
-      { id: "G007", date: "2026-05-25", time: "18:30:00", open: "2026-05-22 10:00:00", status: "UPCOMING", winners: 5 },
-      { id: "G008", date: "2026-05-25", time: "18:30:00", open: "2026-05-22 10:00:00", status: "UPCOMING", winners: 5 },
-      { id: "G009", date: "2026-05-28", time: "18:30:00", open: "2026-05-26 10:00:00", status: "UPCOMING", winners: 5 },
-      { id: "G010", date: "2026-05-31", time: "14:00:00", open: "2026-05-28 10:00:00", status: "UPCOMING", winners: 5 },
-    ];
-    for (const g of gameUpdates) {
+    // 경기장 데이터 없으면 삽입 (games JOIN stadiums 이라 비어 있으면 경기가 안 뜸)
+    for (const s of SEED_STADIUMS) {
       await conn.query(
-        `UPDATE games SET game_date=?, game_time=?, status=?, booking_open_at=?, raffle_winners_count=? WHERE id=?`,
-        [g.date, g.time, g.status, g.open, g.winners, g.id]
+        `INSERT INTO stadiums (id, name, location, capacity) VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE name=VALUES(name), location=VALUES(location), capacity=VALUES(capacity)`,
+        [s.id, s.name, s.location, s.capacity]
       );
     }
-    console.log("✅ 경기 날짜 5월 업데이트 + booking_open_at 설정 완료");
-    // raffle_open_at 설정 (booking_open_at - 2시간)
-    const raffleOpenUpdates = [
-      { id: "G001", open: "2026-05-15 08:00:00" },
-      { id: "G002", open: "2026-05-15 08:00:00" },
-      { id: "G003", open: "2026-05-15 08:00:00" },
-      { id: "G004", open: "2026-05-19 08:00:00" },
-      { id: "G005", open: "2026-05-19 08:00:00" },
-      { id: "G006", open: "2026-05-22 08:00:00" },
-      { id: "G007", open: "2026-05-22 08:00:00" },
-      { id: "G008", open: "2026-05-22 08:00:00" },
-      { id: "G009", open: "2026-05-26 08:00:00" },
-      { id: "G010", open: "2026-05-28 08:00:00" },
-    ];
-    for (const r of raffleOpenUpdates) {
-      await conn.query(`UPDATE games SET raffle_open_at = ? WHERE id = ?`, [r.open, r.id]);
+    console.log("✅ stadiums 시드 완료 (없으면 삽입, 있으면 유지)");
+
+    // 경기 데이터 없으면 삽입, 있으면 날짜/상태 업데이트
+    for (const g of SEED_GAMES) {
+      await conn.query(
+        `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at, raffle_open_at, raffle_winners_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           game_date=VALUES(game_date), game_time=VALUES(game_time),
+           status=VALUES(status), booking_open_at=VALUES(booking_open_at),
+           raffle_open_at=VALUES(raffle_open_at), raffle_winners_count=VALUES(raffle_winners_count)`,
+        [g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price, g.booking_open_at, g.raffle_open_at, g.raffle_winners_count]
+      );
     }
+    console.log("✅ 경기 데이터 시드 완료 (없으면 삽입, 있으면 5월 날짜/상태 업데이트)");
     // G_TEST: 서버 시작 기준 -1시간 → 항상 응모 창 오픈 상태
     await conn.query(`UPDATE games SET raffle_open_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE id = 'G_TEST'`);
     // G_TEST2: 즉시 결과 공개 전용 테스트 경기 (없으면 생성)
