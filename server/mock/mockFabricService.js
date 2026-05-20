@@ -335,6 +335,17 @@ async function requestRefund({ ticketId, walletAddress, refundReason, gameDateSt
   const baseAmount   = ticket.price - (ticket.pointUsed || 0);
   const refundAmount = Math.floor(baseAmount * rate / 100);
 
+  // 포인트 복구 (실제 체인코드 RequestRefund와 동일한 동작)
+  const pointRestored = ticket.pointUsed || 0;
+  if (pointRestored > 0) {
+    const point = _getOrCreatePoint(ticket.userDidHash);
+    point.balance    += pointRestored;
+    point.totalUsed  -= pointRestored;
+    if (point.totalUsed < 0) point.totalUsed = 0;
+    point.lastUpdatedAt = now();
+    _store.points[ticket.userDidHash] = point;
+  }
+
   ticket.status       = 'REFUND_PROCESSING';
   ticket.updatedAt    = now();
   ticket.purchaseType = pType;
@@ -748,12 +759,9 @@ function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCo
 module.exports = {
   registerTicket,
   verifyEntry,
-  earnPointByEntry,
   transferTicket,
   earnPointFromTrade,
-  updateMembershipGrade,
   usePointForTicket,
-  restorePointForRefund,
   exchangePointItem,
   requestRefund,
   completeRefund,

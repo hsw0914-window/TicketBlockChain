@@ -102,31 +102,13 @@ async function verifyEntry({ ticketId, gateId }) {
   return JSON.parse(raw);
 }
 
-// ─── 3. EarnPointByEntry ─────────────────────────────────
-async function earnPointByEntry({ userDidHash, price }) {
-  const raw = await submitTx('EarnPointByEntry', userDidHash, String(price));
-  return JSON.parse(raw);
-}
-
-// ─── 4. UpdateMembershipGrade ────────────────────────────
-async function updateMembershipGrade({ userDidHash }) {
-  const raw = await submitTx('UpdateMembershipGrade', userDidHash);
-  return JSON.parse(raw);
-}
-
-// ─── 5. UsePointForTicket ────────────────────────────────
+// ─── 3. UsePointForTicket ────────────────────────────────
 async function usePointForTicket({ userDidHash, ticketId, pointAmount }) {
   await submitTx('UsePointForTicket', userDidHash, ticketId || '', String(pointAmount));
   return { success: true };
 }
 
-// ─── 5-b. RestorePointForRefund ─────────────────────────
-async function restorePointForRefund({ userDidHash, ticketId, pointAmount }) {
-  await submitTx('RestorePointForRefund', userDidHash, ticketId || '', String(pointAmount));
-  return { success: true };
-}
-
-// ─── 6. ExchangePointItem ────────────────────────────────
+// ─── 4. ExchangePointItem ────────────────────────────────
 async function exchangePointItem({ userDidHash, itemType }) {
   const raw = await submitTx('ExchangePointItem', userDidHash, itemType);
   return JSON.parse(raw);
@@ -277,10 +259,7 @@ module.exports = {
   hashDid,
   registerTicket,
   verifyEntry,
-  earnPointByEntry,
-  updateMembershipGrade,
   usePointForTicket,
-  restorePointForRefund,
   exchangePointItem,
   requestRefund,
   completeRefund,

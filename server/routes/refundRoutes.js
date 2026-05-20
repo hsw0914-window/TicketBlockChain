@@ -105,22 +105,6 @@ router.post('/', requireAuth, async (req, res) => {
       }
     }
 
-    // 포인트 할인 사용분 복구 (예매 시 포인트 차감된 경우)
-    const pd = Number(ticket.point_discount || 0);
-    if (pd > 0) {
-      try {
-        const userDidHash = fabricService.hashDid(walletAddress);
-        await fabricService.restorePointForRefund({
-          userDidHash,
-          ticketId,
-          pointAmount: pd,
-        });
-        console.log(`[refundRoutes] 포인트 복구: ${pd}P (티켓 ${ticketId})`);
-      } catch (pointErr) {
-        console.error('[refundRoutes] 포인트 복구 실패:', pointErr.message);
-      }
-    }
-
     // DB: 자동 완료 처리
     await conn.query(
       "UPDATE tickets SET status = 'refunded' WHERE id = ?",
