@@ -650,8 +650,8 @@ export function Market() {
               </div>
             </div>
           ) : (
-            <div className="grid xl:grid-cols-[280px_minmax(0,1fr)_340px] gap-5 items-start">
-              <motion.aside initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }}>
+            <div className="grid xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px] gap-5 items-stretch">
+              <motion.aside initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }} className="hidden">
                 <button
                   onClick={() => setMarketViewMode("browse")}
                   className="inline-flex items-center gap-2 text-[0.86rem] font-semibold"
@@ -747,8 +747,8 @@ export function Market() {
                 </div>
               </motion.main>
 
-              <motion.aside initial={{ opacity: 0, x: 18 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4, delay: 0.08 }} className="space-y-4">
-                <div className="rounded-[22px] p-5 sticky top-4" style={panelStyle}>
+              <motion.aside initial={{ opacity: 0, x: 18 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4, delay: 0.08 }} className="space-y-4 xl:self-stretch">
+                <div className="rounded-[22px] p-5 sticky top-4 xl:min-h-full" style={panelStyle}>
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-full flex items-center justify-center text-[1rem] font-black shrink-0" style={{ background: `${selectedFragment.color}20`, color: selectedFragment.color }}>{selectedFragment.idol.slice(0, 1)}</div>
                     <div className="min-w-0">
