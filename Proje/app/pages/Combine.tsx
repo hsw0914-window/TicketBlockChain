@@ -386,7 +386,7 @@ export function Combine() {
       </header>
 
       <div className="grid lg:grid-cols-[390px_1fr] gap-6">
-        <div className="space-y-4 lg:self-stretch lg:flex lg:flex-col">
+        <div className="space-y-4 lg:self-stretch lg:flex lg:flex-col lg:min-h-0">
           <Card className="p-4" style={shellTone.panelStrong}>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
@@ -423,7 +423,7 @@ export function Combine() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="fragments" className="mt-0 p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:h-0 lg:flex-1 lg:min-h-0">
+              <TabsContent value="fragments" className="mt-0 p-4 h-[620px] overflow-y-scroll lg:h-0 lg:flex-1 lg:min-h-0">
                 <div className="space-y-2">
                   {sortedFragments.map((fragment) => {
                     const selectedCount = getSelectedCount(selectedFragments, fragment.id);
@@ -500,7 +500,7 @@ export function Combine() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="nfts" className="mt-0 p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:h-0 lg:flex-1 lg:min-h-0">
+              <TabsContent value="nfts" className="mt-0 p-4 h-[620px] overflow-y-scroll lg:h-0 lg:flex-1 lg:min-h-0">
                 <div className="space-y-2">
                   {cardInventory.map((card) => (
                     <Card key={card.id} className="p-3" style={shellTone.surface}>
