@@ -350,26 +350,42 @@ export function Combine() {
 
   return (
     <div className="page-shell" style={{ width: "min(1480px, calc(100% - 3rem))" }}>
-      <div className="mb-6 flex items-center justify-center gap-4">
-        {[
-          { key: "openBox" as const, label: "박스 개봉", icon: Package },
-          { key: "combine" as const, label: "파편 조합", icon: Layers },
-        ].map((item) => {
-          const Icon = item.icon;
-          const active = viewMode === item.key;
-          return (
-            <Button
-              key={item.key}
-              onClick={() => setViewMode(item.key)}
-              className="rounded-[14px] px-5 py-2.5 font-semibold"
-              style={active ? { ...shellTone.selected, color: shellTone.accent } : { ...shellTone.surface, color: shellTone.muted }}
-            >
-              <Icon className="w-5 h-5 mr-2" />
-              {item.label}
-            </Button>
-          );
-        })}
-      </div>
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="page-eyebrow mb-3" style={{ color: shellTone.accentStrong }}>
+            {viewMode === "openBox" ? "BOX" : "COMBINE"}
+          </p>
+          <h1 className="page-title mb-2" style={{ color: shellTone.text }}>
+            {viewMode === "openBox" ? "박스 개봉" : "카드 조합"}
+          </h1>
+          <p className="page-subtitle" style={{ color: shellTone.muted }}>
+            {viewMode === "openBox"
+              ? "시즌 박스 하나만 운영하고, 키 없이 바로 열 수 있게 단순화했습니다."
+              : "파편 2개만 골라서 완성 카드로 합치는 흐름으로 단순화했습니다."}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {[
+            { key: "openBox" as const, label: "박스 개봉", icon: Package },
+            { key: "combine" as const, label: "파편 조합", icon: Layers },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = viewMode === item.key;
+            return (
+              <Button
+                key={item.key}
+                onClick={() => setViewMode(item.key)}
+                className="rounded-[14px] px-5 py-2.5 font-semibold"
+                style={active ? { ...shellTone.selected, color: shellTone.accent } : { ...shellTone.surface, color: shellTone.muted }}
+              >
+                <Icon className="w-5 h-5 mr-2" />
+                {item.label}
+              </Button>
+            );
+          })}
+        </div>
+      </header>
 
       <div className="grid lg:grid-cols-[390px_1fr] gap-6">
         <div className="space-y-4">
@@ -531,13 +547,6 @@ export function Combine() {
         <div className="space-y-6">
           {viewMode === "openBox" ? (
             <>
-              <div>
-                <h1 className="page-title mb-2" style={{ color: shellTone.text }}>박스 개봉</h1>
-                <p className="page-subtitle" style={{ color: shellTone.muted }}>
-                  시즌 박스 하나만 운영하고, 키 없이 바로 열 수 있게 단순화했습니다.
-                </p>
-              </div>
-
               <Card className="p-6 relative overflow-hidden" style={shellTone.panel}>
                 <div className="absolute inset-0" style={{ background: isDark ? "linear-gradient(90deg, rgba(67, 108, 158, 0.14), rgba(58, 80, 106, 0.04))" : "linear-gradient(90deg, rgba(85,109,136,0.08), rgba(124,141,161,0.03))" }}></div>
                 <div className="flex items-start gap-4 relative z-10">
@@ -618,13 +627,6 @@ export function Combine() {
             </>
           ) : (
             <>
-              <div>
-                <h1 className="page-title mb-2" style={{ color: shellTone.text }}>카드 조합</h1>
-                <p className="page-subtitle" style={{ color: shellTone.muted }}>
-                  파편 2개만 골라서 완성 카드로 합치는 흐름으로 단순화했습니다.
-                </p>
-              </div>
-
               <Card className="p-6 relative overflow-hidden" style={shellTone.panel}>
                 <div className="absolute inset-0" style={{ background: isDark ? "linear-gradient(90deg, rgba(67, 108, 158, 0.14), rgba(58, 80, 106, 0.04))" : "linear-gradient(90deg, rgba(85,109,136,0.08), rgba(124,141,161,0.03))" }}></div>
                 <div className="flex items-start gap-4 relative z-10">

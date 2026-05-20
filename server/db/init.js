@@ -106,6 +106,13 @@ const TEST_USER = {
   wallet_address: '0x15f7cc396e4C66296cE92225830e24f491941Fc2',
 };
 
+const ROOT_USER = {
+  user_id:  'root_user',
+  nickname: '입장관리자',
+  email:    'root@gmail.com',
+  password: 'root1234',
+};
+
 const SEED_STADIUMS = [
   { id: "jamsil",   name: "잠실야구장",              location: "서울특별시 송파구",    capacity: 25000 },
   { id: "sajik",    name: "사직야구장",              location: "부산광역시 동래구",    capacity: 24000 },
@@ -1114,6 +1121,14 @@ async function initDB() {
     [TEST_USER.user_id]
   );
   console.log(`✅ 테스트 계정 생성: ${TEST_USER.email} / ${TEST_USER.password}`);
+
+  const rootPasswordHash = await bcrypt.hash(ROOT_USER.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type)
+     VALUES (?, ?, ?, ?, 'local')`,
+    [ROOT_USER.user_id, ROOT_USER.nickname, ROOT_USER.email, rootPasswordHash]
+  );
+  console.log(`✅ QR 입장 관리자 계정 생성: ${ROOT_USER.email} / ${ROOT_USER.password}`);
 
   await conn.end();
   console.log("✅ DB 초기화 및 시드 데이터 삽입 완료");
