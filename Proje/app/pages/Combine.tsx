@@ -366,7 +366,7 @@ export function Combine() {
         <div className="flex items-center gap-3">
           {[
             { key: "openBox" as const, label: "박스 개봉", icon: Package },
-            { key: "combine" as const, label: "파편 완성", icon: Layers },
+            { key: "combine" as const, label: "파편 조합", icon: Layers },
           ].map((item) => {
             const Icon = item.icon;
             const active = viewMode === item.key;
@@ -554,11 +554,11 @@ export function Combine() {
                     <Sparkles className="w-6 h-6" style={{ color: shellTone.success }} />
                   </div>
                   <div>
-                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>시즌 박스 안내</h3>
+                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>랜덤 박스 안내</h3>
                     <ul className="space-y-1 text-sm" style={{ color: shellTone.muted }}>
-                      <li>• 프리미엄 박스 없이 시즌 박스 한 종류만 유지합니다.</li>
-                      <li>• 열쇠 없이 바로 열 수 있어서 처음 쓰는 사람도 흐름이 단순합니다.</li>
-                      <li>• 시즌 박스에서는 완성에 사용하는 파편만 획득할 수 있어요.</li>
+                      <li>• 랜덤 박스를 열면 굿즈 카드 조합에 필요한 파편을 획득할 수 있습니다.</li>
+                      <li>• 획득한 파편은 왼쪽 인벤토리에 자동으로 추가됩니다.</li>
+                      <li>• 같은 파편 2개를 모으면 파편 조합에서 원본 굿즈 카드를 만들 수 있습니다.</li>
                     </ul>
                   </div>
                 </div>
@@ -568,20 +568,20 @@ export function Combine() {
                 <div className="relative z-10 grid xl:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
                   <div className="space-y-5">
                     <div>
-                      <p className="text-[0.72rem] font-semibold tracking-[0.18em] uppercase" style={{ color: shellTone.muted }}>Season Box</p>
-                      <h2 className="mt-2 section-title" style={{ color: shellTone.text }}>시즌 박스 바로 열기</h2>
+                      <p className="text-[0.72rem] font-semibold tracking-[0.18em] uppercase" style={{ color: shellTone.muted }}>Random Box</p>
+                      <h2 className="mt-2 section-title" style={{ color: shellTone.text }}>랜덤 박스 바로 열기</h2>
                       <p className="mt-2 text-sm leading-6" style={{ color: shellTone.muted }}>
-                        개막전, 원정전, 승리 배지처럼 장터에서 실제로 거래되는 야구 자산 위주로 보상을 묶었습니다.
+                        어떤 파편이 나올지 모르는 박스를 열고, 필요한 파편을 모아 원본 굿즈 카드로 조합해보세요.
                       </p>
                     </div>
                     <div className="rounded-[22px] p-5 flex items-center gap-5" style={shellTone.surface}>
                       <div className="w-24 h-24 rounded-[20px] flex items-center justify-center text-5xl" style={shellTone.panelSoft}>📦</div>
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}>단일 박스</span>
+                          <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}>랜덤 박스</span>
                           <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: "#d39a49", color: "#ffffff" }}>보유 {seasonBoxCount}개</span>
                         </div>
-                        <p className="text-lg font-bold" style={{ color: shellTone.text }}>시즌 박스</p>
+                        <p className="text-lg font-bold" style={{ color: shellTone.text }}>랜덤 박스</p>
                         <p className="text-sm leading-6" style={{ color: shellTone.muted }}>별도 선택 없이 바로 열리며, 개봉 결과는 왼쪽 인벤토리에 자동 반영됩니다.</p>
                       </div>
                     </div>
@@ -621,7 +621,7 @@ export function Combine() {
                   style={{ background: shellTone.accentStrong, color: "#ffffff" }}
                 >
                   <Package className="w-5 h-5 mr-2" />
-                  {opening ? "박스 여는 중..." : "시즌 박스 열기"}
+                  {opening ? "박스 여는 중..." : "랜덤 박스 열기"}
                 </Button>
               </Card>
             </>
