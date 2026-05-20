@@ -419,7 +419,7 @@ export function TicketResale() {
             티켓 거래소
           </h1>
           <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>
-            팬들이 직접 올린 티켓을 사고 팔 수 있어요. NFT 소유권 이전이 블록체인에 기록되며 3% 수수료가 플랫폼에 분배됩니다.
+            팬들이 직접 올린 티켓을 사고팔고, NFT 소유권 이전 내역을 확인할 수 있어요.
           </p>
         </div>
       </section>

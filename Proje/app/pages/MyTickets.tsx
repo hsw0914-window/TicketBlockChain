@@ -465,7 +465,7 @@ export function MyTickets() {
         <div>
           <p className="page-eyebrow text-[#1456a0] mb-3">Pass</p>
           <h1 className="page-title mb-3" style={{ color: "#14253f" }}>내 입장권</h1>
-          <p className="page-subtitle" style={{ color: "#55657d" }}>보유 중인 경기 NFT 티켓과 QR 입장권</p>
+          <p className="page-subtitle" style={{ color: "#55657d" }}>보유 중인 경기 NFT 티켓과 QR 입장권을 확인할 수 있어요.</p>
         </div>
       </div>
 

@@ -484,7 +484,7 @@ export function Market() {
                 <span className="rounded-full px-3 py-1 text-[0.72rem] font-semibold" style={{ background: "#edf7f1", border: "1px solid #cbe1d3", color: priceGreen }}>판매자별 등록가 비교</span>
               </div>
               <h1 className="page-title mb-2" style={{ color: neutralText }}>파편 장터</h1>
-              <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>카드 조합에 필요한 파편을 사고팔 수 있는 팬 자산 거래소입니다. 부족한 파편을 찾고, 가장 낮은 가격 매물을 고른 뒤 카드 조합으로 이어가세요.</p>
+              <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>굿즈 파편 매물을 확인하고, 조합에 필요한 파편을 사고팔 수 있어요.</p>
               {(marketViewMode === "detail" || activeTab === "sell") ? (
                 <div className="grid sm:grid-cols-4 gap-3 mt-6">
                   {[
@@ -500,7 +500,7 @@ export function Market() {
                   ))}
                 </div>
               ) : (
-                <p className="mt-6 text-[0.95rem] leading-7" style={{ color: mutedText }}>아래에서 파편을 고른 뒤, 어떤 카드 조합에 쓰이는 재료인지 확인하고 필요한 것만 구매하면 돼요.</p>
+                <p className="mt-6 text-[0.95rem] leading-7" style={{ color: mutedText }}>파편을 선택하면 보유 수량과 판매 매물을 바로 확인할 수 있어요.</p>
               )}
             </div>
 

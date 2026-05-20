@@ -167,7 +167,7 @@ export function Exchange() {
         <div className="page-header-main">
         <p className="page-eyebrow text-[#1456a0] mb-3">Exchange</p>
         <h1 className="page-title mb-2" style={{ color: neutralText }}>교환소</h1>
-        <p className="page-subtitle" style={{ color: mutedText }}>실물 NFT 카드를 교환하거나, 포인트로 응모권을 교환하세요</p>
+        <p className="page-subtitle" style={{ color: mutedText }}>실물 NFT 카드를 교환하거나, 포인트로 응모권을 교환할 수 있어요.</p>
         </div>
       </header>
 

@@ -186,7 +186,7 @@ export function Raffle() {
           <p className="page-eyebrow text-[#1456a0] mb-3">Priority Raffle</p>
           <h1 className="page-title mb-2" style={{ color: "#14253f" }}>우선 예매 응모</h1>
           <p className="page-subtitle max-w-2xl" style={{ color: "#586981" }}>
-            응모권 NFT로 추첨에 참여하고, 당첨되면 일반 예매 전에 지정된 테이블석을 Toss 결제로 예매할 수 있습니다.
+            응모권 NFT로 추첨에 참여하고, 당첨되면 우선 예매를 진행할 수 있어요.
           </p>
         </div>
       </header>
