@@ -3,6 +3,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { requireAuth } = require('../middleware/auth');
+const fabricService = require('../services/fabricBridge');
+const membershipService = require('../services/membershipService');
 
 const router = express.Router();
 let _pool;
@@ -203,76 +205,210 @@ router.get('/wallet', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/auth/membership — 멤버십 등급 및 입장 횟수 조회
-const TIER_ORDER = ['일반', '브론즈', '실버', '골드'];
-const TIER_REQUIREMENTS = { '일반': 0, '브론즈': 3, '실버': 6, '골드': 10 };
-
+// GET /api/auth/membership — 가입 상태, 티어, 혜택, 월 응모권 조회
 router.get('/membership', requireAuth, async (req, res) => {
   try {
-    const [[boxRow]] = await _pool.query(
-      'SELECT season_count FROM user_boxes WHERE user_id = ?',
-      [req.user.user_id]
-    );
-    const season_count = boxRow?.season_count ?? 0;
-
-    // 현재 등급 계산
-    let currentTier = '일반';
-    for (const tier of TIER_ORDER) {
-      if (season_count >= TIER_REQUIREMENTS[tier]) currentTier = tier;
-    }
-
-    const currentIdx = TIER_ORDER.indexOf(currentTier);
-    const nextTier = currentIdx < TIER_ORDER.length - 1 ? TIER_ORDER[currentIdx + 1] : null;
-    const nextTierCount = nextTier ? TIER_REQUIREMENTS[nextTier] : null;
-    const canTierUp = nextTier ? season_count >= TIER_REQUIREMENTS[nextTier] : false;
-
-    res.json({ success: true, currentTier, season_count, nextTier, nextTierCount, canTierUp });
+    const summary = await membershipService.getMembershipSummary(_pool, req.user.user_id);
+    res.json(summary);
   } catch (err) {
     console.error('[auth/membership]', err);
     res.status(500).json({ error: '서버 오류' });
   }
 });
 
-// GET /api/auth/early-access-count — 보유 응모권 수 조회
+// POST /api/auth/join-membership — 멤버십 가입(베이직 시작)
+router.post('/join-membership', requireAuth, async (req, res) => {
+  try {
+    const walletAddress = await membershipService.getVerifiedWallet(
+      _pool,
+      req.user.user_id,
+      String(req.body.walletAddress || '').trim(),
+    );
+    if (!walletAddress) {
+      return res.status(400).json({ error: '멤버십 가입은 인증된 지갑 연결 후 가능합니다.' });
+    }
+
+    const current = await membershipService.getUserMembership(_pool, req.user.user_id);
+    if (current.joined) {
+      return res.json({ success: true, message: '이미 멤버십에 가입되어 있습니다.', currentTier: current.tier });
+    }
+
+    const userDidHash = fabricService.hashDid(walletAddress);
+    await fabricService.joinMembership({ userDidHash });
+    await _pool.query(
+      `UPDATE users
+          SET membership_tier = '베이직', membership_joined_at = NOW()
+        WHERE user_id = ?`,
+      [req.user.user_id],
+    );
+    await _pool.query(
+      `INSERT INTO user_boxes (user_id, season_count)
+       VALUES (?, 0)
+       ON DUPLICATE KEY UPDATE season_count = season_count`,
+      [req.user.user_id],
+    );
+
+    res.json({ success: true, message: '멤버십 가입 완료! 베이직 등급으로 시작합니다.', currentTier: '베이직' });
+  } catch (err) {
+    console.error('[auth/join-membership]', err);
+    res.status(500).json({ error: err.message || '멤버십 가입 실패' });
+  }
+});
+
+// GET /api/auth/early-access-count — 사용 가능한 응모권 수 조회
 router.get('/early-access-count', requireAuth, async (req, res) => {
   try {
-    const [[row]] = await _pool.query(
-      "SELECT COUNT(*) AS cnt FROM raffle_nfts WHERE user_id = ? AND status = 'ISSUED'",
-      [req.user.user_id]
+    await _pool.query(
+      `UPDATE raffle_nfts
+          SET status = 'EXPIRED'
+        WHERE user_id = ? AND status = 'ISSUED' AND expires_at IS NOT NULL AND expires_at < NOW()`,
+      [req.user.user_id],
     );
-    res.json({ success: true, count: row?.cnt ?? 0 });
+    const [[row]] = await _pool.query(
+      `SELECT COUNT(*) AS cnt
+         FROM raffle_nfts
+        WHERE user_id = ? AND status = 'ISSUED'
+          AND (expires_at IS NULL OR expires_at > NOW())`,
+      [req.user.user_id],
+    );
+    const membership = await membershipService.getUserMembership(_pool, req.user.user_id);
+    res.json({ success: true, count: row?.cnt ?? 0, tier: membership.tier, joined: membership.joined });
   } catch (err) {
     console.error('[auth/early-access-count]', err);
     res.status(500).json({ error: '서버 오류' });
   }
 });
 
-// POST /api/auth/tier-up — 티어 업그레이드
+// POST /api/auth/tier-up — 수동 티어업 + 최초 달성 혜택 지급
 router.post('/tier-up', requireAuth, async (req, res) => {
   try {
-    const [[boxRow]] = await _pool.query(
-      'SELECT season_count FROM user_boxes WHERE user_id = ?',
-      [req.user.user_id]
-    );
-    const season_count = boxRow?.season_count ?? 0;
+    const membership = await membershipService.getUserMembership(_pool, req.user.user_id);
+    if (!membership.joined) return res.status(400).json({ error: '멤버십 가입 후 티어업할 수 있습니다.' });
 
-    let currentTier = '일반';
-    for (const tier of TIER_ORDER) {
-      if (season_count >= TIER_REQUIREMENTS[tier]) currentTier = tier;
-    }
-
-    const currentIdx = TIER_ORDER.indexOf(currentTier);
-    const nextTier = currentIdx < TIER_ORDER.length - 1 ? TIER_ORDER[currentIdx + 1] : null;
+    const seasonCount = await membershipService.getSeasonCount(_pool, req.user.user_id);
+    const currentIdx = membershipService.TIER_ORDER.indexOf(membership.tier);
+    const nextTier = currentIdx < membershipService.TIER_ORDER.length - 1
+      ? membershipService.TIER_ORDER[currentIdx + 1]
+      : null;
 
     if (!nextTier) return res.status(400).json({ error: '이미 최고 등급입니다.' });
-    if (season_count < TIER_REQUIREMENTS[nextTier]) {
-      return res.status(400).json({ error: `${nextTier} 달성 조건 미충족 (필요: ${TIER_REQUIREMENTS[nextTier]}회)` });
+    if (seasonCount < membershipService.TIER_REQUIREMENTS[nextTier]) {
+      return res.status(400).json({ error: `${nextTier} 달성 조건 미충족(필요: ${membershipService.TIER_REQUIREMENTS[nextTier]}회)` });
     }
 
-    res.json({ success: true, message: `${nextTier} 등급으로 티어업 완료!`, newTier: nextTier, awardedCards: [] });
+    const walletAddress = await membershipService.getVerifiedWallet(
+      _pool,
+      req.user.user_id,
+      String(req.body.walletAddress || '').trim(),
+    );
+    if (!walletAddress) return res.status(400).json({ error: '인증된 지갑 연결이 필요합니다.' });
+
+    const userDidHash = fabricService.hashDid(walletAddress);
+    await fabricService.tierUpMembership({ userDidHash, targetGrade: membershipService.toFabricTier(nextTier) });
+
+    const [[existingReward]] = await _pool.query(
+      `SELECT id FROM membership_tier_rewards WHERE user_id = ? AND tier = ?`,
+      [req.user.user_id, nextTier],
+    );
+    if (existingReward) return res.status(409).json({ error: '이미 해당 티어 최초 혜택을 수령했습니다.' });
+
+    const reward = membershipService.TIER_REWARDS[nextTier] || { cards: 0, raffles: 0 };
+    const awardedCards = await membershipService.issueRewardCards(_pool, req.user.user_id, reward.cards, nextTier);
+    const issuedRaffleNftIds = await membershipService.issueRaffleNfts({
+      pool: _pool,
+      fabricService,
+      userId: req.user.user_id,
+      walletAddress,
+      count: reward.raffles,
+      source: 'TIER_REWARD',
+      expiresAt: membershipService.addDays(new Date(), 60),
+    });
+
+    await _pool.query(
+      'UPDATE users SET membership_tier = ? WHERE user_id = ?',
+      [nextTier, req.user.user_id],
+    );
+    await _pool.query(
+      `INSERT INTO membership_tier_rewards
+         (id, user_id, tier, reward_cards, reward_raffles, card_payload_json, raffle_nft_ids)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        crypto.randomUUID(),
+        req.user.user_id,
+        nextTier,
+        reward.cards,
+        reward.raffles,
+        JSON.stringify(awardedCards),
+        JSON.stringify(issuedRaffleNftIds),
+      ],
+    );
+
+    res.json({
+      success: true,
+      message: `${nextTier} 등급으로 티어업 완료! 최초 달성 혜택이 지급되었습니다.`,
+      newTier: nextTier,
+      raffleCount: issuedRaffleNftIds.length,
+      issuedRaffleNftIds,
+      awardedCards,
+    });
   } catch (err) {
     console.error('[auth/tier-up]', err);
-    res.status(500).json({ error: '서버 오류' });
+    res.status(500).json({ error: err.message || '서버 오류' });
+  }
+});
+
+// POST /api/auth/claim-monthly-raffles — 등급별 월 응모권 수령
+router.post('/claim-monthly-raffles', requireAuth, async (req, res) => {
+  try {
+    const membership = await membershipService.getUserMembership(_pool, req.user.user_id);
+    if (!membership.joined) return res.status(400).json({ error: '멤버십 가입 후 월 응모권을 받을 수 있습니다.' });
+
+    const limit = membershipService.TIER_MONTHLY_RAFFLES[membership.tier] || 0;
+    if (limit <= 0) return res.status(400).json({ error: `${membership.tier} 등급은 월 응모권 지급 대상이 아닙니다.` });
+
+    const claimMonth = membershipService.formatMonth();
+    const [[existing]] = await _pool.query(
+      `SELECT id FROM membership_monthly_raffle_claims WHERE user_id = ? AND claim_month = ?`,
+      [req.user.user_id, claimMonth],
+    );
+    if (existing) return res.status(400).json({ error: '이번 달 응모권은 이미 수령했습니다.' });
+
+    const walletAddress = await membershipService.getVerifiedWallet(
+      _pool,
+      req.user.user_id,
+      String(req.body.walletAddress || '').trim(),
+    );
+    if (!walletAddress) return res.status(400).json({ error: '인증된 지갑 연결이 필요합니다.' });
+
+    const expiresAt = membershipService.nextMonthEnd();
+    const issuedRaffleNftIds = await membershipService.issueRaffleNfts({
+      pool: _pool,
+      fabricService,
+      userId: req.user.user_id,
+      walletAddress,
+      count: limit,
+      source: 'MONTHLY_GRANT',
+      expiresAt,
+      claimedMonth: claimMonth,
+    });
+
+    await _pool.query(
+      `INSERT INTO membership_monthly_raffle_claims
+         (id, user_id, claim_month, tier, claimed_count, raffle_nft_ids, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [crypto.randomUUID(), req.user.user_id, claimMonth, membership.tier, limit, JSON.stringify(issuedRaffleNftIds), expiresAt],
+    );
+
+    res.json({
+      success: true,
+      message: `${claimMonth} 월 응모권 ${limit}장이 지급되었습니다.`,
+      count: limit,
+      raffleNftIds: issuedRaffleNftIds,
+      expiresAt,
+    });
+  } catch (err) {
+    console.error('[auth/claim-monthly-raffles]', err);
+    res.status(500).json({ error: err.message || '월 응모권 수령 실패' });
   }
 });
 

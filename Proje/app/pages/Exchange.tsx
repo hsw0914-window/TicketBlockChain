@@ -61,9 +61,19 @@ export function Exchange() {
   };
   const [status, setStatus] = useState<ExchangeStatus | null>(null);
 
-  const fetchStatus = () => {
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/exchange/status`, { headers: apiHeaders() });
+      const data = await res.json();
+      if (data.success) {
+        setStatus(data);
+        return;
+      }
+    } catch {
+      // 서버 상태 조회 실패 시 아래 기본값 사용
+    }
     setStatus({
-      tier: "일반",
+      tier: "베이직",
       limits: { nft: 1, raffle: 1 },
       used: { nft: 0, raffle: raffleCount ?? 0 },
       remaining: { nft: 1, raffle: Math.max(0, 1 - (raffleCount ?? 0)) },
@@ -82,17 +92,21 @@ export function Exchange() {
       fetch(`${API_BASE}/api/inventory`, { headers: apiHeaders() }).then(r => r.json()),
       fetch(`${API_BASE}/api/points?walletAddress=${walletAddress}`).then(r => r.json()),
       fetch(`${API_BASE}/api/raffle/my?walletAddress=${walletAddress}`, { headers: apiHeaders() }).then(r => r.json()).catch(() => ({ success: false, data: [] })),
-    ]).then(([inv, pointData, raffleData]) => {
+      fetch(`${API_BASE}/api/exchange/status`, { headers: apiHeaders() }).then(r => r.json()).catch(() => ({ success: false })),
+    ]).then(([inv, pointData, raffleData, statusData]) => {
       setCards(inv.cards ?? []);
       const count = Array.isArray(raffleData.data) ? raffleData.data.filter((r: { status?: string }) => r.status === "ISSUED").length : 0;
       setRaffleCount(count);
       if (pointData.success) setPoints(Number(pointData.data?.balance ?? pointData.data ?? 0));
-      setStatus({
-        tier: "일반",
-        limits: { nft: 1, raffle: 1 },
-        used: { nft: 0, raffle: count },
-        remaining: { nft: 1, raffle: Math.max(0, 1 - count) },
-      });
+      if (statusData.success) setStatus(statusData);
+      else {
+        setStatus({
+          tier: "베이직",
+          limits: { nft: 1, raffle: 1 },
+          used: { nft: 0, raffle: count },
+          remaining: { nft: 1, raffle: Math.max(0, 1 - count) },
+        });
+      }
     })
     .catch(() => {})
     .finally(() => setLoading(false));
@@ -108,7 +122,7 @@ export function Exchange() {
     setExchanging(true);
     try {
       setConfirmModal(null);
-      fetchStatus();
+      void fetchStatus();
       showToast(`${card.name} 실물 교환 신청 화면이 확인되었습니다. 기존 toss 기능 유지를 위해 NFT는 차감하지 않았습니다.`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "교환 신청 확인 중 오류가 발생했습니다.", "error");
@@ -123,16 +137,16 @@ export function Exchange() {
     if (!walletAddress) { showToast("지갑 연결이 필요합니다.", "error"); return; }
     setRafflePurchasing(pkg.id);
     try {
-      const res = await fetch(`${API_BASE}/api/points/exchange`, {
+      const res = await fetch(`${API_BASE}/api/exchange/buy-raffle`, {
         method: "POST",
         headers: apiHeaders(),
-        body: JSON.stringify({ walletAddress, itemType: "RAFFLE_NFT" }),
+        body: JSON.stringify({ walletAddress, count: pkg.count }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "응모권 교환 실패");
-      setPoints(Number(data.data?.remainingBalance ?? Math.max(0, points - pkg.price)));
+      setPoints(Number(data.remainingBalance ?? Math.max(0, points - pkg.price)));
       setRaffleCount(data.newCount ?? (raffleCount ?? 0) + pkg.count);
-      fetchStatus();
+      void fetchStatus();
       showToast(`응모권 ${pkg.count}장을 교환했습니다!`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "응모권 교환 중 오류가 발생했습니다.", "error");

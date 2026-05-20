@@ -6,12 +6,34 @@ const fabricService = require("../services/fabricBridge");
 const { confirmPayment, cancelPayment } = require("../services/tossPayService");
 const { requireAuth } = require("../middleware/auth");
 const { isWithinGamePlus1h } = require("../utils/gameTime");
+const membershipService = require("../services/membershipService");
 
 const router = express.Router();
 let _pool;
 
 function setPool(pool) {
   _pool = pool;
+}
+
+const PRIORITY_BLOCKS = new Set(['T1', 'T2']);
+const PRIORITY_ROW = 5;
+const PRIORITY_SEATS = new Set([2, 3, 4, 5, 6]);
+
+function isPrioritySeat(block, seat) {
+  return PRIORITY_BLOCKS.has(String(block || '').toUpperCase())
+    && Number(seat.row) === PRIORITY_ROW
+    && PRIORITY_SEATS.has(Number(seat.seatNumber));
+}
+
+function parseJsonArray(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 async function requireVerifiedDidForWallet(req, res, next) {
@@ -83,12 +105,21 @@ router.get("/games", async (req, res) => {
     const [games] = await _pool.query(`
       SELECT g.id, g.home_team, g.away_team,
         DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
-        g.game_time, g.stadium_id, g.status, g.base_price,
+        TIME_FORMAT(g.game_time, '%H:%i:%s') AS game_time,
+        g.stadium_id, g.base_price,
+        DATE_FORMAT(g.booking_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS booking_open_at,
+        DATE_FORMAT(g.raffle_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS raffle_open_at,
+        g.raffle_winners_count,
         s.name AS stadium_name, s.location,
-        ELT(WEEKDAY(g.game_date)+1, '월','화','수','목','금','토','일') AS day_of_week
+        ELT(WEEKDAY(g.game_date)+1, '월','화','수','목','금','토','일') AS day_of_week,
+        CASE
+          WHEN TIMESTAMP(g.game_date, g.game_time) < NOW() THEN 'ENDED'
+          WHEN g.booking_open_at IS NOT NULL AND g.booking_open_at > NOW() THEN 'UPCOMING'
+          ELSE g.status
+        END AS status
       FROM games g
       JOIN stadiums s ON g.stadium_id = s.id
-      ORDER BY g.game_date ASC
+      ORDER BY g.game_date ASC, g.game_time ASC
     `);
     res.json({ success: true, data: games });
   } catch (err) {
@@ -105,8 +136,16 @@ router.get("/games/:id", async (req, res) => {
       `SELECT g.id, g.home_team, g.away_team,
          DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
          TIME_FORMAT(g.game_time, '%H:%i:%s') AS game_time,
-         g.stadium_id, g.status, g.base_price,
-         s.name AS stadium_name, s.location, s.capacity
+         g.stadium_id, g.base_price,
+         DATE_FORMAT(g.booking_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS booking_open_at,
+         DATE_FORMAT(g.raffle_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS raffle_open_at,
+         g.raffle_winners_count,
+         s.name AS stadium_name, s.location, s.capacity,
+         CASE
+           WHEN TIMESTAMP(g.game_date, g.game_time) < NOW() THEN 'ENDED'
+           WHEN g.booking_open_at IS NOT NULL AND g.booking_open_at > NOW() THEN 'UPCOMING'
+           ELSE g.status
+         END AS status
        FROM games g
        JOIN stadiums s ON g.stadium_id = s.id
        WHERE g.id = ?`,
@@ -302,6 +341,7 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
     paymentKey, orderId, amount,
     walletAddress, gameId, stadium, grade, block, seats,
     pointDiscount,
+    bookingMode, priorityEntryId,
   } = req.body;
 
   if (!paymentKey || !orderId || !amount) {
@@ -312,10 +352,17 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
   }
 
   const verifiedWalletAddress = req.verifiedWalletAddress || String(walletAddress).toLowerCase();
+  const isPriorityMode = bookingMode === 'priority';
+  let priorityEntry = null;
+  let priorityRaffleNftId = '';
 
   // 1-a. 예매 마감 체크 (경기 시작 후 1시간까지)
   const [[gameDeadlineRow]] = await _pool.query(
-    `SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date, TIME_FORMAT(game_time, '%H:%i:%s') AS game_time FROM games WHERE id = ?`,
+    `SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date,
+            TIME_FORMAT(game_time, '%H:%i:%s') AS game_time,
+            booking_open_at
+       FROM games
+      WHERE id = ?`,
     [gameId]
   );
   if (!gameDeadlineRow) {
@@ -325,12 +372,53 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
     return res.status(400).json({ success: false, message: '예매 마감 시간이 지났습니다 (경기 시작 1시간 이후 예매 불가)' });
   }
 
+  if (!isPriorityMode && gameDeadlineRow.booking_open_at && new Date(gameDeadlineRow.booking_open_at).getTime() > Date.now()) {
+    return res.status(400).json({ success: false, message: '아직 일반 예매 오픈 전입니다' });
+  }
+
+  if (isPriorityMode) {
+    if (!priorityEntryId) {
+      return res.status(400).json({ success: false, message: '우선 예매 응모 당첨 정보가 필요합니다' });
+    }
+    if (!seats.every((seat) => isPrioritySeat(block, seat))) {
+      return res.status(400).json({ success: false, message: '우선 예매는 T1/T2 5열 2~6번 좌석만 선택할 수 있습니다' });
+    }
+
+    const [[entry]] = await _pool.query(
+      `SELECT *
+         FROM game_raffle_entries
+        WHERE id = ? AND user_id = ? AND game_id = ? AND status = 'won'
+        LIMIT 1`,
+      [priorityEntryId, req.user.user_id, gameId],
+    );
+    if (!entry) {
+      return res.status(403).json({ success: false, message: '우선 예매 당첨 내역을 찾을 수 없습니다' });
+    }
+    priorityEntry = entry;
+
+    const raffleNftIds = parseJsonArray(entry.raffle_nft_ids);
+    if (raffleNftIds.length > 0) {
+      const placeholders = raffleNftIds.map(() => '?').join(',');
+      const [[winnerNft]] = await _pool.query(
+        `SELECT id FROM raffle_nfts
+          WHERE id IN (${placeholders}) AND user_id = ? AND game_id = ? AND status = 'WINNER'
+          LIMIT 1`,
+        [...raffleNftIds, req.user.user_id, gameId],
+      );
+      priorityRaffleNftId = winnerNft?.id || raffleNftIds[0];
+    }
+  }
+
   // 1-b. pointDiscount 서버 검증 (결제 호출 전)
   const pd = Number(pointDiscount || 0);
   if (pd < 0) {
     return res.status(400).json({ success: false, message: '포인트 할인 금액은 0 이상이어야 합니다' });
   }
   if (pd > 0) {
+    const memberJoined = await membershipService.isMembershipActive(_pool, req.user.user_id);
+    if (!memberJoined) {
+      return res.status(400).json({ success: false, message: '멤버십 가입 후 포인트를 사용할 수 있습니다' });
+    }
     // 좌석 총액과 결제 금액이 맞는지 확인 (서비스 수수료 3% 포함)
     const totalSeatPrice = seats.reduce((sum, s) => sum + Number(s.price), 0);
     const serviceFee = Math.round(totalSeatPrice * 0.03);
@@ -432,7 +520,11 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
           if (userDidHash) {
             const reservationId = uuidv4();
             await fabricService.createReservation({
-              reservationId, userDidHash, gameId: String(gameId), raffleNftId: '', isPriority: false,
+              reservationId,
+              userDidHash,
+              gameId: String(gameId),
+              raffleNftId: priorityRaffleNftId || '',
+              isPriority: isPriorityMode,
             });
             await fabricService.confirmReservation({ reservationId, ticketId });
           }
@@ -457,6 +549,34 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
         console.log(`[toss] 포인트 차감 완료: ${pointDiscount}P (티켓 ${ticketResults[0].ticketId})`);
       } catch (pointErr) {
         console.error('[toss] 포인트 차감 실패 (무시):', pointErr.message);
+      }
+    }
+
+    if (isPriorityMode && priorityEntry && ticketResults.length > 0) {
+      try {
+        if (priorityRaffleNftId) {
+          await fabricService.useRaffleNFT({
+            raffleNftId: priorityRaffleNftId,
+            userDidHash: fabricService.hashDid(verifiedWalletAddress),
+            ticketId: ticketResults[0].ticketId,
+          });
+        }
+        await _pool.query(
+          `UPDATE game_raffle_entries SET status = 'used', used_at = NOW() WHERE id = ?`,
+          [priorityEntry.id],
+        );
+        const raffleNftIds = parseJsonArray(priorityEntry.raffle_nft_ids);
+        if (raffleNftIds.length > 0) {
+          const placeholders = raffleNftIds.map(() => '?').join(',');
+          await _pool.query(
+            `UPDATE raffle_nfts SET status = 'USED', updated_at = NOW()
+              WHERE id IN (${placeholders}) AND user_id = ?`,
+            [...raffleNftIds, req.user.user_id],
+          );
+        }
+        console.log(`[toss] 우선 예매 응모권 사용 완료: entry=${priorityEntry.id}, ticket=${ticketResults[0].ticketId}`);
+      } catch (priorityErr) {
+        console.error('[toss] 우선 예매 응모권 사용 처리 실패 (무시):', priorityErr.message);
       }
     }
 

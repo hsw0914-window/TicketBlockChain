@@ -152,6 +152,25 @@ const SEED_GAMES = [
   { id: "G028", home_team: "한화", away_team: "LG",   game_date: "2026-05-31", game_time: "14:00:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000 },
 ];
 
+function dateTimeDaysBefore(dateStr, days, timeStr) {
+  const date = new Date(`${dateStr}T00:00:00+09:00`);
+  date.setDate(date.getDate() - days);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d} ${timeStr}`;
+}
+
+function bookingOpenAtForGame(game) {
+  if (game.status === 'UPCOMING') return dateTimeDaysBefore(game.game_date, 2, '10:00:00');
+  return '2020-01-01 00:00:00';
+}
+
+function raffleOpenAtForGame(game) {
+  if (game.status === 'UPCOMING') return dateTimeDaysBefore(game.game_date, 2, '08:00:00');
+  return '2020-01-01 00:00:00';
+}
+
 // ─── 초기화 함수 ──────────────────────────────────────────
 
 const GOODS_SEED = [
@@ -214,9 +233,13 @@ async function initDB() {
   // ─── 매 재시작마다 초기화: FK 역순으로 DROP ───────────
   await conn.query(`SET FOREIGN_KEY_CHECKS = 0`);
   // raffle / reservation 테이블
+  await conn.query(`DROP TABLE IF EXISTS game_raffle_entries`);
   await conn.query(`DROP TABLE IF EXISTS reservations`);
   await conn.query(`DROP TABLE IF EXISTS draws`);
   await conn.query(`DROP TABLE IF EXISTS raffle_nfts`);
+  await conn.query(`DROP TABLE IF EXISTS membership_monthly_raffle_claims`);
+  await conn.query(`DROP TABLE IF EXISTS membership_tier_rewards`);
+  await conn.query(`DROP TABLE IF EXISTS point_events`);
   // combine/market 테이블 (FK 역순)
   await conn.query(`DROP TABLE IF EXISTS box_open_logs`);
   await conn.query(`DROP TABLE IF EXISTS combine_logs`);
@@ -265,6 +288,8 @@ async function initDB() {
       login_type    ENUM('local','google') NOT NULL DEFAULT 'local',
       google_id     VARCHAR(255) UNIQUE DEFAULT NULL,
       profile_image VARCHAR(255) DEFAULT NULL,
+      membership_tier ENUM('베이직','브론즈','실버','골드') DEFAULT NULL,
+      membership_joined_at DATETIME DEFAULT NULL,
       is_active     TINYINT(1)   NOT NULL DEFAULT 1,
       created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -366,6 +391,9 @@ async function initDB() {
       stadium_id VARCHAR(50)  NOT NULL,
       status     ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED','CANCELLED') NOT NULL DEFAULT 'OPEN',
       base_price DECIMAL(10,2) DEFAULT NULL,
+      booking_open_at DATETIME DEFAULT NULL,
+      raffle_open_at DATETIME DEFAULT NULL,
+      raffle_winners_count INT NOT NULL DEFAULT 5,
       FOREIGN KEY (stadium_id) REFERENCES stadiums(id)
     )
   `);
@@ -420,6 +448,51 @@ async function initDB() {
     )
   `);
 
+  await conn.query(`
+    CREATE TABLE point_events (
+      id             CHAR(36)     PRIMARY KEY,
+      user_id        VARCHAR(50)  NOT NULL,
+      wallet_address VARCHAR(100) DEFAULT NULL,
+      event_type     VARCHAR(50)  NOT NULL,
+      reason         VARCHAR(120) NOT NULL,
+      amount         INT          NOT NULL DEFAULT 0,
+      metadata_json  JSON         DEFAULT NULL,
+      read_at        DATETIME     DEFAULT NULL,
+      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE membership_tier_rewards (
+      id                CHAR(36)     PRIMARY KEY,
+      user_id           VARCHAR(50)  NOT NULL,
+      tier              ENUM('브론즈','실버','골드') NOT NULL,
+      reward_cards      INT          NOT NULL DEFAULT 0,
+      reward_raffles    INT          NOT NULL DEFAULT 0,
+      card_payload_json JSON         DEFAULT NULL,
+      raffle_nft_ids    JSON         DEFAULT NULL,
+      claimed_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_membership_tier_reward (user_id, tier),
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE membership_monthly_raffle_claims (
+      id             CHAR(36)     PRIMARY KEY,
+      user_id        VARCHAR(50)  NOT NULL,
+      claim_month    CHAR(7)      NOT NULL,
+      tier           ENUM('베이직','브론즈','실버','골드') NOT NULL,
+      claimed_count  INT          NOT NULL DEFAULT 0,
+      raffle_nft_ids JSON         DEFAULT NULL,
+      expires_at     DATETIME     NOT NULL,
+      claimed_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_membership_monthly_claim (user_id, claim_month),
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
   // ─── 환불 테이블 ─────────────────────────────────────
   await conn.query(`
     CREATE TABLE refunds (
@@ -451,6 +524,9 @@ async function initDB() {
       status          ENUM('ISSUED','ENTERED','WINNER','LOST','USED','EXPIRED') NOT NULL DEFAULT 'ISSUED',
       draw_id         CHAR(36)     DEFAULT NULL,
       fabric_token_id VARCHAR(100) DEFAULT NULL,
+      source          ENUM('TIER_REWARD','MONTHLY_GRANT','POINT_EXCHANGE','ADMIN') NOT NULL DEFAULT 'POINT_EXCHANGE',
+      claimed_month   CHAR(7)      DEFAULT NULL,
+      expires_at      DATETIME     DEFAULT NULL,
       issued_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -487,6 +563,22 @@ async function initDB() {
       expires_at        DATETIME     DEFAULT NULL,
       FOREIGN KEY (user_id)  REFERENCES users(user_id),
       FOREIGN KEY (game_id)  REFERENCES games(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE game_raffle_entries (
+      id             INT          PRIMARY KEY AUTO_INCREMENT,
+      user_id        VARCHAR(50)  NOT NULL,
+      game_id        VARCHAR(50)  NOT NULL,
+      tickets_used   INT          NOT NULL DEFAULT 1,
+      raffle_nft_ids JSON         DEFAULT NULL,
+      status         ENUM('applied','won','lost','used') NOT NULL DEFAULT 'applied',
+      applied_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      used_at        DATETIME     DEFAULT NULL,
+      UNIQUE KEY uq_game_raffle_user (user_id, game_id),
+      FOREIGN KEY (user_id) REFERENCES users(user_id),
+      FOREIGN KEY (game_id) REFERENCES games(id)
     )
   `);
 
@@ -820,10 +912,23 @@ async function initDB() {
 
   for (const g of SEED_GAMES) {
     await conn.query(
-      "INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price]
+      `INSERT INTO games
+         (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at, raffle_open_at, raffle_winners_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price,
+        bookingOpenAtForGame(g), raffleOpenAtForGame(g), 5,
+      ]
     );
   }
+  await conn.query(
+    `UPDATE games
+        SET raffle_open_at = DATE_SUB(NOW(), INTERVAL 1 HOUR),
+            booking_open_at = DATE_ADD(NOW(), INTERVAL 2 HOUR),
+            raffle_winners_count = 5,
+            status = 'UPCOMING'
+      WHERE id = 'G023'`
+  );
 
   // ─── combine/market 시드 데이터 ──────────────────────
 

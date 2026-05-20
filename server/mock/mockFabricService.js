@@ -120,11 +120,16 @@ async function verifyEntry({ ticketId, tokenId, walletAddress, gateId }) {
     result: 'ALLOWED',
   };
 
-  // 포인트 적립
-  const { earnedPoint } = await _earnPointByEntry(ticket.userDidHash, ticket.price);
-
-  // 멤버십 갱신
-  const { grade } = await _updateMembershipGrade(ticket.userDidHash);
+  const membership = _getOrCreateMembership(ticket.userDidHash);
+  let earnedPoint = 0;
+  let grade = membership.grade;
+  if (membership.joined) {
+    ({ earnedPoint } = await _earnPointByEntry(ticket.userDidHash, ticket.price));
+    membership.entryCount += 1;
+    membership.updatedAt = now();
+    _store.memberships[ticket.userDidHash] = membership;
+    grade = membership.grade;
+  }
 
   // 이벤트 발생
   _emitEvent('NFT_BURN_REQUESTED', {
@@ -146,6 +151,7 @@ async function verifyEntry({ ticketId, tokenId, walletAddress, gateId }) {
 // ─── 3. EarnPointByEntry (내부 호출용) ────────────────────
 async function _earnPointByEntry(userDidHash, price) {
   const membership = _getOrCreateMembership(userDidHash);
+  if (!membership.joined) return { earnedPoint: 0, balance: _getOrCreatePoint(userDidHash).balance };
   const rate       = getEarnRate(membership.grade);
   const earnedPoint = Math.floor(price * rate);
 
@@ -182,6 +188,8 @@ async function updateMembershipGrade({ userDidHash }) {
 
 // ─── 5. UsePointForTicket ──────────────────────────────────
 async function usePointForTicket({ userDidHash, ticketId, pointAmount }) {
+  const membership = _getOrCreateMembership(userDidHash);
+  if (!membership.joined) throw new Error('MEMBERSHIP_REQUIRED');
   const point = _getOrCreatePoint(userDidHash);
 
   if (pointAmount < 1000) {
@@ -226,6 +234,7 @@ async function exchangePointItem({ userDidHash, itemType }) {
 
   const point      = _getOrCreatePoint(userDidHash);
   const membership = _getOrCreateMembership(userDidHash);
+  if (!membership.joined) throw new Error('MEMBERSHIP_REQUIRED');
   const currentMonth = new Date().toISOString().slice(0, 7);
 
   // 월 초기화
@@ -467,10 +476,11 @@ async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, tr
   ticket.userDidHash  = hashDid(toWalletAddress);
   ticket.updatedAt    = now();
 
-  // 판매자 포인트 0.3% 적립
-  const earnedPoint = Math.floor(Number(transferPrice) * 0.003);
+  // 판매자 포인트 0.3% 적립 (멤버십 가입자만)
+  const fromDidHash = hashDid(fromWalletAddress);
+  const membership = _getOrCreateMembership(fromDidHash);
+  const earnedPoint = membership.joined ? Math.floor(Number(transferPrice) * 0.003) : 0;
   if (earnedPoint > 0) {
-    const fromDidHash = hashDid(fromWalletAddress);
     const point = _getOrCreatePoint(fromDidHash);
     point.balance     += earnedPoint;
     point.totalEarned += earnedPoint;
@@ -494,6 +504,8 @@ async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, tr
 
 // ─── EarnPointFromTrade (양도/장터 거래 포인트) ────────────────
 async function earnPointFromTrade({ userDidHash, amount, rate }) {
+  const membership = _getOrCreateMembership(userDidHash);
+  if (!membership.joined) return { earnedPoint: 0, balance: _getOrCreatePoint(userDidHash).balance };
   const earnedPoint = Math.floor(amount * rate);
   if (earnedPoint <= 0) return { earnedPoint: 0, balance: _getOrCreatePoint(userDidHash).balance };
 
@@ -722,6 +734,7 @@ function _getOrCreateMembership(userDidHash) {
     _store.memberships[userDidHash] = {
       userDidHash,
       grade:                        'BASIC',
+      joined:                       false,
       entryCount:                   0,
       monthlyRaffleExchangeCount:   0,
       monthlyCardExchangeCount:     0,
@@ -738,7 +751,7 @@ function _emitEvent(name, payload) {
 }
 
 // ─── 서버 시작 시 테스트 계정 포인트/멤버십 사전 세팅 ────────
-function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCount }) {
+function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCount, joined = false }) {
   const userDidHash = hashDid(walletAddress);
 
   _store.points[userDidHash] = {
@@ -750,8 +763,9 @@ function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCo
   };
 
   _store.memberships[userDidHash] = {
-    userDidHash,
-    grade:                        calcGrade(entryCount),
+      userDidHash,
+      grade:                        calcGrade(entryCount),
+      joined,
     entryCount,
     monthlyRaffleExchangeCount:   0,
     monthlyCardExchangeCount:     0,
@@ -762,9 +776,29 @@ function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCo
   console.log(`[MockFabric] SeedUser: ${walletAddress.slice(0, 10)}... ${pointBalance}P ${calcGrade(entryCount)}`);
 }
 
+async function joinMembership({ userDidHash }) {
+  const membership = _getOrCreateMembership(userDidHash);
+  membership.joined = true;
+  membership.grade = membership.grade || 'BASIC';
+  membership.updatedAt = now();
+  _store.memberships[userDidHash] = membership;
+  return { success: true, grade: membership.grade };
+}
+
+async function tierUpMembership({ userDidHash, targetGrade }) {
+  const membership = _getOrCreateMembership(userDidHash);
+  if (!membership.joined) throw new Error('MEMBERSHIP_REQUIRED');
+  membership.grade = targetGrade;
+  membership.updatedAt = now();
+  _store.memberships[userDidHash] = membership;
+  return { success: true, grade: targetGrade };
+}
+
 module.exports = {
   registerTicket,
   verifyEntry,
+  joinMembership,
+  tierUpMembership,
   transferTicket,
   earnPointFromTrade,
   usePointForTicket,

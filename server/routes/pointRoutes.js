@@ -3,6 +3,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService  = require('../services/fabricBridge');
+const membershipService = require('../services/membershipService');
 
 const router = express.Router();
 let _pool;
@@ -16,7 +17,14 @@ router.get('/', optionalAuth, async (req, res) => {
 
     const userDidHash = fabricService.hashDid(walletAddress);
     const point = await fabricService.getPointBalance({ userDidHash });
-    res.json({ success: true, data: point });
+    const membership = req.user?.user_id
+      ? await membershipService.getUserMembership(_pool, req.user.user_id)
+      : { joined: true };
+    res.json({
+      success: true,
+      data: membership.joined ? point : { ...point, balance: 0, totalEarned: 0, totalUsed: 0 },
+      membershipJoined: membership.joined,
+    });
   } catch (err) {
     console.error('[pointRoutes] GET /:', err);
     res.status(500).json({ error: err.message });
@@ -103,9 +111,10 @@ router.post('/exchange', requireAuth, async (req, res) => {
           const raffleNftId = uuidv4();
           await fabricService.registerRaffleNFT({ raffleNftId, userDidHash, gameId: '' });
           await _pool.query(
-            `INSERT INTO raffle_nfts (id, user_id, wallet_address, user_did_hash, status)
-             VALUES (?, ?, ?, ?, 'ISSUED')`,
-            [raffleNftId, wallet.user_id, walletAddress, userDidHash]
+            `INSERT INTO raffle_nfts
+               (id, user_id, wallet_address, user_did_hash, status, source, expires_at)
+             VALUES (?, ?, ?, ?, 'ISSUED', 'POINT_EXCHANGE', ?)`,
+            [raffleNftId, wallet.user_id, walletAddress, userDidHash, membershipService.addDays(new Date(), 60)]
           );
           result.raffleNftId = raffleNftId;
         }
@@ -121,11 +130,35 @@ router.post('/exchange', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/points/events  (디버그용: mock 이벤트 로그 전체)
-router.get('/events', async (req, res) => {
+// GET /api/points/events — 최근 포인트 적립 알림
+router.get('/events', requireAuth, async (req, res) => {
   try {
-    const events = await fabricService.getEvents();
-    res.json({ success: true, data: events });
+    const [rows] = await _pool.query(
+      `SELECT id, event_type, reason, amount, metadata_json, read_at,
+              DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s+09:00') AS created_at
+         FROM point_events
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 10`,
+      [req.user.user_id],
+    );
+    const [[unread]] = await _pool.query(
+      `SELECT COUNT(*) AS cnt FROM point_events WHERE user_id = ? AND read_at IS NULL`,
+      [req.user.user_id],
+    );
+    res.json({ success: true, data: rows, unreadCount: Number(unread?.cnt ?? 0) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/events/read', requireAuth, async (req, res) => {
+  try {
+    await _pool.query(
+      `UPDATE point_events SET read_at = NOW() WHERE user_id = ? AND read_at IS NULL`,
+      [req.user.user_id],
+    );
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

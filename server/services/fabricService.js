@@ -104,6 +104,16 @@ async function verifyEntry({ ticketId, gateId }) {
   return JSON.parse(raw);
 }
 
+async function joinMembership({ userDidHash }) {
+  const raw = await submitTx('JoinMembership', userDidHash);
+  return raw ? JSON.parse(raw) : { success: true };
+}
+
+async function tierUpMembership({ userDidHash, targetGrade }) {
+  const raw = await submitTx('TierUpMembership', userDidHash, targetGrade);
+  return raw ? JSON.parse(raw) : { success: true };
+}
+
 // ─── 3. UsePointForTicket ────────────────────────────────
 async function usePointForTicket({ userDidHash, ticketId, pointAmount }) {
   await submitTx('UsePointForTicket', userDidHash, ticketId || '', String(pointAmount));
@@ -262,6 +272,8 @@ module.exports = {
   hashDid,
   registerTicket,
   verifyEntry,
+  joinMembership,
+  tierUpMembership,
   usePointForTicket,
   exchangePointItem,
   requestRefund,

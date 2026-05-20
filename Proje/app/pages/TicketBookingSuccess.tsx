@@ -21,6 +21,8 @@ interface OrderInfo {
   seats:         SeatInfo[];
   pointDiscount: number;
   finalTotal:    number;
+  bookingMode?:  "normal" | "priority";
+  priorityEntryId?: string;
 }
 
 function formatPrice(value: number) {
@@ -83,6 +85,8 @@ export function TicketBookingSuccess() {
           price:      s.price,
         })),
         pointDiscount: info.pointDiscount,
+        bookingMode:   info.bookingMode ?? "normal",
+        priorityEntryId: info.priorityEntryId ?? "",
       }),
     })
       .then((res) => res.json())

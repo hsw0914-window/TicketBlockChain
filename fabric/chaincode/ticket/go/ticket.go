@@ -50,6 +50,8 @@ type PointRecord struct {
 type MembershipRecord struct {
 	UserDidHash                string `json:"userDidHash"`
 	Grade                      string `json:"grade"` // BASIC, BRONZE, SILVER, GOLD
+	Joined                     bool   `json:"joined"`
+	JoinedAt                   string `json:"joinedAt"`
 	EntryCount                 int    `json:"entryCount"`
 	MonthlyRaffleExchangeCount int    `json:"monthlyRaffleExchangeCount"`
 	MonthlyCardExchangeCount   int    `json:"monthlyCardExchangeCount"`
@@ -355,6 +357,7 @@ func getOrCreateMembership(ctx contractapi.TransactionContextInterface, userDidH
 		return &MembershipRecord{
 			UserDidHash:    userDidHash,
 			Grade:          "BASIC",
+			Joined:         false,
 			LastResetMonth: currentMonth(ctx),
 			UpdatedAt:      nowISO(ctx),
 		}, nil
@@ -373,6 +376,68 @@ func putMembership(ctx contractapi.TransactionContextInterface, r *MembershipRec
 		return err
 	}
 	return ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixMembership+r.UserDidHash, b)
+}
+
+func (t *TicketChaincode) JoinMembership(
+	ctx contractapi.TransactionContextInterface,
+	userDidHash string,
+) (string, error) {
+	if userDidHash == "" {
+		return "", fmt.Errorf("INVALID_PARAM: userDidHash는 필수입니다")
+	}
+	membership, err := getOrCreateMembership(ctx, userDidHash)
+	if err != nil {
+		return "", err
+	}
+	if membership.Joined {
+		out, _ := json.Marshal(map[string]interface{}{"success": true, "grade": membership.Grade, "joined": true})
+		return string(out), nil
+	}
+	membership.Joined = true
+	membership.JoinedAt = nowISO(ctx)
+	membership.Grade = "BASIC"
+	membership.EntryCount = 0
+	resetMonthlyIfNeeded(membership, currentMonth(ctx))
+	if err = putMembership(ctx, membership); err != nil {
+		return "", err
+	}
+	out, _ := json.Marshal(map[string]interface{}{"success": true, "grade": membership.Grade, "joined": true})
+	return string(out), nil
+}
+
+func (t *TicketChaincode) TierUpMembership(
+	ctx contractapi.TransactionContextInterface,
+	userDidHash, targetGrade string,
+) (string, error) {
+	if userDidHash == "" || targetGrade == "" {
+		return "", fmt.Errorf("INVALID_PARAM: userDidHash, targetGrade는 필수입니다")
+	}
+	targetGrade = strings.ToUpper(targetGrade)
+	membership, err := getOrCreateMembership(ctx, userDidHash)
+	if err != nil {
+		return "", err
+	}
+	if !membership.Joined {
+		return "", fmt.Errorf("MEMBERSHIP_REQUIRED: 멤버십 가입 후 이용할 수 있습니다")
+	}
+	required := map[string]int{"BRONZE": 3, "SILVER": 6, "GOLD": 10}
+	if _, ok := required[targetGrade]; !ok {
+		return "", fmt.Errorf("INVALID_GRADE: %s", targetGrade)
+	}
+	order := map[string]int{"BASIC": 0, "BRONZE": 1, "SILVER": 2, "GOLD": 3}
+	if order[targetGrade] != order[membership.Grade]+1 {
+		return "", fmt.Errorf("INVALID_TIER_STEP: 한 단계씩만 승급할 수 있습니다")
+	}
+	if membership.EntryCount < required[targetGrade] {
+		return "", fmt.Errorf("TIER_REQUIREMENT_NOT_MET: %s requires %d entries", targetGrade, required[targetGrade])
+	}
+	membership.Grade = targetGrade
+	resetMonthlyIfNeeded(membership, currentMonth(ctx))
+	if err = putMembership(ctx, membership); err != nil {
+		return "", err
+	}
+	out, _ := json.Marshal(map[string]interface{}{"success": true, "grade": membership.Grade, "entryCount": membership.EntryCount})
+	return string(out), nil
 }
 
 // ─── 1. RegisterTicket ────────────────────────────────────
@@ -483,18 +548,18 @@ func (t *TicketChaincode) VerifyEntry(
 		return "", err
 	}
 
-	// 월 초기화
-	resetMonthlyIfNeeded(membership, currentMonth(ctx))
-
-	earnedPoint := math.Floor(ticket.Price * getEarnRate(membership.Grade))
-	point.Balance += earnedPoint
-	point.TotalEarned += earnedPoint
-	if err = putPoint(ctx, point); err != nil {
-		return "", err
+	earnedPoint := 0.0
+	if membership.Joined {
+		// 월 초기화
+		resetMonthlyIfNeeded(membership, currentMonth(ctx))
+		earnedPoint = math.Floor(ticket.Price * getEarnRate(membership.Grade))
+		point.Balance += earnedPoint
+		point.TotalEarned += earnedPoint
+		if err = putPoint(ctx, point); err != nil {
+			return "", err
+		}
+		membership.EntryCount++
 	}
-
-	membership.EntryCount++
-	membership.Grade = calcGrade(membership.EntryCount)
 	if err = putMembership(ctx, membership); err != nil {
 		return "", err
 	}
@@ -519,6 +584,13 @@ func (t *TicketChaincode) UsePointForTicket(
 ) error {
 	if pointAmount < 1000 {
 		return fmt.Errorf("MIN_POINT_1000: 최소 1,000P 이상 사용 가능")
+	}
+	membership, err := getOrCreateMembership(ctx, userDidHash)
+	if err != nil {
+		return err
+	}
+	if !membership.Joined {
+		return fmt.Errorf("MEMBERSHIP_REQUIRED: 멤버십 가입 후 포인트를 사용할 수 있습니다")
 	}
 	point, err := getOrCreatePoint(ctx, userDidHash)
 	if err != nil {
@@ -571,6 +643,9 @@ func (t *TicketChaincode) ExchangePointItem(
 	membership, err := getOrCreateMembership(ctx, userDidHash)
 	if err != nil {
 		return "", err
+	}
+	if !membership.Joined {
+		return "", fmt.Errorf("MEMBERSHIP_REQUIRED: 멤버십 가입 후 교환할 수 있습니다")
 	}
 
 	resetMonthlyIfNeeded(membership, currentMonth(ctx))
@@ -854,7 +929,14 @@ func (t *TicketChaincode) EarnPointFromTrade(
 	userDidHash string,
 	amount, rate float64,
 ) (string, error) {
-	earnedPoint := math.Floor(amount * rate)
+	membership, err := getOrCreateMembership(ctx, userDidHash)
+	if err != nil {
+		return "", err
+	}
+	earnedPoint := 0.0
+	if membership.Joined {
+		earnedPoint = math.Floor(amount * rate)
+	}
 
 	point, err := getOrCreatePoint(ctx, userDidHash)
 	if err != nil {
@@ -917,8 +999,15 @@ func (t *TicketChaincode) TransferTicket(
 		return "", err
 	}
 
-	// 판매자 포인트 0.3% 적립
-	earnedPoint := math.Floor(transferPrice * 0.003)
+	// 판매자 포인트 0.3% 적립 (멤버십 가입자만)
+	membership, err := getOrCreateMembership(ctx, fromDidHash)
+	if err != nil {
+		return "", err
+	}
+	earnedPoint := 0.0
+	if membership.Joined {
+		earnedPoint = math.Floor(transferPrice * 0.003)
+	}
 	if earnedPoint > 0 {
 		point, err := getOrCreatePoint(ctx, fromDidHash)
 		if err != nil {
@@ -1600,6 +1689,9 @@ func (t *TicketChaincode) SubmitRaffleNFTs(
 	membership, err := getOrCreateMembership(ctx, userDidHash)
 	if err != nil {
 		return "", err
+	}
+	if !membership.Joined {
+		return "", fmt.Errorf("MEMBERSHIP_REQUIRED: 멤버십 가입 후 응모할 수 있습니다")
 	}
 	resetMonthlyIfNeeded(membership, currentMonth(ctx))
 

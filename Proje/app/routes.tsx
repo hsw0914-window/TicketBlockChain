@@ -26,6 +26,7 @@ const Attendance     = lazy(() => import("./pages/Attendance").then((m) => ({ de
 const Detail         = lazy(() => import("./pages/Detail").then((m) => ({ default: m.Detail })));
 const Exchange       = lazy(() => import("./pages/Exchange").then((m) => ({ default: m.Exchange })));
 const EntryScanner   = lazy(() => import("./pages/EntryScanner").then((m) => ({ default: m.EntryScanner })));
+const Raffle         = lazy(() => import("./pages/Raffle").then((m) => ({ default: m.Raffle })));
 
 function withSuspense(Component: React.ComponentType) {
   return function LazyRoute() {
@@ -64,6 +65,8 @@ export const router = createBrowserRouter([
       { path: "notice/write/:id",         Component: withSuspense(NoticeWrite) },
       { path: "mypage",                   Component: withSuspense(MyPage) },
       { path: "mypage/membership",        Component: withSuspense(Membership) },
+      { path: "mypage/raffle",            Component: withSuspense(Raffle) },
+      { path: "raffle",                   Component: withSuspense(Raffle) },
       { path: "ticket-resale",            Component: withSuspense(TicketResale) },
       { path: "market/buy/success",          Component: withSuspense(TicketResaleSuccess) },
       { path: "market/fragment/buy/success", Component: withSuspense(MarketBuySuccess) },

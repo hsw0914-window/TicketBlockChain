@@ -29,6 +29,7 @@ const pointRoute        = require('./routes/pointRoutes');
 const refundRoute       = require('./routes/refundRoutes');
 const settlementRoute   = require('./routes/settlementRoutes');
 const raffleRoute       = require('./routes/raffleRoutes');
+const exchangeRoute     = require('./routes/exchange');
 const mockFabric        = require('./services/fabricBridge');
 
 const app = express();
@@ -98,6 +99,7 @@ async function start() {
   refundRoute.setPool(pool);
   settlementRoute.setPool(pool);
   raffleRoute.setPool(pool);
+  exchangeRoute.setPool(pool);
 
   // ─── 신규 라우트 ────────────────────────────────────────
   app.use('/api/auth',       authRoute.router);
@@ -115,6 +117,7 @@ async function start() {
   app.use('/api/refunds',      refundRoute.router);
   app.use('/api/settlements',  settlementRoute.router);
   app.use('/api/raffle',       raffleRoute.router);
+  app.use('/api/exchange',      exchangeRoute.router);
 
   // 업로드 이미지 정적 서빙
   app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));

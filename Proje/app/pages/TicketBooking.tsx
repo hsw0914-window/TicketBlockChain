@@ -16,7 +16,7 @@ import {
   Ticket,
   Wallet,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Button } from "../components/ui/button";
 import {
   buildEventFromApiGame,
@@ -137,28 +137,42 @@ const blockFlowMeta: Record<string, { startLabel: string; endLabel: string }> = 
   "incheon-navy": { startLabel: "중앙 왼쪽", endLabel: "중앙 오른쪽" },
 };
 
+const PRIORITY_GRADE_ID = "jamsil-table";
+const PRIORITY_ROW = 5;
+const PRIORITY_SEAT_NUMS = new Set([2, 3, 4, 5, 6]);
+
 export function TicketBooking() {
   const { eventId = "" } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { walletAddress, connectWallet } = useAppSettings();
   const accessStatus = useBookingAccess();
+  const isPriorityMode = searchParams.get("mode") === "priority";
+  const priorityEntryId = searchParams.get("entryId") ?? "";
 
   // 로컬 이벤트 먼저 시도, 없으면 API에서 게임 정보 가져와서 템플릿으로 변환
   const [event, setEvent] = useState<TicketEvent | undefined>(() => getTicketEvent(eventId));
   const [eventLoading, setEventLoading] = useState(!getTicketEvent(eventId));
+  const [bookingOpenAt, setBookingOpenAt] = useState<Date | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
 
   useEffect(() => {
-    if (getTicketEvent(eventId)) return; // 로컬에 있으면 API 불필요
     fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games/${eventId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.data) {
-          setEvent(buildEventFromApiGame(data.data));
+          if (data.data.booking_open_at) setBookingOpenAt(new Date(data.data.booking_open_at));
+          if (!getTicketEvent(eventId)) setEvent(buildEventFromApiGame(data.data));
         }
       })
       .catch((err) => console.error("[TicketBooking] 경기 조회 실패:", err))
       .finally(() => setEventLoading(false));
   }, [eventId]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedGradeId, setSelectedGradeId] = useState<string | null>(null);
@@ -206,6 +220,15 @@ export function TicketBooking() {
       return next;
     });
   }, [selectedSeatKeys]);
+
+  useEffect(() => {
+    if (!isPriorityMode || !event) return;
+    const tableGrade = event.seatGrades.find((grade) => grade.id === PRIORITY_GRADE_ID);
+    if (!tableGrade) return;
+    setSelectedGradeId(PRIORITY_GRADE_ID);
+    setSelectedBlockId(tableGrade.blocks[0]?.id ?? null);
+    setSelectedSeatKeys([]);
+  }, [isPriorityMode, event]);
 
   const selectedGrade = useMemo(
     () => event?.seatGrades.find((grade) => grade.id === selectedGradeId) ?? null,
@@ -305,6 +328,7 @@ export function TicketBooking() {
   };
 
   const handleSelectGrade = (grade: SeatGrade) => {
+    if (isPriorityMode && grade.id !== PRIORITY_GRADE_ID) return;
     setSelectedGradeId(grade.id);
     setSelectedBlockId(grade.blocks[0]?.id ?? null);
     setSelectedSeatKeys([]);
@@ -320,6 +344,10 @@ export function TicketBooking() {
 
     const compoundKey = `${selectedBlock.label}:${seatKey}`;
     if (takenSeatKeys.has(compoundKey)) return;
+    if (isPriorityMode) {
+      const { row, seatNumber } = parseSeatKey(seatKey);
+      if (!(row === PRIORITY_ROW && PRIORITY_SEAT_NUMS.has(seatNumber))) return;
+    }
 
     setSelectedSeatKeys((previous) => {
       if (previous.includes(seatKey)) {
@@ -407,6 +435,8 @@ export function TicketBooking() {
           })),
           pointDiscount,
           finalTotal,
+          bookingMode: isPriorityMode ? "priority" : "normal",
+          priorityEntryId,
         }),
       );
 
@@ -456,6 +486,46 @@ export function TicketBooking() {
     return (
       <div className="page-shell flex items-center justify-center min-h-[40vh]">
         <p className="text-[0.95rem]" style={{ color: "#8a9ab0" }}>예매할 경기를 찾지 못했습니다.</p>
+      </div>
+    );
+  }
+
+  if (bookingOpenAt && bookingOpenAt.getTime() > nowMs && !isPriorityMode) {
+    const diff = Math.max(0, bookingOpenAt.getTime() - nowMs);
+    const totalMin = Math.floor(diff / 60000);
+    const days = Math.floor(totalMin / 1440);
+    const hours = Math.floor(totalMin / 60) % 24;
+    const mins = totalMin % 60;
+    const openLabel = bookingOpenAt.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })
+      + " "
+      + bookingOpenAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+    return (
+      <div className="page-shell flex items-center justify-center min-h-[55vh]">
+        <div className="w-full max-w-md rounded-[28px] border px-8 py-10 text-center" style={{ background: "#fff", borderColor: "#d7e0e8", boxShadow: "0 20px 48px rgba(17,40,73,0.08)" }}>
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full" style={{ background: "#eef4ff" }}>
+            <Clock3 className="h-8 w-8" style={{ color: "#1456a0" }} />
+          </div>
+          <h2 className="mb-2 text-[1.25rem] font-black" style={{ color: "#14253f" }}>예매 오픈 전입니다</h2>
+          <p className="mb-6 text-[0.9rem]" style={{ color: "#55657d" }}>
+            일반 예매 오픈: <strong style={{ color: "#1456a0" }}>{openLabel}</strong>
+          </p>
+          <div className="mb-6 grid grid-cols-3 gap-3">
+            {[
+              { label: "일", value: days },
+              { label: "시간", value: hours },
+              { label: "분", value: mins },
+            ].map((item) => (
+              <div key={item.label} className="rounded-[16px] px-4 py-4" style={{ background: "#eef4ff", border: "1px solid #bfdbfe" }}>
+                <p className="text-[1.6rem] font-black leading-none" style={{ color: "#1456a0" }}>{String(item.value).padStart(2, "0")}</p>
+                <p className="mt-1 text-[0.72rem] font-semibold" style={{ color: "#6d8aaa" }}>{item.label}</p>
+              </div>
+            ))}
+          </div>
+          <Button className="rounded-[14px] bg-[#1456a0] px-6 text-white" onClick={() => navigate("/tickets")}>
+            경기 목록으로 돌아가기
+          </Button>
+        </div>
       </div>
     );
   }
@@ -992,6 +1062,12 @@ export function TicketBooking() {
                   <span className="h-3 w-3 rounded-full bg-[#b7c3cf]" />
                   판매 완료
                 </span>
+                {isPriorityMode && (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full" style={{ background: "#fef3c7", border: "1px solid #fde68a" }} />
+                    우선 예매 외 좌석
+                  </span>
+                )}
               </div>
 
               <div className="mt-6 overflow-x-auto rounded-[24px] border bg-white p-4" style={{ borderColor: "#dbe3ea" }}>
@@ -1018,6 +1094,8 @@ export function TicketBooking() {
                             const seatKey = `${row}-${seatNumber}`;
                             const compoundKey = `${selectedBlock.label}:${seatKey}`;
                             const sold = takenSeatKeys.has(compoundKey);
+                            const priorityRestricted = isPriorityMode && !(row === PRIORITY_ROW && PRIORITY_SEAT_NUMS.has(seatNumber));
+                            const disabled = sold || priorityRestricted;
                             const selected = selectedSeatKeys.includes(seatKey);
 
                             return (
@@ -1025,13 +1103,13 @@ export function TicketBooking() {
                                 key={seatKey}
                                 type="button"
                                 onClick={() => toggleSeat(seatKey)}
-                                disabled={sold}
+                                disabled={disabled}
                                 className="h-8 rounded-md text-[0.72rem] font-semibold transition"
                                 style={{
-                                  background: sold ? "#b8c3ce" : selected ? "#1456a0" : "#eef3f7",
-                                  color: sold ? "#f7fafc" : selected ? "#ffffff" : "#4e6178",
-                                  border: sold ? "1px solid #b8c3ce" : selected ? "1px solid #1456a0" : "1px solid #d7dfe7",
-                                  opacity: sold ? 0.9 : 1,
+                                  background: sold ? "#b8c3ce" : priorityRestricted ? "#fef3c7" : selected ? "#1456a0" : "#eef3f7",
+                                  color: sold ? "#f7fafc" : priorityRestricted ? "#b45309" : selected ? "#ffffff" : "#4e6178",
+                                  border: sold ? "1px solid #b8c3ce" : priorityRestricted ? "1px solid #fde68a" : selected ? "1px solid #1456a0" : "1px solid #d7dfe7",
+                                  opacity: sold ? 0.9 : priorityRestricted ? 0.65 : 1,
                                 }}
                               >
                                 {seatNumber}

@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, Gift, QrCode } from "lucide-react";
+import { FaBell } from "react-icons/fa";
 import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
@@ -11,7 +12,11 @@ export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [pointMenuOpen, setPointMenuOpen] = useState(false);
+  const [pointEvents, setPointEvents] = useState<Array<{ id: string; reason: string; amount: number; created_at: string; read_at?: string | null }>>([]);
+  const [pointUnread, setPointUnread] = useState(0);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const pointMenuRef = useRef<HTMLDivElement>(null);
 
   const { theme, walletConnected, walletAddress, connectWallet, disconnectWallet, isConnectingWallet } = useAppSettings();
   const { isLoggedIn, user, logout } = useAuth();
@@ -29,6 +34,9 @@ export function Layout() {
       if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
         setProfileMenuOpen(false);
       }
+      if (pointMenuRef.current && !pointMenuRef.current.contains(e.target as Node)) {
+        setPointMenuOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -39,6 +47,43 @@ export function Layout() {
   const walletLabel = walletConnected && walletAddress
     ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
     : "지갑 인증";
+
+  const fetchPointEvents = async () => {
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/points/events`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPointEvents(Array.isArray(data.data) ? data.data : []);
+        setPointUnread(Number(data.unreadCount ?? 0));
+      }
+    } catch {
+      setPointEvents([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    void fetchPointEvents();
+  }, [isLoggedIn, location.pathname]);
+
+  const openPointMenu = async () => {
+    const next = !pointMenuOpen;
+    setPointMenuOpen(next);
+    if (next) {
+      await fetchPointEvents();
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        void fetch(`${import.meta.env.VITE_API_URL}/api/points/events/read`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(() => setPointUnread(0)).catch(() => {});
+      }
+    }
+  };
 
   const shellBackground =
     theme === "dark"
@@ -71,6 +116,7 @@ export function Layout() {
     { path: "/combine",       label: "카드 조합",    icon: Layers },
     { path: "/market",        label: "팬 자산 장터", icon: ShoppingBag },
     { path: "/exchange",      label: "교환소",       icon: Gift },
+    { path: "/raffle",        label: "우선 응모",    icon: Trophy },
     { path: "/community",     label: "커뮤니티",     icon: MessagesSquare },
     { path: "/notice",        label: "공지사항",     icon: Bell },
     { path: "/entry-scanner", label: "QR 입장",      icon: QrCode },
@@ -174,6 +220,53 @@ export function Layout() {
                   <Wallet className="w-4 h-4" />
                   <span>{isConnectingWallet ? "연결 중..." : walletLabel}</span>
                 </button>
+
+                <div className="relative" ref={pointMenuRef}>
+                  <button
+                    onClick={openPointMenu}
+                    className="hidden md:flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200 hover:scale-105"
+                    style={{
+                      background: theme === "dark" ? "rgba(90,116,146,0.18)" : "rgba(90,116,146,0.08)",
+                      border: "1px solid rgba(90,116,146,0.16)",
+                      color: theme === "dark" ? "#b8c7d6" : "#49647f",
+                      boxShadow: theme === "dark" ? "0 6px 14px rgba(0,0,0,0.18)" : "0 6px 14px rgba(41,61,85,0.05)",
+                    }}
+                    aria-label="포인트 알림"
+                  >
+                    <FaBell className="h-4 w-4" />
+                    {pointUnread > 0 && (
+                      <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[0.65rem] font-black text-white" style={{ background: "#10b981" }}>
+                        {pointUnread > 9 ? "9+" : pointUnread}
+                      </span>
+                    )}
+                  </button>
+
+                  {pointMenuOpen && (
+                    <div className="absolute right-0 top-12 w-80 rounded-[16px] border shadow-xl z-50 overflow-hidden"
+                      style={{ background: dropdownBg, borderColor: dropdownBorder, boxShadow: "0 12px 32px rgba(17,40,73,0.12)" }}>
+                      <div className="px-4 py-3 border-b" style={{ borderColor: dropdownBorder }}>
+                        <p className="text-[0.84rem] font-black" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>포인트 적립 알림</p>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto py-2">
+                        {pointEvents.length === 0 ? (
+                          <p className="px-4 py-6 text-center text-[0.82rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>최근 포인트 적립 내역이 없습니다.</p>
+                        ) : pointEvents.map((event) => (
+                          <div key={event.id} className="px-4 py-3 border-b last:border-b-0" style={{ borderColor: dropdownBorder }}>
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <p className="text-[0.84rem] font-bold" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>{event.reason}</p>
+                                <p className="mt-1 text-[0.72rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>{new Date(event.created_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
+                              </div>
+                              <span className="shrink-0 rounded-full px-3 py-1 text-[0.78rem] font-black" style={{ background: "#eaf8f0", color: "#168557" }}>
+                                +{Number(event.amount || 0).toLocaleString()}P
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* 로그인 상태: 프로필 드롭다운 */}
                 <div className="relative" ref={profileMenuRef}>

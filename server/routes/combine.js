@@ -1,7 +1,13 @@
 const express = require('express');
 const crypto  = require('crypto');
 const { requireAuth } = require('../middleware/auth');
-const { mintFragmentOnChain, burnFragmentOnChain, mintCardOnChain, burnBoxOnChain } = require('../services/nftService');
+const {
+  mintFragmentOnChain,
+  burnFragmentOnChain,
+  getFragmentBalanceOnChain,
+  mintCardOnChain,
+  burnBoxOnChain,
+} = require('../services/nftService');
 
 const router = express.Router();
 let _pool;
@@ -204,6 +210,18 @@ router.post('/combine', requireAuth, async (req, res) => {
     if (onChainPending) {
       Promise.resolve()
         .then(async () => {
+          const requiredCount = 2;
+          const onChainBalance = await getFragmentBalanceOnChain(walletAddress, frag.onchain_id);
+          if (onChainBalance < requiredCount) {
+            const missingCount = requiredCount - onChainBalance;
+            console.warn(
+              `[combine] 온체인 파편 잔액 보정: wallet=${walletAddress}, fragment=${frag.onchain_id}, balance=${onChainBalance}, mint=${missingCount}`,
+            );
+            for (let i = 0; i < missingCount; i += 1) {
+              await mintFragmentOnChain(walletAddress, frag.onchain_id);
+            }
+          }
+
           await burnFragmentOnChain(walletAddress, frag.onchain_id);
           const realTxHash = await mintCardOnChain(walletAddress, recipe.result_card_type_id);
           await _pool.query(

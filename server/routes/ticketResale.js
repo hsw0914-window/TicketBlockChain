@@ -5,6 +5,7 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const { confirmPayment, cancelPayment } = require('../services/tossPayService');
 const { isBeforeGameMinus1h, isWithinGamePlus1h } = require('../utils/gameTime');
+const membershipService = require('../services/membershipService');
 
 const router = express.Router();
 let _pool;
@@ -513,6 +514,7 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
       // Fabric TransferTicket 기록
       let earnedPoint = 0;
       let transferCreditedPoint = false;
+      const sellerMemberJoined = await membershipService.isMembershipActive(_pool, listing.seller_id);
       try {
         const transferResult = await fabricService.transferTicket({
           ticketId:          newTicketId,
@@ -521,7 +523,36 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
           transferPrice:     listing.listed_price,
         });
         earnedPoint = Number(transferResult?.sellerEarnedPoint ?? transferResult?.earnedPoint ?? 0);
+        if (!sellerMemberJoined) earnedPoint = 0;
         transferCreditedPoint = earnedPoint > 0;
+        if (transferCreditedPoint && sellerMemberJoined) {
+          const sellerDidHash = fabricService.hashDid(listing.resolved_seller_wallet_address || '');
+          console.log(`[ticketResale] 판매자 포인트 적립: ${earnedPoint}P (TransferTicket, 거래금액 ${listing.listed_price}원 × 0.3%)`);
+          await membershipService.recordPointEvent(_pool, {
+            userId: listing.seller_id,
+            walletAddress: listing.resolved_seller_wallet_address || '',
+            eventType: 'TICKET_RESALE_REWARD',
+            reason: '티켓 판매 완료',
+            amount: earnedPoint,
+            metadata: { listingId: req.params.id, ticketId: newTicketId, buyerId: userId, price: Number(listing.listed_price) },
+          });
+          await _pool.query(
+            `INSERT INTO fabric_events
+               (id, event_name, ticket_id, user_did_hash, payload_json)
+             VALUES (UUID(), 'TICKET_RESALE_POINT_EARNED', ?, ?,
+                     JSON_OBJECT('source', 'TransferTicket', 'listingId', ?, 'sellerId', ?, 'buyerId', ?, 'amount', ?, 'rate', ?, 'earnedPoint', ?))`,
+            [
+              newTicketId,
+              sellerDidHash,
+              req.params.id,
+              listing.seller_id,
+              userId,
+              Number(listing.listed_price),
+              0.003,
+              earnedPoint,
+            ],
+          );
+        }
       } catch (fabricErr) {
         console.error('[ticketResale] Fabric TransferTicket 실패:', fabricErr.message);
       }
@@ -537,7 +568,7 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
             'SELECT COUNT(*) AS cnt FROM ticket_trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
             [listing.seller_id],
           );
-          if (!transferCreditedPoint && Number(cnt) <= 3) {
+          if (sellerMemberJoined && !transferCreditedPoint && Number(cnt) <= 3) {
             const result = await fabricService.earnPointFromTrade({
               userDidHash: fabricService.hashDid(sellerWalletRow.wallet_address),
               amount:      listing.listed_price,
@@ -545,6 +576,32 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
             });
             earnedPoint = result.earnedPoint;
             console.log(`[ticketResale] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.listed_price}원 × 0.3%)`);
+            if (earnedPoint > 0) {
+              await membershipService.recordPointEvent(_pool, {
+                userId: listing.seller_id,
+                walletAddress: sellerWalletRow.wallet_address,
+                eventType: 'TICKET_RESALE_REWARD',
+                reason: '티켓 판매 완료',
+                amount: earnedPoint,
+                metadata: { listingId: req.params.id, ticketId: newTicketId, buyerId: userId, price: Number(listing.listed_price) },
+              });
+              await _pool.query(
+                `INSERT INTO fabric_events
+                   (id, event_name, ticket_id, user_did_hash, payload_json)
+                 VALUES (UUID(), 'TICKET_RESALE_POINT_EARNED', ?, ?,
+                         JSON_OBJECT('source', 'EarnPointFromTrade', 'listingId', ?, 'sellerId', ?, 'buyerId', ?, 'amount', ?, 'rate', ?, 'earnedPoint', ?))`,
+                [
+                  newTicketId,
+                  fabricService.hashDid(sellerWalletRow.wallet_address),
+                  req.params.id,
+                  listing.seller_id,
+                  userId,
+                  Number(listing.listed_price),
+                  0.003,
+                  earnedPoint,
+                ],
+              );
+            }
           }
         }
       } catch (pointErr) {

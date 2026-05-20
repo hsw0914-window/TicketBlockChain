@@ -88,7 +88,7 @@ export function MyPage() {
     const token = localStorage.getItem("auth_token") ?? "";
     fetch(`${import.meta.env.VITE_API_URL}/api/auth/membership`, {
       headers: { Authorization: `Bearer ${token}` },
-    }).then(r => r.json()).then(d => { if (d.success) setMemberTier(d.currentTier); }).catch(() => {});
+    }).then(r => r.json()).then(d => { if (d.success) setMemberTier(d.joined ? d.currentTier : "미가입"); }).catch(() => {});
   }, [isLoggedIn]);
 
   // DID 상태
@@ -310,7 +310,7 @@ export function MyPage() {
             className="group relative col-span-2 overflow-hidden rounded-[24px] border h-[140px] transition-all hover:brightness-95 md:col-span-1"
             style={{
               background: "linear-gradient(145deg, #f8fbff 0%, #eefcf7 100%)",
-              borderColor: { 일반: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8",
+              borderColor: { 미가입: "#9ca3af", 베이직: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8",
               borderWidth: 2,
             }}
           >
@@ -319,7 +319,7 @@ export function MyPage() {
                 className="relative flex h-12 w-12 items-center justify-center"
                 style={{
                   clipPath: "polygon(50% 3%, 92% 25%, 92% 75%, 50% 97%, 8% 75%, 8% 25%)",
-                  background: `linear-gradient(145deg, ${{ 일반: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8"}, ${{ 일반: "#6b7280", 브론즈: "#b45309", 실버: "#475569", 골드: "#d97706" }[memberTier] ?? "#475569"})`,
+                  background: `linear-gradient(145deg, ${{ 미가입: "#9ca3af", 베이직: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8"}, ${{ 미가입: "#6b7280", 베이직: "#6b7280", 브론즈: "#b45309", 실버: "#475569", 골드: "#d97706" }[memberTier] ?? "#475569"})`,
                 }}
               >
                 <div
@@ -327,7 +327,7 @@ export function MyPage() {
                   style={{
                     background: "linear-gradient(145deg, #f8fafc, #cbd5e1)",
                     borderColor: "#f8fafc",
-                    color: { 일반: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b",
+                    color: { 미가입: "#6b7280", 베이직: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b",
                   }}
                 >
                   {memberTier === "골드" ? (
@@ -337,7 +337,7 @@ export function MyPage() {
                       <GiBaseballBat className="absolute left-0 top-0 h-6 w-6 -rotate-[32deg]" />
                       <FaBaseballBall className="absolute bottom-0 right-0 h-3 w-3" />
                     </div>
-                  ) : memberTier === "일반" ? (
+                  ) : memberTier === "베이직" || memberTier === "미가입" ? (
                     <FaBaseballBall className="h-5 w-5" />
                   ) : (
                     <GiBaseballGlove className="h-6 w-6" />
@@ -346,7 +346,7 @@ export function MyPage() {
               </div>
               <div className="text-center">
                 <p className="text-[1rem] font-bold leading-tight" style={{ color: "#3f4e68" }}>멤버십</p>
-                <p className="text-[1.35rem] font-black leading-tight" style={{ color: { 일반: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b" }}>{memberTier}</p>
+                <p className="text-[1.35rem] font-black leading-tight" style={{ color: { 미가입: "#6b7280", 베이직: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b" }}>{memberTier}</p>
               </div>
               <span className="mt-1 inline-flex items-center gap-1 text-[0.76rem] font-extrabold" style={{ color: "#475569" }}>
                 정보 보기

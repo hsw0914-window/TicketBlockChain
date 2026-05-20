@@ -4,6 +4,7 @@ const { getAddress, verifyMessage } = require('ethers');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const { confirmPayment, cancelPayment } = require('../services/tossPayService');
+const membershipService = require('../services/membershipService');
 
 const router = express.Router();
 let _pool;
@@ -468,13 +469,22 @@ router.post('/buy', requireAuth, async (req, res) => {
         'SELECT COUNT(*) AS cnt FROM trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
         [listing.seller_id]
       );
-      if (Number(cnt) <= 2) {
+      const memberJoined = await membershipService.isMembershipActive(_pool, listing.seller_id);
+      if (memberJoined && Number(cnt) <= 2) {
         const result = await fabricService.earnPointFromTrade({
           userDidHash: fabricService.hashDid(sellerWalletAddress),
           amount: listing.price,
           rate:   0.001,
         });
         earnedPoint = result.earnedPoint;
+        await membershipService.recordPointEvent(_pool, {
+          userId: listing.seller_id,
+          walletAddress: sellerWalletAddress,
+          eventType: 'MARKET_SALE_REWARD',
+          reason: '팬 자산 판매 완료',
+          amount: earnedPoint,
+          metadata: { listingId, fragmentTypeId: listing.fragment_type_id, price: listing.price },
+        });
         console.log(`[market] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.price}원 × 0.1%)`);
       }
     } catch (pointErr) {
@@ -995,13 +1005,22 @@ router.post('/toss-confirm', requireAuth, async (req, res) => {
           'SELECT COUNT(*) AS cnt FROM trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
           [listing.seller_id]
         );
-        if (Number(cnt) <= 2) {
+        const memberJoined = await membershipService.isMembershipActive(_pool, listing.seller_id);
+        if (memberJoined && Number(cnt) <= 2) {
           const result = await fabricService.earnPointFromTrade({
             userDidHash: fabricService.hashDid(sellerWalletAddress),
             amount: listing.price,
             rate:   0.001,
           });
           earnedPoint = result.earnedPoint;
+          await membershipService.recordPointEvent(_pool, {
+            userId: listing.seller_id,
+            walletAddress: sellerWalletAddress,
+            eventType: 'MARKET_SALE_REWARD',
+            reason: '팬 자산 판매 완료',
+            amount: earnedPoint,
+            metadata: { listingId, fragmentTypeId: listing.fragment_type_id, price: listing.price, paymentKey },
+          });
           console.log(`[market/toss-confirm] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.price}원 × 0.1%)`);
         }
       } catch (pointErr) {
