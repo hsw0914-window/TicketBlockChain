@@ -448,6 +448,7 @@ export function Market() {
   const subtleSurface = "#f2f5f8";
   const accentSurface = "#e9eef4";
   const accentBorder = "#c6d2df";
+  const showSelectedFragmentSummary = activeTab === "market" && marketViewMode === "detail";
 
   if (loading) {
     return (
@@ -485,7 +486,7 @@ export function Market() {
               </div>
               <h1 className="page-title mb-2" style={{ color: neutralText }}>파편 장터</h1>
               <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>굿즈 파편 매물을 확인하고, 조합에 필요한 파편을 사고팔 수 있어요.</p>
-              {(marketViewMode === "detail" || activeTab === "sell") ? (
+              {showSelectedFragmentSummary ? (
                 <div className="grid sm:grid-cols-4 gap-3 mt-6">
                   {[
                     { label: "선택 파편", value: selectedFragment.fragmentName, tone: neutralText },
@@ -504,7 +505,7 @@ export function Market() {
               )}
             </div>
 
-            {(marketViewMode === "detail" || activeTab === "sell") ? (
+            {showSelectedFragmentSummary ? (
               <div className="rounded-[24px] p-5" style={panelStyle}>
                 <div className="flex items-start justify-between gap-4">
                   <div>

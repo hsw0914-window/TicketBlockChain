@@ -179,7 +179,7 @@ export function Layout() {
     { path: "/my-tickets",    label: "내 입장권",    icon: Ticket },
     { path: "/combine",       label: "카드 조합",    icon: Layers },
     { path: "/ticket-resale", label: "티켓 양도",    icon: Tag },
-    { path: "/market",        label: "팬 자산 장터", icon: ShoppingBag },
+    { path: "/market",        label: "파편 장터",    icon: ShoppingBag },
     { path: "/exchange",      label: "교환소",       icon: Gift },
     { path: "/raffle",        label: "우선 응모",    icon: Trophy },
     { path: "/community",     label: "커뮤니티",     icon: MessagesSquare },
