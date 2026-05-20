@@ -564,7 +564,7 @@ export function Combine() {
                 </div>
               </Card>
 
-              <Card className="p-8 relative overflow-hidden lg:min-h-[655px]" style={shellTone.panelStrong}>
+              <Card className="p-8 relative overflow-hidden lg:min-h-[724px]" style={shellTone.panelStrong}>
                 <div className="relative z-10 grid xl:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
                   <div className="space-y-5">
                     <div>
