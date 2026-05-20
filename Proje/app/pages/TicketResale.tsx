@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Ticket, Plus, X, Loader2, CheckCircle2, AlertCircle, Trash2, Lock, Wallet, ShieldCheck } from "lucide-react";
 import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
+import { MdAutorenew } from "react-icons/md";
 import { useAuth } from "../context/AuthContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { getDidStatus } from "../api/didApi";
@@ -456,20 +457,24 @@ export function TicketResale() {
               </div>
             </div>
 
+            <div className="space-y-3">
+              <button
+                onClick={fetchListings}
+                className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-[14px] text-[0.86rem] font-semibold transition-opacity hover:opacity-80"
+                style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}
+              >
+                <MdAutorenew className="w-5 h-5" />
+                새로고침
+              </button>
+              <p className="text-[0.88rem] font-semibold text-center" style={{ color: mutedText }}>
+                올라온 티켓 <span style={{ color: neutralText }}>{listings.length}건</span>
+              </p>
+            </div>
+
           </aside>
 
           {/* ── 가운데 매물 목록 ──────────────────────────── */}
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-[0.88rem] font-semibold" style={{ color: mutedText }}>
-                올라온 티켓 <span style={{ color: neutralText }}>{listings.length}건</span>
-              </p>
-              <button onClick={fetchListings} className="text-[0.8rem] px-3 py-1.5 rounded-lg transition-opacity hover:opacity-70"
-                style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>
-                새로고침
-              </button>
-            </div>
-
             {loadingList ? (
               <div className="flex justify-center items-center h-48">
                 <Loader2 className="w-7 h-7 animate-spin" style={{ color: mutedText }} />
