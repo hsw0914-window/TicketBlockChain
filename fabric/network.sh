@@ -24,7 +24,7 @@ function createConfigtxgen() {
 }
 
 function upNetwork() {
-  basic-network/scripts/upNetwork.sh $1 $2
+  basic-network/scripts/upNetwork.sh up
 }
 
 function joinChannel() {
