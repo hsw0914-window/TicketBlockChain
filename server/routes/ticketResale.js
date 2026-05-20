@@ -6,6 +6,7 @@ const fabricService = require('../services/fabricBridge');
 const { confirmPayment, cancelPayment } = require('../services/tossPayService');
 const { isBeforeGameMinus1h, isWithinGamePlus1h } = require('../utils/gameTime');
 const membershipService = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 let _pool;
@@ -510,6 +511,23 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
 
       const { grossAmount: ga, platformFee: pf, settlementAmount: sa } = calculateTicketSettlement(listing.listed_price);
       console.log(`[ticketResale] 거래 완료: ${listing.home_team} vs ${listing.away_team} | ${listing.seat_section} | 결제 ${ga}원 (수수료 ${pf}원, 정산 ${sa}원) | 구매자: ${userId}`);
+
+      await notificationService.recordNotification(_pool, {
+        userId,
+        category: 'TRADE',
+        title: '티켓 구매 완료',
+        message: `${listing.home_team} vs ${listing.away_team} ${listing.seat_section || ''} 티켓 구매가 완료되었습니다.`,
+        amount: Number(listing.listed_price),
+        metadata: { listingId: req.params.id, ticketId: newTicketId, sellerId: listing.seller_id },
+      });
+      await notificationService.recordNotification(_pool, {
+        userId: listing.seller_id,
+        category: 'TRADE',
+        title: '티켓 판매 완료',
+        message: `${listing.home_team} vs ${listing.away_team} ${listing.seat_section || ''} 티켓 판매가 완료되었습니다.`,
+        amount: Number(listing.listed_price),
+        metadata: { listingId: req.params.id, ticketId: newTicketId, buyerId: userId },
+      });
 
       // Fabric TransferTicket 기록
       let earnedPoint = 0;

@@ -6,6 +6,7 @@ const fabricService    = require('../services/fabricBridge');
 const nftBridge        = require('../services/nftBridgeAdapter');
 const { mintBoxOnChain } = require('../services/nftService');
 const membershipService = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 let _pool;
@@ -162,6 +163,14 @@ router.post('/verify', async (req, res) => {
           if (process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS) {
             boxTxHash = await mintBoxOnChain(ticket.wallet_address);
           }
+          await notificationService.recordNotification(_pool, {
+            userId: walletRow.user_id,
+            category: 'BOX',
+            title: '시즌 박스 획득',
+            message: 'QR 입장이 완료되어 시즌 굿즈 박스 1개가 지급되었습니다.',
+            amount: 1,
+            metadata: { ticketId, gameId: ticket.game_id, gateId: gateId || 'GATE_DEFAULT', boxTxHash },
+          });
           await membershipService.recordPointEvent(_pool, {
             userId: walletRow.user_id,
             walletAddress: ticket.wallet_address,

@@ -6,6 +6,18 @@ import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 
+type NotificationFilter = "all" | "trade" | "point" | "box";
+
+interface NotificationItem {
+  id: string;
+  category: "TRADE" | "POINT" | "BOX" | "SYSTEM";
+  title: string;
+  message: string;
+  amount?: number | null;
+  created_at: string;
+  read_at?: string | null;
+}
+
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -13,8 +25,9 @@ export function Layout() {
   const [scrolled, setScrolled] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [pointMenuOpen, setPointMenuOpen] = useState(false);
-  const [pointEvents, setPointEvents] = useState<Array<{ id: string; reason: string; amount: number; created_at: string; read_at?: string | null }>>([]);
-  const [pointUnread, setPointUnread] = useState(0);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationUnread, setNotificationUnread] = useState(0);
+  const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>("all");
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const pointMenuRef = useRef<HTMLDivElement>(null);
 
@@ -48,39 +61,39 @@ export function Layout() {
     ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
     : "지갑 인증";
 
-  const fetchPointEvents = async () => {
+  const fetchNotifications = async (filter: NotificationFilter = notificationFilter) => {
     const token = localStorage.getItem("auth_token");
     if (!token) return;
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/points/events`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/notifications?type=${filter}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (data.success) {
-        setPointEvents(Array.isArray(data.data) ? data.data : []);
-        setPointUnread(Number(data.unreadCount ?? 0));
+        setNotifications(Array.isArray(data.data) ? data.data : []);
+        setNotificationUnread(Number(data.unreadCount ?? 0));
       }
     } catch {
-      setPointEvents([]);
+      setNotifications([]);
     }
   };
 
   useEffect(() => {
     if (!isLoggedIn) return;
-    void fetchPointEvents();
-  }, [isLoggedIn, location.pathname]);
+    void fetchNotifications(notificationFilter);
+  }, [isLoggedIn, location.pathname, notificationFilter]);
 
   const openPointMenu = async () => {
     const next = !pointMenuOpen;
     setPointMenuOpen(next);
     if (next) {
-      await fetchPointEvents();
+      await fetchNotifications(notificationFilter);
       const token = localStorage.getItem("auth_token");
       if (token) {
-        void fetch(`${import.meta.env.VITE_API_URL}/api/points/events/read`, {
+        void fetch(`${import.meta.env.VITE_API_URL}/api/notifications/read`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
-        }).then(() => setPointUnread(0)).catch(() => {});
+        }).then(() => setNotificationUnread(0)).catch(() => {});
       }
     }
   };
@@ -108,6 +121,18 @@ export function Layout() {
   const titleGradient = theme === "dark" ? "linear-gradient(90deg, #d9e6f2, #93b1cb)" : "linear-gradient(90deg, #45617f, #6b8878)";
   const dropdownBg = theme === "dark" ? "rgba(22,32,43,0.98)" : "#f8fafc";
   const dropdownBorder = theme === "dark" ? "rgba(90,116,146,0.22)" : "#d0d8e2";
+  const notificationTabs: Array<{ id: NotificationFilter; label: string }> = [
+    { id: "all", label: "전체" },
+    { id: "trade", label: "거래 내역" },
+    { id: "point", label: "포인트" },
+    { id: "box", label: "상자" },
+  ];
+  const notificationAccent = (category: NotificationItem["category"]) => {
+    if (category === "POINT") return { background: "#eaf8f0", color: "#168557", label: "포인트" };
+    if (category === "TRADE") return { background: "#edf3ff", color: "#1456a0", label: "거래" };
+    if (category === "BOX") return { background: "#fff7ed", color: "#c05621", label: "상자" };
+    return { background: "#edf2f7", color: "#50647d", label: "알림" };
+  };
 
   const navItems = [
     { path: "/tickets",       label: "경기 예매",    icon: Ticket },
@@ -231,12 +256,12 @@ export function Layout() {
                       color: theme === "dark" ? "#b8c7d6" : "#49647f",
                       boxShadow: theme === "dark" ? "0 6px 14px rgba(0,0,0,0.18)" : "0 6px 14px rgba(41,61,85,0.05)",
                     }}
-                    aria-label="포인트 알림"
+                    aria-label="알림"
                   >
                     <FaBell className="h-4 w-4" />
-                    {pointUnread > 0 && (
+                    {notificationUnread > 0 && (
                       <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[0.65rem] font-black text-white" style={{ background: "#10b981" }}>
-                        {pointUnread > 9 ? "9+" : pointUnread}
+                        {notificationUnread > 9 ? "9+" : notificationUnread}
                       </span>
                     )}
                   </button>
@@ -245,24 +270,60 @@ export function Layout() {
                     <div className="absolute right-0 top-12 w-80 rounded-[16px] border shadow-xl z-50 overflow-hidden"
                       style={{ background: dropdownBg, borderColor: dropdownBorder, boxShadow: "0 12px 32px rgba(17,40,73,0.12)" }}>
                       <div className="px-4 py-3 border-b" style={{ borderColor: dropdownBorder }}>
-                        <p className="text-[0.84rem] font-black" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>포인트 적립 알림</p>
+                        <p className="text-[0.84rem] font-black" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>알림</p>
+                        <div className="mt-3 grid grid-cols-4 gap-1 rounded-xl p-1" style={{ background: theme === "dark" ? "rgba(90,116,146,0.14)" : "#edf2f7" }}>
+                          {notificationTabs.map((tab) => {
+                            const active = notificationFilter === tab.id;
+                            return (
+                              <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => {
+                                  setNotificationFilter(tab.id);
+                                  void fetchNotifications(tab.id);
+                                }}
+                                className="h-8 rounded-lg text-[0.7rem] font-black transition-colors"
+                                style={{
+                                  background: active ? (theme === "dark" ? "rgba(216,230,242,0.12)" : "#ffffff") : "transparent",
+                                  color: active ? (theme === "dark" ? "#d9e6f2" : "#1f3248") : (theme === "dark" ? "#8ba0b4" : "#72849a"),
+                                  boxShadow: active && theme !== "dark" ? "0 4px 10px rgba(17,40,73,0.06)" : "none",
+                                }}
+                              >
+                                {tab.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                       <div className="max-h-80 overflow-y-auto py-2">
-                        {pointEvents.length === 0 ? (
-                          <p className="px-4 py-6 text-center text-[0.82rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>최근 포인트 적립 내역이 없습니다.</p>
-                        ) : pointEvents.map((event) => (
+                        {notifications.length === 0 ? (
+                          <p className="px-4 py-6 text-center text-[0.82rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>새로운 알림이 없습니다.</p>
+                        ) : notifications.map((event) => {
+                          const accent = notificationAccent(event.category);
+                          return (
                           <div key={event.id} className="px-4 py-3 border-b last:border-b-0" style={{ borderColor: dropdownBorder }}>
                             <div className="flex items-start justify-between gap-4">
-                              <div>
-                                <p className="text-[0.84rem] font-bold" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>{event.reason}</p>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="rounded-full px-2 py-0.5 text-[0.64rem] font-black" style={{ background: accent.background, color: accent.color }}>
+                                    {accent.label}
+                                  </span>
+                                  <p className="truncate text-[0.84rem] font-bold" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>{event.title}</p>
+                                </div>
+                                {event.message && (
+                                  <p className="mt-1 text-[0.76rem] leading-5" style={{ color: theme === "dark" ? "#9cadbd" : "#60728a" }}>{event.message}</p>
+                                )}
                                 <p className="mt-1 text-[0.72rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>{new Date(event.created_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
                               </div>
-                              <span className="shrink-0 rounded-full px-3 py-1 text-[0.78rem] font-black" style={{ background: "#eaf8f0", color: "#168557" }}>
-                                +{Number(event.amount || 0).toLocaleString()}P
-                              </span>
+                              {event.category === "POINT" && (
+                                <span className="shrink-0 rounded-full px-3 py-1 text-[0.78rem] font-black" style={{ background: "#eaf8f0", color: "#168557" }}>
+                                  +{Number(event.amount || 0).toLocaleString()}P
+                                </span>
+                              )}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}

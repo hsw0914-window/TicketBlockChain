@@ -130,7 +130,7 @@ router.post('/exchange', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/points/events — 최근 포인트 적립 알림
+// GET /api/points/events — legacy point event feed
 router.get('/events', requireAuth, async (req, res) => {
   try {
     const [rows] = await _pool.query(

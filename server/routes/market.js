@@ -5,6 +5,7 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const { confirmPayment, cancelPayment } = require('../services/tossPayService');
 const membershipService = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 let _pool;
@@ -496,6 +497,22 @@ router.post('/buy', requireAuth, async (req, res) => {
       [listing.fragment_type_id]
     );
     const assetId = assetRow?.id ?? fragmentId ?? listing.fragment_type_id;
+    await notificationService.recordNotification(_pool, {
+      userId,
+      category: 'TRADE',
+      title: '팬 자산 구매 완료',
+      message: `${assetRow?.asset_name ?? '굿즈 파편'} 구매가 완료되었습니다.`,
+      amount: Number(listing.price),
+      metadata: { listingId, fragmentTypeId: listing.fragment_type_id, sellerId: listing.seller_id, purchaseHistoryId },
+    });
+    await notificationService.recordNotification(_pool, {
+      userId: listing.seller_id,
+      category: 'TRADE',
+      title: '팬 자산 판매 완료',
+      message: `${assetRow?.asset_name ?? '굿즈 파편'} 판매가 완료되었습니다.`,
+      amount: Number(listing.price),
+      metadata: { listingId, fragmentTypeId: listing.fragment_type_id, buyerId: userId, purchaseHistoryId },
+    });
     const updatedFragment = await buildFragmentMarket(assetId, userId);
 
     console.log(`[market] 파편 거래 완료: ${assetRow?.asset_name ?? listing.fragment_type_id} | ${listing.price}원 | 구매자: ${userId} | 판매자: ${listing.seller_id}`);
@@ -1031,6 +1048,23 @@ router.post('/toss-confirm', requireAuth, async (req, res) => {
         'SELECT id, idol, asset_name FROM market_assets WHERE fragment_type_id = ? LIMIT 1',
         [listing.fragment_type_id]
       );
+
+      await notificationService.recordNotification(_pool, {
+        userId,
+        category: 'TRADE',
+        title: '팬 자산 구매 완료',
+        message: `${assetRow?.asset_name ?? '굿즈 파편'} 구매가 완료되었습니다.`,
+        amount: Number(listing.price),
+        metadata: { listingId, fragmentTypeId: listing.fragment_type_id, sellerId: listing.seller_id, purchaseHistoryId, paymentKey },
+      });
+      await notificationService.recordNotification(_pool, {
+        userId: listing.seller_id,
+        category: 'TRADE',
+        title: '팬 자산 판매 완료',
+        message: `${assetRow?.asset_name ?? '굿즈 파편'} 판매가 완료되었습니다.`,
+        amount: Number(listing.price),
+        metadata: { listingId, fragmentTypeId: listing.fragment_type_id, buyerId: userId, purchaseHistoryId, paymentKey },
+      });
 
       console.log(`[market/toss-confirm] 파편 거래 완료 (토스): ${assetRow?.asset_name ?? listing.fragment_type_id} | ${listing.price}원 | 구매자: ${userId}`);
 

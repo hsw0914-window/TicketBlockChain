@@ -239,6 +239,7 @@ async function initDB() {
   await conn.query(`DROP TABLE IF EXISTS raffle_nfts`);
   await conn.query(`DROP TABLE IF EXISTS membership_monthly_raffle_claims`);
   await conn.query(`DROP TABLE IF EXISTS membership_tier_rewards`);
+  await conn.query(`DROP TABLE IF EXISTS notification_events`);
   await conn.query(`DROP TABLE IF EXISTS point_events`);
   // combine/market 테이블 (FK 역순)
   await conn.query(`DROP TABLE IF EXISTS box_open_logs`);
@@ -459,6 +460,22 @@ async function initDB() {
       metadata_json  JSON         DEFAULT NULL,
       read_at        DATETIME     DEFAULT NULL,
       created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE notification_events (
+      id             CHAR(36)     PRIMARY KEY,
+      user_id        VARCHAR(50)  NOT NULL,
+      category       VARCHAR(20)  NOT NULL,
+      title          VARCHAR(120) NOT NULL,
+      message        VARCHAR(255) NOT NULL DEFAULT '',
+      amount         INT          DEFAULT NULL,
+      metadata_json  JSON         DEFAULT NULL,
+      read_at        DATETIME     DEFAULT NULL,
+      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_notification_user_category (user_id, category, created_at),
       FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
     )
   `);

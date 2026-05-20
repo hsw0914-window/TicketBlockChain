@@ -191,22 +191,6 @@ export function TicketBookingSuccess() {
               </div>
             </div>
 
-            <div
-              className="mt-4 rounded-[22px] border p-4"
-              style={{ background: "linear-gradient(135deg, #f5eeff, #fce8ff)", borderColor: "#d4aaee" }}
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">🎁</span>
-                <div>
-                  <p className="text-[0.88rem] font-bold" style={{ color: "#7700bb" }}>
-                    굿즈 박스가 지급되었습니다!
-                  </p>
-                  <p className="mt-1 text-[0.8rem]" style={{ color: "#9b6dbf" }}>
-                    박스를 개봉하면 NFT 굿즈 또는 파편을 획득할 수 있어요.
-                  </p>
-                </div>
-              </div>
-            </div>
           </>
         )}
 
@@ -223,13 +207,6 @@ export function TicketBookingSuccess() {
             onClick={() => navigate("/my-tickets")}
           >
             내 입장권 보기
-          </Button>
-          <Button
-            className="rounded-2xl text-white"
-            style={{ background: "linear-gradient(135deg, #7700bb, #ff10f0)" }}
-            onClick={() => navigate("/combine")}
-          >
-            🎁 박스 받기
           </Button>
         </div>
       </div>

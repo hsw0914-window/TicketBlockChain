@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const notificationService = require('./notificationService');
 
 const TIER_ORDER = ['베이직', '브론즈', '실버', '골드'];
 const TIER_REQUIREMENTS = { 베이직: 0, 브론즈: 3, 실버: 6, 골드: 10 };
@@ -196,6 +197,18 @@ async function recordPointEvent(pool, {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [id, userId, walletAddress || null, eventType, reason, pointAmount, JSON.stringify(metadata)],
   );
+  try {
+    await notificationService.recordNotification(pool, {
+      userId,
+      category: 'POINT',
+      title: reason,
+      message: `${pointAmount.toLocaleString('ko-KR')}P가 적립되었습니다.`,
+      amount: pointAmount,
+      metadata: { eventType, walletAddress, ...metadata },
+    });
+  } catch (notificationErr) {
+    console.error('[membershipService] point notification failed:', notificationErr.message);
+  }
   return id;
 }
 
