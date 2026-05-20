@@ -53,7 +53,7 @@ elif [ "$1" == "start"             ]; then
   createConfigtxgen
   sleep 2
   upNetwork org1peer0 orderer
-  sleep 5
+  sleep 20
   joinChannel createChannel
   joinChannel joinChannel
   joinChannel updateAnchor
