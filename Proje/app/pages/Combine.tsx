@@ -39,14 +39,14 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
     }
 
     if (typeof payload === "string" && payload.includes("<!DOCTYPE")) {
-      throw new Error("카드 조합 서버 응답을 받지 못했습니다. 백엔드가 실행 중인지 확인해주세요.");
+      throw new Error("팬 자산 공방 서버 응답을 받지 못했습니다. 백엔드가 실행 중인지 확인해주세요.");
     }
 
     throw new Error(typeof payload === "string" && payload.trim().length > 0 ? payload : "요청 처리 중 오류가 발생했습니다.");
   }
 
   if (!isJson) {
-    throw new Error("카드 조합 서버가 올바른 JSON 응답을 보내지 않았습니다.");
+    throw new Error("팬 자산 공방 서버가 올바른 JSON 응답을 보내지 않았습니다.");
   }
 
   return payload as T;
@@ -246,7 +246,7 @@ export function Combine() {
     setSelectedFragments((cur) => [...cur, id]);
   };
 
-  // ─── 조합 API 호출 ────────────────────────────────────────
+  // ─── 파편 완성 API 호출 ────────────────────────────────────────
   const handleCombine = async () => {
     if (!canCombine) return;
     setCombining(true);
@@ -274,7 +274,7 @@ export function Combine() {
       setSelectedFragments([]);
       setActiveTab("nfts");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "조합 중 오류가 발생했습니다.");
+      alert(err instanceof Error ? err.message : "완성 처리 중 오류가 발생했습니다.");
     } finally {
       setCombining(false);
     }
@@ -353,22 +353,20 @@ export function Combine() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="page-eyebrow mb-3" style={{ color: shellTone.accentStrong }}>
-            {viewMode === "openBox" ? "BOX" : "COMBINE"}
+            FAN ASSET
           </p>
           <h1 className="page-title mb-2" style={{ color: shellTone.text }}>
-            {viewMode === "openBox" ? "박스 개봉" : "카드 조합"}
+            팬 자산 공방
           </h1>
           <p className="page-subtitle" style={{ color: shellTone.muted }}>
-            {viewMode === "openBox"
-              ? "시즌 박스 하나만 운영하고, 키 없이 바로 열 수 있게 단순화했습니다."
-              : "파편 2개만 골라서 완성 카드로 합치는 흐름으로 단순화했습니다."}
+            박스를 열어 파편을 얻고, 같은 파편을 모아 완성 카드로 교환할 수 있어요.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           {[
             { key: "openBox" as const, label: "박스 개봉", icon: Package },
-            { key: "combine" as const, label: "파편 조합", icon: Layers },
+            { key: "combine" as const, label: "파편 완성", icon: Layers },
           ].map((item) => {
             const Icon = item.icon;
             const active = viewMode === item.key;
@@ -388,7 +386,7 @@ export function Combine() {
       </header>
 
       <div className="grid lg:grid-cols-[390px_1fr] gap-6">
-        <div className="space-y-4">
+        <div className="space-y-4 lg:h-full lg:flex lg:flex-col">
           <Card className="p-4" style={shellTone.panelStrong}>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
@@ -412,8 +410,8 @@ export function Combine() {
             </div>
           </Card>
 
-          <Card className="overflow-hidden" style={shellTone.panelStrong}>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <Card className="overflow-hidden lg:flex-1 lg:min-h-0" style={shellTone.panelStrong}>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full lg:h-full lg:flex lg:flex-col">
               <TabsList className="grid w-full grid-cols-2 border-b" style={{ background: isDark ? "#22303d" : "#edf1f5", borderColor: isDark ? "#334657" : "#d4dbe4" }}>
                 <TabsTrigger value="fragments" className="data-[state=active]:bg-transparent">
                   <Gem className="w-4 h-4 mr-2" />
@@ -425,7 +423,7 @@ export function Combine() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="fragments" className="p-4 max-h-[620px] overflow-y-auto">
+              <TabsContent value="fragments" className="p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:flex-1 lg:min-h-0">
                 <div className="space-y-2">
                   {sortedFragments.map((fragment) => {
                     const selectedCount = getSelectedCount(selectedFragments, fragment.id);
@@ -502,7 +500,7 @@ export function Combine() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="nfts" className="p-4 max-h-[620px] overflow-y-auto">
+              <TabsContent value="nfts" className="p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:flex-1 lg:min-h-0">
                 <div className="space-y-2">
                   {cardInventory.map((card) => (
                     <Card key={card.id} className="p-3" style={shellTone.surface}>
@@ -558,7 +556,7 @@ export function Combine() {
                     <ul className="space-y-1 text-sm" style={{ color: shellTone.muted }}>
                       <li>• 프리미엄 박스 없이 시즌 박스 한 종류만 유지합니다.</li>
                       <li>• 열쇠 없이 바로 열 수 있어서 처음 쓰는 사람도 흐름이 단순합니다.</li>
-                      <li>• 시즌 박스에서는 조합에 사용하는 파편만 획득할 수 있어요.</li>
+                      <li>• 시즌 박스에서는 완성에 사용하는 파편만 획득할 수 있어요.</li>
                     </ul>
                   </div>
                 </div>
@@ -634,12 +632,11 @@ export function Combine() {
                     <Sparkles className="w-6 h-6" style={{ color: shellTone.success }} />
                   </div>
                   <div>
-                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>조합 시스템 안내</h3>
+                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>파편 완성 안내</h3>
                     <ul className="space-y-1 text-sm" style={{ color: shellTone.muted }}>
-                      <li>• 같은 파편 2개를 모아야 완성 카드 1개를 만들 수 있습니다.</li>
-                      <li>• 예를 들어 두산 홈런볼 골드컷 파편 2개를 모으면 두산 홈런볼 골드컷 카드가 완성됩니다.</li>
-                      <li>• 서로 다른 파편을 섞어 고정 카드가 나오는 방식은 사용하지 않고, 같은 파편 2개만 조합할 수 있습니다.</li>
-                      <li>• 부족한 파편은 각 항목의 장터 버튼을 눌러 바로 구매할 수 있어요.</li>
+                      <li>• 같은 종류의 파편 2개를 모으면 완성 카드 1개로 교환됩니다.</li>
+                      <li>• 부족한 파편은 장터에서 구매해 채울 수 있어요.</li>
+                      <li>• 완성된 카드는 교환소에서 실물 굿즈 교환에 사용할 수 있습니다.</li>
                     </ul>
                   </div>
                 </div>
@@ -649,7 +646,7 @@ export function Combine() {
                 <div className="relative z-10 space-y-8">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
-                      <h2 className="section-title" style={{ color: shellTone.text }}>조합 미리보기</h2>
+                      <h2 className="section-title" style={{ color: shellTone.text }}>완성 미리보기</h2>
                       <p className="mt-2 text-sm leading-6" style={{ color: shellTone.muted }}>
                         현재 선택한 파편이 오른쪽 결과 카드로 어떻게 이어지는지 바로 확인할 수 있어요.
                       </p>
@@ -733,7 +730,7 @@ export function Combine() {
                         같은 파편 2개를 아직 고르지 않았어요
                       </p>
                       <p className="mt-2 text-[0.78rem] leading-6" style={{ color: shellTone.muted }}>
-                        왼쪽에서 같은 파편을 두 번 선택하세요. 수량이 1개뿐이면 장터에서 같은 파편을 하나 더 구매한 뒤 조합할 수 있습니다.
+                        왼쪽에서 같은 파편을 두 번 선택하세요. 수량이 1개뿐이면 장터에서 같은 파편을 하나 더 구매한 뒤 완성할 수 있습니다.
                       </p>
                     </div>
                   )}
@@ -746,7 +743,7 @@ export function Combine() {
                     style={{ background: shellTone.accentStrong, color: "#ffffff" }}
                   >
                     <Layers className="w-5 h-5 mr-2" />
-                    {combining ? "조합 중..." : "파편 2개 조합하기"}
+                    {combining ? "완성 중..." : "완성 카드 만들기"}
                   </Button>
                 </div>
               </Card>
@@ -793,7 +790,7 @@ export function Combine() {
         )}
 
         {result && !combining && (
-          <ResultModal title="조합 완료" result={result} shellTone={shellTone} onClose={handleCloseResult} onOpenMarket={(assetId) => navigate(`/market?fragment=${assetId}`)} />
+          <ResultModal title="완성 완료" result={result} shellTone={shellTone} onClose={handleCloseResult} onOpenMarket={(assetId) => navigate(`/market?fragment=${assetId}`)} />
         )}
 
         {openResult && !opening && (
