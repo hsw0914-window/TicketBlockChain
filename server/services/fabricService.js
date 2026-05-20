@@ -251,7 +251,8 @@ async function getAllDraws() {
 }
 
 async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, transferPrice }) {
-  await submitTx('TransferTicket', ticketId, fromWalletAddress, toWalletAddress, String(transferPrice));
+  const raw = await submitTx('TransferTicket', ticketId, fromWalletAddress, toWalletAddress, String(transferPrice));
+  return raw ? JSON.parse(raw) : { success: true };
 }
 
 // seedUser는 mock 전용 — real Fabric에서는 불필요

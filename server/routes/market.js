@@ -25,6 +25,14 @@ const MARKET_NATIVE_SYMBOL      = process.env.MARKET_NATIVE_SYMBOL      ?? 'HOOD
 const MARKET_NATIVE_PRICE_KRW   = Number(process.env.MARKET_NATIVE_PRICE_KRW ?? 3700000);
 const MARKET_RESERVATION_SECONDS = Number(process.env.MARKET_RESERVATION_SECONDS ?? 120);
 
+async function ensureMarketPaymentColumns(conn) {
+  const [columns] = await conn.query(`SHOW COLUMNS FROM purchase_history`);
+  const existing = new Set(columns.map((c) => c.Field));
+  if (!existing.has('toss_payment_key')) {
+    await conn.query(`ALTER TABLE purchase_history ADD COLUMN toss_payment_key VARCHAR(200) DEFAULT NULL AFTER tx_hash`);
+  }
+}
+
 // ─── 유틸 ────────────────────────────────────────────────
 
 function createTokenId(prefix) {
@@ -460,7 +468,7 @@ router.post('/buy', requireAuth, async (req, res) => {
         'SELECT COUNT(*) AS cnt FROM trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
         [listing.seller_id]
       );
-      if (Number(cnt) < 2) {
+      if (Number(cnt) <= 2) {
         const result = await fabricService.earnPointFromTrade({
           userDidHash: fabricService.hashDid(sellerWalletAddress),
           amount: listing.price,
@@ -825,7 +833,37 @@ router.post('/toss-confirm', requireAuth, async (req, res) => {
   const buyerWalletAddress = await getWalletAddress(userId);
   const conn = await _pool.getConnection();
   try {
+    await ensureMarketPaymentColumns(conn);
     await conn.beginTransaction();
+
+    const [[existingPurchase]] = await conn.query(
+      `SELECT ph.*, u.nickname AS seller_name, ma.id AS asset_id, ma.idol, ma.asset_name
+       FROM purchase_history ph
+       LEFT JOIN users u ON u.user_id = ph.seller_id
+       LEFT JOIN market_assets ma ON ma.fragment_type_id = ph.fragment_type_id
+       WHERE ph.toss_payment_key = ? AND ph.buyer_id = ?
+       LIMIT 1`,
+      [paymentKey, userId]
+    );
+    if (existingPurchase) {
+      await conn.commit();
+      return res.json({
+        success: true,
+        alreadyProcessed: true,
+        receipt: {
+          fragmentId:       existingPurchase.asset_id ?? existingPurchase.fragment_type_id,
+          idol:             existingPurchase.idol ?? '',
+          fragmentName:     existingPurchase.asset_name ?? '',
+          sellerName:       existingPurchase.seller_name ?? '',
+          price:            existingPurchase.price,
+          platformFee:      existingPurchase.platform_fee,
+          settlementAmount: existingPurchase.settlement_amount,
+          earnedPoint:      0,
+          tokenId:          existingPurchase.token_id,
+          txHash:           existingPurchase.tx_hash,
+        },
+      });
+    }
 
     const [[listing]] = await conn.query(
       `SELECT ml.*, u.nickname AS seller_name
@@ -932,11 +970,11 @@ router.post('/toss-confirm', requireAuth, async (req, res) => {
         `INSERT INTO purchase_history
            (id, buyer_id, fragment_type_id, listing_id, seller_id,
             buyer_wallet_address, seller_wallet_address, token_id,
-            price, quantity, platform_fee, settlement_amount, tx_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+            price, quantity, platform_fee, settlement_amount, tx_hash, toss_payment_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         [purchaseHistoryId, userId, listing.fragment_type_id, listingId, listing.seller_id,
          buyerWalletAddress, sellerWalletAddress, tradedTokenId,
-         listing.price, platformFee, settlementAmount, txHash]
+         listing.price, platformFee, settlementAmount, txHash, paymentKey]
       );
 
       await conn.query(
@@ -957,7 +995,7 @@ router.post('/toss-confirm', requireAuth, async (req, res) => {
           'SELECT COUNT(*) AS cnt FROM trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
           [listing.seller_id]
         );
-        if (Number(cnt) < 2) {
+        if (Number(cnt) <= 2) {
           const result = await fabricService.earnPointFromTrade({
             userDidHash: fabricService.hashDid(sellerWalletAddress),
             amount: listing.price,

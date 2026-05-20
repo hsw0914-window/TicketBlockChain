@@ -480,7 +480,16 @@ async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, tr
 
   _emitEvent('TICKET_TRANSFERRED', { ticketId, fromWalletAddress, toWalletAddress, transferPrice, earnedPoint });
   console.log(`[MockFabric] TransferTicket: ${ticketId} ${fromWalletAddress.slice(0, 8)} → ${toWalletAddress.slice(0, 8)}`);
-  return { success: true, txId: `mock-tx-${uuidv4().slice(0, 8)}` };
+  return {
+    success: true,
+    txId: `mock-tx-${uuidv4().slice(0, 8)}`,
+    ticketId,
+    fromDidHash: hashDid(fromWalletAddress),
+    toDidHash: hashDid(toWalletAddress),
+    transferPrice,
+    sellerEarnedPoint: earnedPoint,
+    status: 'TRANSFERRED',
+  };
 }
 
 // ─── EarnPointFromTrade (양도/장터 거래 포인트) ────────────────

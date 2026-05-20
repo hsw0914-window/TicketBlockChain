@@ -13,7 +13,9 @@ function setPool(pool) { _pool = pool; }
 const QR_SECRET = process.env.QR_SECRET;
 
 function getCurrentSlot() {
-  return Math.floor(Date.now() / 1000 / 60);
+  const offset = Number.parseFloat(process.env.DEBUG_TIME_OFFSET_HOURS || '0');
+  const nowMs = Date.now() + (Number.isFinite(offset) ? offset : 0) * 60 * 60 * 1000;
+  return Math.floor(nowMs / 1000 / 60);
 }
 
 function generateQRToken(ticketId, slot) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -28,8 +28,12 @@ export function TicketResaleSuccess() {
   const [status, setStatus]     = useState<"loading" | "done" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const [orderInfo, setOrderInfo] = useState<ResaleOrderInfo | null>(null);
+  const confirmedRef = useRef(false);
 
   useEffect(() => {
+    if (confirmedRef.current) return;
+    confirmedRef.current = true;
+
     if (!paymentKey || !orderId || !amount) {
       setErrorMsg("결제 정보가 올바르지 않습니다.");
       setStatus("error");

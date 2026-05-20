@@ -79,6 +79,21 @@ async function ensureTradeColumns(conn) {
   }
 }
 
+function buildResaleReceipt(listing, paymentKey) {
+  const { grossAmount, platformFee, settlementAmount } = calculateTicketSettlement(listing.listed_price);
+  return {
+    homeTeam:        listing.home_team,
+    awayTeam:        listing.away_team,
+    gameDate:        listing.game_date instanceof Date ? formatDate(listing.game_date) : String(listing.game_date).slice(0, 10),
+    seatSection:     listing.seat_section,
+    price:           grossAmount,
+    platformFee,
+    settlementAmount,
+    sellerName:      listing.seller_name,
+    paymentKey,
+  };
+}
+
 function normalizeAddress(address) {
   return String(address || '').trim().toLowerCase();
 }
@@ -123,8 +138,8 @@ async function ensureTransferredTicket(conn, listing, buyerWalletAddress) {
   const ticketId = crypto.randomUUID();
   await conn.query(
     `INSERT INTO tickets
-      (id, wallet_address, game_id, stadium, grade, price, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'confirmed')`,
+      (id, wallet_address, game_id, stadium, grade, price, purchase_type, status)
+     VALUES (?, ?, ?, ?, ?, ?, 'TRANSFERRED', 'confirmed')`,
     [
       ticketId,
       buyerWalletAddress,
@@ -416,6 +431,26 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
     await conn.beginTransaction();
 
     const buyerWalletAddress = await getBuyerWalletOrThrow(conn, userId);
+    const [[existingTrade]] = await conn.query(
+      `SELECT tt.*, tl.home_team, tl.away_team, tl.game_date, tl.seat_section,
+              tl.listed_price, u.nickname AS seller_name
+         FROM ticket_trades tt
+         JOIN ticket_listings tl ON tl.id = tt.listing_id
+         JOIN users u ON u.user_id = tt.seller_id
+        WHERE tt.toss_payment_key = ? AND tt.buyer_id = ?
+        LIMIT 1`,
+      [paymentKey, userId],
+    );
+    if (existingTrade) {
+      await conn.commit();
+      return res.json({
+        success: true,
+        earnedPoint: 0,
+        alreadyProcessed: true,
+        receipt: buildResaleReceipt(existingTrade, paymentKey),
+      });
+    }
+
     const [[listing]] = await conn.query(
       `SELECT tl.*, u.nickname AS seller_name,
               COALESCE(tl.seller_wallet_address, uw.wallet_address) AS resolved_seller_wallet_address,
@@ -476,19 +511,22 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
       console.log(`[ticketResale] 거래 완료: ${listing.home_team} vs ${listing.away_team} | ${listing.seat_section} | 결제 ${ga}원 (수수료 ${pf}원, 정산 ${sa}원) | 구매자: ${userId}`);
 
       // Fabric TransferTicket 기록
+      let earnedPoint = 0;
+      let transferCreditedPoint = false;
       try {
-        await fabricService.transferTicket({
+        const transferResult = await fabricService.transferTicket({
           ticketId:          newTicketId,
           fromWalletAddress: listing.resolved_seller_wallet_address || '',
           toWalletAddress:   buyerWalletAddress,
           transferPrice:     listing.listed_price,
         });
+        earnedPoint = Number(transferResult?.sellerEarnedPoint ?? transferResult?.earnedPoint ?? 0);
+        transferCreditedPoint = earnedPoint > 0;
       } catch (fabricErr) {
         console.error('[ticketResale] Fabric TransferTicket 실패:', fabricErr.message);
       }
 
       // 판매자 포인트 적립 (거래금액 0.3%, 하루 3건 한도)
-      let earnedPoint = 0;
       try {
         const [[sellerWalletRow]] = await _pool.query(
           'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
@@ -499,7 +537,7 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
             'SELECT COUNT(*) AS cnt FROM ticket_trades WHERE seller_id = ? AND DATE(traded_at) = CURDATE()',
             [listing.seller_id],
           );
-          if (Number(cnt) < 3) {
+          if (!transferCreditedPoint && Number(cnt) <= 3) {
             const result = await fabricService.earnPointFromTrade({
               userDidHash: fabricService.hashDid(sellerWalletRow.wallet_address),
               amount:      listing.listed_price,
@@ -516,17 +554,7 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
       res.json({
         success: true,
         earnedPoint,
-        receipt: {
-          homeTeam:        listing.home_team,
-          awayTeam:        listing.away_team,
-          gameDate:        listing.game_date instanceof Date ? formatDate(listing.game_date) : String(listing.game_date).slice(0, 10),
-          seatSection:     listing.seat_section,
-          price:           grossAmount,
-          platformFee,
-          settlementAmount,
-          sellerName:      listing.seller_name,
-          paymentKey,
-        },
+        receipt: buildResaleReceipt(listing, paymentKey),
       });
     } catch (dbErr) {
       await conn.rollback();
