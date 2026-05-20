@@ -386,7 +386,7 @@ export function Combine() {
       </header>
 
       <div className="grid lg:grid-cols-[390px_1fr] gap-6">
-        <div className="space-y-4 lg:h-full lg:flex lg:flex-col">
+        <div className="space-y-4 lg:self-stretch lg:flex lg:flex-col">
           <Card className="p-4" style={shellTone.panelStrong}>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
@@ -411,8 +411,8 @@ export function Combine() {
           </Card>
 
           <Card className="overflow-hidden lg:flex-1 lg:min-h-0" style={shellTone.panelStrong}>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full lg:h-full lg:flex lg:flex-col">
-              <TabsList className="grid w-full grid-cols-2 border-b" style={{ background: isDark ? "#22303d" : "#edf1f5", borderColor: isDark ? "#334657" : "#d4dbe4" }}>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full lg:h-full lg:flex lg:flex-col lg:min-h-0">
+              <TabsList className="grid w-full grid-cols-2 border-b lg:shrink-0" style={{ background: isDark ? "#22303d" : "#edf1f5", borderColor: isDark ? "#334657" : "#d4dbe4" }}>
                 <TabsTrigger value="fragments" className="data-[state=active]:bg-transparent">
                   <Gem className="w-4 h-4 mr-2" />
                   파편
@@ -423,7 +423,7 @@ export function Combine() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="fragments" className="p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:flex-1 lg:min-h-0">
+              <TabsContent value="fragments" className="mt-0 p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:h-0 lg:flex-1 lg:min-h-0">
                 <div className="space-y-2">
                   {sortedFragments.map((fragment) => {
                     const selectedCount = getSelectedCount(selectedFragments, fragment.id);
@@ -500,7 +500,7 @@ export function Combine() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="nfts" className="p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:flex-1 lg:min-h-0">
+              <TabsContent value="nfts" className="mt-0 p-4 max-h-[620px] overflow-y-auto lg:max-h-none lg:h-0 lg:flex-1 lg:min-h-0">
                 <div className="space-y-2">
                   {cardInventory.map((card) => (
                     <Card key={card.id} className="p-3" style={shellTone.surface}>
@@ -632,11 +632,11 @@ export function Combine() {
                     <Sparkles className="w-6 h-6" style={{ color: shellTone.success }} />
                   </div>
                   <div>
-                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>파편 완성 안내</h3>
+                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>조합 시스템 안내</h3>
                     <ul className="space-y-1 text-sm" style={{ color: shellTone.muted }}>
-                      <li>• 같은 종류의 파편 2개를 모으면 완성 카드 1개로 교환됩니다.</li>
-                      <li>• 부족한 파편은 장터에서 구매해 채울 수 있어요.</li>
-                      <li>• 완성된 카드는 교환소에서 실물 굿즈 교환에 사용할 수 있습니다.</li>
+                      <li>• 같은 종류의 파편 2개를 조합해야 원본 굿즈 1개를 만들 수 있습니다.</li>
+                      <li>• 부족한 파편은 상자 개봉이나 장터에서 구매 후 획득할 수 있습니다.</li>
+                      <li>• 완성된 원본 굿즈 카드는 실물 굿즈 교환에 사용할 수 있습니다.</li>
                     </ul>
                   </div>
                 </div>
@@ -715,7 +715,8 @@ export function Combine() {
                         </div>
                       ) : (
                         <p className="text-sm leading-6" style={{ color: shellTone.muted }}>
-                          같은 파편을 조합하여 원본 굿즈 카드를 완성하세요.
+                          같은 파편을 조합하여 원본<br />
+                          굿즈 카드를 완성하세요.
                         </p>
                       )}
                     </div>
@@ -727,7 +728,7 @@ export function Combine() {
                         같은 파편 2개를 아직 고르지 않았어요
                       </p>
                       <p className="mt-2 text-[0.78rem] leading-6" style={{ color: shellTone.muted }}>
-                        수량이 1개뿐이라면 상자 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후 완성할 수 있습니다.
+                        수량이 1개뿐이라면 상자 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후, 완성할 수 있습니다.
                       </p>
                     </div>
                   )}
