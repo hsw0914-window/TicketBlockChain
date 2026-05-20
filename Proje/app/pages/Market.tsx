@@ -455,7 +455,6 @@ export function Market() {
   const selectedListingVsFloor = selectedListing ? selectedListing.price - selectedFragment.floorPrice : null;
 
   const panelStyle = { background: "#f8fafc", border: "1px solid #d6dee8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" };
-  const mutedPanelStyle = { background: "#eef2f5", border: "1px solid #dde4ec" };
   const inputStyle = { border: "1px solid #cbd5e1", background: "#fcfdfe", color: "#1f2f47" };
   const neutralText = "#1c2f4a";
   const mutedText = "#728195";
@@ -465,7 +464,7 @@ export function Market() {
   const subtleSurface = "#f2f5f8";
   const accentSurface = "#e9eef4";
   const accentBorder = "#c6d2df";
-  const showSelectedFragmentSummary = activeTab === "market" && marketViewMode === "detail";
+  const isMarketDetail = activeTab === "market" && marketViewMode === "detail";
 
   if (loading) {
     return (
@@ -503,50 +502,10 @@ export function Market() {
               </div>
               <h1 className="page-title mb-2" style={{ color: neutralText }}>파편 장터</h1>
               <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>굿즈 파편 매물을 확인하고, 조합에 필요한 파편을 사고팔 수 있어요.</p>
-              {showSelectedFragmentSummary ? (
-                <div className="grid sm:grid-cols-4 gap-3 mt-6">
-                  {[
-                    { label: "선택 파편", value: selectedFragment.fragmentName, tone: neutralText },
-                    { label: "현재 최저가", value: formatPrice(selectedFragment.floorPrice), tone: priceGreen },
-                    { label: "판매자 수", value: `${selectedFragmentListings.length}명`, tone: actionBlue },
-                    { label: "내 보유 수량", value: `${getOwnedCount(selectedFragment)}개`, tone: neutralText },
-                  ].map((item) => (
-                    <div key={item.label} className="rounded-[18px] px-4 py-4" style={mutedPanelStyle}>
-                      <p className="market-stat-label mb-2" style={{ color: mutedText }}>{item.label}</p>
-                      <p className="text-[1.02rem] font-bold tracking-[-0.03em] truncate" style={{ color: item.tone }}>{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
+              {!isMarketDetail && (
                 <p className="mt-6 text-[0.95rem] leading-7" style={{ color: mutedText }}>파편을 선택하면 보유 수량과 판매 매물을 바로 확인할 수 있어요.</p>
               )}
             </div>
-
-            {showSelectedFragmentSummary ? (
-              <div className="rounded-[24px] p-5" style={panelStyle}>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="market-eyebrow mb-2" style={{ color: mutedText }}>선택된 파편</p>
-                    <h2 className="text-[1.45rem] font-bold tracking-[-0.04em]" style={{ color: neutralText }}>{selectedFragment.fragmentName}</h2>
-                    <p className="mt-2 text-[0.92rem]" style={{ color: mutedText }}>{selectedFragment.description}</p>
-                    <p className="mt-2 text-[0.82rem] font-semibold" style={{ color: actionBlue }}>조합 결과 · {selectedFragmentResultName}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 mt-5">
-                  {[
-                    { label: "최근 체결가", value: formatPrice(selectedFragment.lastPrice) },
-                    { label: "현재 판매자 수", value: `${selectedFragmentListings.length}명` },
-                    { label: "내 보유 수량", value: `${getOwnedCount(selectedFragment)}개` },
-                    { label: "구매 안내", value: "가장 낮은 가격 매물을 고르면 바로 구매할 수 있어요." },
-                  ].map((item) => (
-                    <div key={item.label} className="rounded-[18px] px-4 py-4" style={mutedPanelStyle}>
-                      <p className="market-stat-label mb-1.5" style={{ color: mutedText }}>{item.label}</p>
-                      <p className="text-[1.12rem] font-bold" style={{ color: neutralText }}>{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </motion.div>
 
           <div className="flex flex-wrap gap-3 mt-6">
