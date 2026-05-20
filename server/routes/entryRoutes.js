@@ -105,7 +105,8 @@ router.post('/verify', async (req, res) => {
           gateId:        gateId || 'GATE_DEFAULT',
         });
       } catch (reRegErr) {
-        console.error('[entryRoutes] Fabric 재등록 실패:', reRegErr.message);
+        console.error('[entryRoutes] Fabric 재등록 실패:', reRegErr);
+        fabricResult = { allowed: false, reason: 'FABRIC_REGISTRATION_FAILED' };
       }
     }
 

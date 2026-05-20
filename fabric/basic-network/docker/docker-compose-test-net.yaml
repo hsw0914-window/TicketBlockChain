@@ -179,6 +179,7 @@ services:
       - ../scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts/
       - ../channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
       - ../../chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
+      - ../collections_config.json:/opt/gopath/src/github.com/hyperledger/fabric/peer/collections_config.json
     depends_on:
       - peer0.org1.example.com
     networks:

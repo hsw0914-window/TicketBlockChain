@@ -10,6 +10,8 @@
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 
+const DID_PEPPER = process.env.DID_PEPPER || 'ticket-blockchain-pepper';
+
 // 인메모리 상태 저장 (서버 재시작 시 초기화)
 const _store = {
   tickets:      {},   // ticketId → TicketRecord
@@ -30,7 +32,7 @@ function now() {
 }
 
 function hashDid(walletAddress) {
-  return crypto.createHash('sha256').update(walletAddress.toLowerCase()).digest('hex');
+  return crypto.createHash('sha256').update(DID_PEPPER + walletAddress.toLowerCase()).digest('hex');
 }
 
 // ─── 멤버십 등급 계산 ──────────────────────────────────────

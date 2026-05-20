@@ -5,11 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
+
+var didPepper string
+
+func init() {
+	if p := os.Getenv("DID_PEPPER"); p != "" {
+		didPepper = p
+	} else {
+		didPepper = "ticket-blockchain-pepper"
+	}
+}
 
 // ─── 데이터 구조체 ─────────────────────────────────────────
 
@@ -114,13 +125,6 @@ type ReservationRecord struct {
 	UpdatedAt     string `json:"updatedAt"`
 }
 
-type HistoryRecord struct {
-	TxId      string          `json:"txId"`
-	Value     json.RawMessage `json:"value"`
-	Timestamp string          `json:"timestamp"`
-	IsDelete  bool            `json:"isDelete"`
-}
-
 // ─── 우선 예매 추첨 구조체 ────────────────────────────────
 
 type PreSaleConfig struct {
@@ -180,6 +184,10 @@ const (
 	keyPrefixPreSaleConfig = "PRESALE_CONFIG:"
 	keyPrefixPreSaleEntry  = "PRESALE_ENTRY:"
 	keyPrefixPreSaleRight  = "PRESALE_RIGHT:"
+
+	// Private Data Collection 이름
+	collectionOrg1     = "collectionOrg1"
+	collectionOrg1Org2 = "collectionOrg1Org2"
 )
 
 // ─── 유틸 함수 ────────────────────────────────────────────
@@ -201,7 +209,7 @@ func currentMonth(ctx contractapi.TransactionContextInterface) string {
 }
 
 func hashDid(walletAddress string) string {
-	h := sha256.Sum256([]byte(strings.ToLower(walletAddress)))
+	h := sha256.Sum256([]byte(didPepper + strings.ToLower(walletAddress)))
 	return fmt.Sprintf("%x", h)
 }
 
@@ -315,7 +323,7 @@ func putTicketRecord(ctx contractapi.TransactionContextInterface, r *TicketRecor
 }
 
 func getOrCreatePoint(ctx contractapi.TransactionContextInterface, userDidHash string) (*PointRecord, error) {
-	b, err := ctx.GetStub().GetState(keyPrefixPoint + userDidHash)
+	b, err := ctx.GetStub().GetPrivateData(collectionOrg1, keyPrefixPoint+userDidHash)
 	if err != nil {
 		return nil, err
 	}
@@ -335,11 +343,11 @@ func putPoint(ctx contractapi.TransactionContextInterface, r *PointRecord) error
 	if err != nil {
 		return err
 	}
-	return ctx.GetStub().PutState(keyPrefixPoint+r.UserDidHash, b)
+	return ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixPoint+r.UserDidHash, b)
 }
 
 func getOrCreateMembership(ctx contractapi.TransactionContextInterface, userDidHash string) (*MembershipRecord, error) {
-	b, err := ctx.GetStub().GetState(keyPrefixMembership + userDidHash)
+	b, err := ctx.GetStub().GetPrivateData(collectionOrg1, keyPrefixMembership+userDidHash)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +372,7 @@ func putMembership(ctx contractapi.TransactionContextInterface, r *MembershipRec
 	if err != nil {
 		return err
 	}
-	return ctx.GetStub().PutState(keyPrefixMembership+r.UserDidHash, b)
+	return ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixMembership+r.UserDidHash, b)
 }
 
 // ─── 1. RegisterTicket ────────────────────────────────────
@@ -604,7 +612,7 @@ func (t *TicketChaincode) ExchangePointItem(
 	if err != nil {
 		return "", err
 	}
-	if err = ctx.GetStub().PutState(keyPrefixExchange+exchangeId, b); err != nil {
+	if err = ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixExchange+exchangeId, b); err != nil {
 		return "", err
 	}
 
@@ -726,18 +734,18 @@ func (t *TicketChaincode) RequestRefund(
 	if err != nil {
 		return "", err
 	}
-	if err = ctx.GetStub().PutState(keyPrefixRefund+refundId, b); err != nil {
+	if err = ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixRefund+refundId, b); err != nil {
 		return "", err
 	}
 
 	out, _ := json.Marshal(map[string]interface{}{
-		"refundId":       refundId,
-		"ticketId":       ticketId,
-		"refundRate":     rate,
-		"refundAmount":   refundAmount,
-		"pointRestored":  pointRestored,
-		"purchaseType":   ticket.PurchaseType,
-		"status":         "COMPLETED",
+		"refundId":      refundId,
+		"ticketId":      ticketId,
+		"refundRate":    rate,
+		"refundAmount":  refundAmount,
+		"pointRestored": pointRestored,
+		"purchaseType":  ticket.PurchaseType,
+		"status":        "COMPLETED",
 	})
 	return string(out), nil
 }
@@ -822,7 +830,7 @@ func (t *TicketChaincode) CancelGameRefundAll(
 			failedIds = append(failedIds, ticketId)
 			continue
 		}
-		if err = ctx.GetStub().PutState(keyPrefixRefund+refundId, rb); err != nil {
+		if err = ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixRefund+refundId, rb); err != nil {
 			failedIds = append(failedIds, ticketId)
 			continue
 		}
@@ -967,7 +975,7 @@ func (t *TicketChaincode) CreateSettlement(
 	if err != nil {
 		return "", err
 	}
-	if err = ctx.GetStub().PutState(keyPrefixSettlement+settlementId, b); err != nil {
+	if err = ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixSettlement+settlementId, b); err != nil {
 		return "", err
 	}
 
@@ -996,6 +1004,9 @@ func (t *TicketChaincode) GetPointBalance(
 	ctx contractapi.TransactionContextInterface,
 	userDidHash string,
 ) (string, error) {
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	point, err := getOrCreatePoint(ctx, userDidHash)
 	if err != nil {
 		return "", err
@@ -1008,6 +1019,9 @@ func (t *TicketChaincode) GetMembership(
 	ctx contractapi.TransactionContextInterface,
 	userDidHash string,
 ) (string, error) {
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	membership, err := getOrCreateMembership(ctx, userDidHash)
 	if err != nil {
 		return "", err
@@ -1449,75 +1463,7 @@ func (t *TicketChaincode) HashDid(
 	return hashDid(walletAddress), nil
 }
 
-// ─── 22. GetTicketHistory ────────────────────────────────
-
-func (t *TicketChaincode) GetTicketHistory(
-	ctx contractapi.TransactionContextInterface,
-	ticketId string,
-) (string, error) {
-	iter, err := ctx.GetStub().GetHistoryForKey(keyPrefixTicket + ticketId)
-	if err != nil {
-		return "", err
-	}
-	defer iter.Close()
-
-	records := make([]HistoryRecord, 0)
-	for iter.HasNext() {
-		mod, err := iter.Next()
-		if err != nil {
-			continue
-		}
-		ts := ""
-		if mod.Timestamp != nil {
-			ts = time.Unix(mod.Timestamp.Seconds, 0).UTC().Format(time.RFC3339)
-		}
-		rec := HistoryRecord{
-			TxId:      mod.TxId,
-			Value:     json.RawMessage(mod.Value),
-			Timestamp: ts,
-			IsDelete:  mod.IsDelete,
-		}
-		records = append(records, rec)
-	}
-	out, _ := json.Marshal(records)
-	return string(out), nil
-}
-
-// ─── 23. GetPointHistory ─────────────────────────────────
-
-func (t *TicketChaincode) GetPointHistory(
-	ctx contractapi.TransactionContextInterface,
-	userDidHash string,
-) (string, error) {
-	iter, err := ctx.GetStub().GetHistoryForKey(keyPrefixPoint + userDidHash)
-	if err != nil {
-		return "", err
-	}
-	defer iter.Close()
-
-	records := make([]HistoryRecord, 0)
-	for iter.HasNext() {
-		mod, err := iter.Next()
-		if err != nil {
-			continue
-		}
-		ts := ""
-		if mod.Timestamp != nil {
-			ts = time.Unix(mod.Timestamp.Seconds, 0).UTC().Format(time.RFC3339)
-		}
-		rec := HistoryRecord{
-			TxId:      mod.TxId,
-			Value:     json.RawMessage(mod.Value),
-			Timestamp: ts,
-			IsDelete:  mod.IsDelete,
-		}
-		records = append(records, rec)
-	}
-	out, _ := json.Marshal(records)
-	return string(out), nil
-}
-
-// ─── 24. GetAllDraws ─────────────────────────────────────
+// ─── 22. GetAllDraws ─────────────────────────────────────
 
 func (t *TicketChaincode) GetAllDraws(
 	ctx contractapi.TransactionContextInterface,
@@ -1926,7 +1872,6 @@ func (t *TicketChaincode) ExecutePreSaleDraw(
 		"matchId":      matchId,
 		"totalEntries": len(entries),
 		"winnerCount":  len(winners),
-		"winners":      winners,
 		"rightIds":     rightIds,
 	})
 	return string(out), nil

@@ -7,11 +7,14 @@ if [ "$#" -lt 1 ]; then
 fi
 
 CC_NAME=$1
+CC_VERSION=${2:-2}
+CC_SEQUENCE=${3:-2}
 
 ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
 ORG1_PEER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 ORG2_PEER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
 ORG2_ADMIN_MSP=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
+COLLECTIONS_CONFIG=/opt/gopath/src/github.com/hyperledger/fabric/peer/collections_config.json
 
 ## 체인코드 빌드 (vendor 포함 — Docker 빌드 중 인터넷 불필요)
 echo "체인코드 빌드: $CC_NAME"
@@ -28,7 +31,7 @@ cd /opt/gopath/src/github.com/hyperledger/fabric/peer
 peer lifecycle chaincode package ${CC_NAME}.tar.gz \
   --path ./chaincode/${CC_NAME}/go/ \
   --lang golang \
-  --label ${CC_NAME}_1
+  --label ${CC_NAME}_${CC_VERSION}
 
 ## PACKAGE_ID 추출 (설치 전 calculatepackageid로 확정)
 export PACKAGE_ID=$(peer lifecycle chaincode calculatepackageid ${CC_NAME}.tar.gz)
@@ -51,9 +54,10 @@ peer lifecycle chaincode approveformyorg \
   --cafile $ORDERER_CA \
   --channelID channel1 \
   --name ${CC_NAME} \
-  --version 1 \
+  --version ${CC_VERSION} \
   --package-id $PACKAGE_ID \
-  --sequence 1
+  --sequence ${CC_SEQUENCE} \
+  --collections-config $COLLECTIONS_CONFIG
 
 ## Org2 설치
 echo "Org2 peer0 체인코드 설치"
@@ -76,9 +80,10 @@ peer lifecycle chaincode approveformyorg \
   --cafile $ORDERER_CA \
   --channelID channel1 \
   --name ${CC_NAME} \
-  --version 1 \
+  --version ${CC_VERSION} \
   --package-id $PACKAGE_ID \
-  --sequence 1
+  --sequence ${CC_SEQUENCE} \
+  --collections-config $COLLECTIONS_CONFIG
 
 ## 커밋 (Org1 + Org2 양쪽 피어로 MAJORITY Endorsement 충족)
 echo "체인코드 커밋"
@@ -93,7 +98,8 @@ peer lifecycle chaincode commit \
   --tlsRootCertFiles $ORG1_PEER_CA \
   --peerAddresses peer0.org2.example.com:9051 \
   --tlsRootCertFiles $ORG2_PEER_CA \
-  --version 1 \
-  --sequence 1
+  --version ${CC_VERSION} \
+  --sequence ${CC_SEQUENCE} \
+  --collections-config $COLLECTIONS_CONFIG
 
 echo "체인코드 배포 완료: $CC_NAME"

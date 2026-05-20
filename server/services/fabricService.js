@@ -17,8 +17,10 @@ const chaincodeName = 'ticket';
 const ccpPath    = process.env.FABRIC_CCP_PATH    || path.resolve(__dirname, '../../fabric/application/connection-org1.json');
 const walletPath = process.env.FABRIC_WALLET_PATH || path.join(__dirname,    '../../fabric/wallet');
 
+const DID_PEPPER = process.env.DID_PEPPER || 'ticket-blockchain-pepper';
+
 function hashDid(walletAddress) {
-  return crypto.createHash('sha256').update(walletAddress.toLowerCase()).digest('hex');
+  return crypto.createHash('sha256').update(DID_PEPPER + walletAddress.toLowerCase()).digest('hex');
 }
 
 let _gateway = null;
