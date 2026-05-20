@@ -25,4 +25,13 @@ echo "▶ Orderer 인증서 생성..."
   --config=./organizations/cryptogen/crypto-config-orderer.yaml \
   --output=organizations
 
+echo "▶ Admin 인증서를 admincerts에 복사 (채널 생성 정책 인식용)..."
+mkdir -p organizations/peerOrganizations/org1.example.com/msp/admincerts
+cp organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem \
+   organizations/peerOrganizations/org1.example.com/msp/admincerts/
+
+mkdir -p organizations/peerOrganizations/org2.example.com/msp/admincerts
+cp organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp/signcerts/Admin@org2.example.com-cert.pem \
+   organizations/peerOrganizations/org2.example.com/msp/admincerts/
+
 echo "✅ 인증서 생성 완료"

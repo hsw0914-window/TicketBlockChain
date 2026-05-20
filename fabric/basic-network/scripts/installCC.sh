@@ -8,7 +8,7 @@ fi
 
 CC_NAME=$1
 CC_VERSION=${2:-2}
-CC_SEQUENCE=${3:-2}
+CC_SEQUENCE=${3:-1}
 
 ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
 ORG1_PEER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
@@ -57,7 +57,8 @@ peer lifecycle chaincode approveformyorg \
   --version ${CC_VERSION} \
   --package-id $PACKAGE_ID \
   --sequence ${CC_SEQUENCE} \
-  --collections-config $COLLECTIONS_CONFIG
+  --collections-config $COLLECTIONS_CONFIG \
+  --signature-policy "OR('Org1MSP.member', 'Org2MSP.member')"
 
 ## Org2 설치
 echo "Org2 peer0 체인코드 설치"
@@ -83,9 +84,10 @@ peer lifecycle chaincode approveformyorg \
   --version ${CC_VERSION} \
   --package-id $PACKAGE_ID \
   --sequence ${CC_SEQUENCE} \
-  --collections-config $COLLECTIONS_CONFIG
+  --collections-config $COLLECTIONS_CONFIG \
+  --signature-policy "OR('Org1MSP.member', 'Org2MSP.member')"
 
-## 커밋 (Org1 + Org2 양쪽 피어로 MAJORITY Endorsement 충족)
+## 커밋 (OR policy — Org1 단독 endorsement로 충족)
 echo "체인코드 커밋"
 peer lifecycle chaincode commit \
   -o orderer.example.com:7050 \
@@ -100,6 +102,7 @@ peer lifecycle chaincode commit \
   --tlsRootCertFiles $ORG2_PEER_CA \
   --version ${CC_VERSION} \
   --sequence ${CC_SEQUENCE} \
-  --collections-config $COLLECTIONS_CONFIG
+  --collections-config $COLLECTIONS_CONFIG \
+  --signature-policy "OR('Org1MSP.member', 'Org2MSP.member')"
 
 echo "체인코드 배포 완료: $CC_NAME"

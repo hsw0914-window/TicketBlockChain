@@ -56,6 +56,7 @@ elif [ "$1" == "start"             ]; then
   sleep 20
   joinChannel createChannel
   joinChannel joinChannel
+  joinChannel joinChannelOrg2
   joinChannel updateAnchor
   echo "네트워크 시작 완료 → 이제 installCC ticket 실행하세요"
 else

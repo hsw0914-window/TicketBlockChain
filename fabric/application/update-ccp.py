@@ -87,7 +87,7 @@ channel_peers = {
 }
 if has_org2:
     channel_peers['peer0.org2.example.com'] = {
-        'endorsingPeer': True,
+        'endorsingPeer': False,  # collectionOrg1은 Org1 전용 — Org2 endorsement 제외
         'chaincodeQuery': False,
         'ledgerQuery':    False,
         'eventSource':    False,
