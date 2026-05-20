@@ -160,13 +160,15 @@ export function Exchange() {
   const raffleLimitReached = status ? status.remaining.raffle <= 0 : false;
 
   return (
-    <div className="page-shell max-w-[1080px] space-y-8">
+    <div className="page-shell space-y-8">
 
       {/* ?? ?ㅻ뜑 */}
-      <header className="space-y-2">
+      <header className="page-header">
+        <div className="page-header-main">
         <p className="page-eyebrow text-[#1456a0] mb-3">Exchange</p>
-        <h1 className="text-[2.2rem] font-black leading-tight tracking-[-0.04em]" style={{ color: neutralText }}>교환소</h1>
-        <p className="text-[0.98rem]" style={{ color: mutedText }}>실물 NFT 카드를 교환하거나, 포인트로 응모권을 교환하세요</p>
+        <h1 className="page-title mb-2" style={{ color: neutralText }}>교환소</h1>
+        <p className="page-subtitle" style={{ color: mutedText }}>실물 NFT 카드를 교환하거나, 포인트로 응모권을 교환하세요</p>
+        </div>
       </header>
 
       {/* ?? ??*/}

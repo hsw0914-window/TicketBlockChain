@@ -82,17 +82,17 @@ export function PointHistory() {
   const events = data?.events ?? [];
 
   return (
-    <div className="page-shell max-w-[1040px] space-y-8">
+    <div className="page-shell space-y-8">
       <Link to="/mypage/membership" className="inline-flex items-center gap-2 text-[0.9rem] font-semibold" style={{ color: "#4d5f78" }}>
         <ArrowLeft className="h-4 w-4" />
         멤버십으로 돌아가기
       </Link>
 
-      <header className="flex flex-wrap items-end justify-between gap-5">
-        <div>
-          <p className="text-[0.86rem] font-extrabold uppercase tracking-[0.22em]" style={{ color: "#2563eb" }}>Membership Points</p>
-          <h1 className="mt-2 text-[2.2rem] font-black leading-tight" style={{ color: "#1f3248" }}>포인트 적립·사용 내역</h1>
-          <p className="mt-2 text-[0.98rem]" style={{ color: "#8a98b0" }}>
+      <header className="page-header">
+        <div className="page-header-main">
+          <p className="page-eyebrow mb-3" style={{ color: "#2563eb" }}>Membership Points</p>
+          <h1 className="page-title mb-2" style={{ color: "#1f3248" }}>포인트 적립·사용 내역</h1>
+          <p className="page-subtitle" style={{ color: "#8a98b0" }}>
             적립과 사용 흐름을 월별로 확인할 수 있습니다.
           </p>
         </div>

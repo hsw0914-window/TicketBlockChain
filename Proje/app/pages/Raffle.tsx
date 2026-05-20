@@ -181,7 +181,7 @@ export function Raffle() {
   }
 
   return (
-    <div className="page-shell max-w-[1120px] space-y-8">
+    <div className="page-shell space-y-8">
       <button
         type="button"
         onClick={() => navigate("/mypage/membership")}
@@ -192,12 +192,14 @@ export function Raffle() {
         멤버십으로 돌아가기
       </button>
 
-      <header className="space-y-3">
-        <p className="page-eyebrow text-[#1456a0]">Priority Raffle</p>
-        <h1 className="page-title" style={{ color: "#14253f" }}>우선 예매 응모</h1>
+      <header className="page-header">
+        <div className="page-header-main">
+        <p className="page-eyebrow text-[#1456a0] mb-3">Priority Raffle</p>
+        <h1 className="page-title mb-2" style={{ color: "#14253f" }}>우선 예매 응모</h1>
         <p className="page-subtitle max-w-2xl" style={{ color: "#586981" }}>
           응모권 NFT로 추첨에 참여하고, 당첨되면 일반 예매 전에 지정된 테이블석을 Toss 결제로 예매할 수 있습니다.
         </p>
+        </div>
       </header>
 
       {loading ? (

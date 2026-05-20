@@ -405,10 +405,9 @@ export function TicketResale() {
         borderColor: lineColor,
         background: "radial-gradient(circle at top left, rgba(83,111,141,.08), transparent 28%), linear-gradient(180deg,#eef2f5 0%,#e9eef2 100%)",
       }}>
-        <div className="max-w-[1600px] mx-auto px-6 pt-8 pb-7">
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            <span className="rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[.22em]"
-              style={{ background: "#eef4ff", border: "1px solid #c8d8ef", color: actionBlue }}>
+        <div className="page-strip-wide pt-8 pb-7">
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className="page-eyebrow" style={{ color: actionBlue }}>
               Ticket Exchange
             </span>
             <span className="rounded-full px-3 py-1 text-[0.72rem] font-semibold"
@@ -416,17 +415,17 @@ export function TicketResale() {
               오픈 마켓 · 원가 110% 상한 · 3% 플랫폼 수수료
             </span>
           </div>
-          <h1 style={{ color: neutralText, fontSize: "clamp(2rem,3.6vw,3.3rem)", fontWeight: 800, letterSpacing: "-.05em", lineHeight: 1.02 }}>
+          <h1 className="page-title mb-2" style={{ color: neutralText }}>
             티켓 거래소
           </h1>
-          <p className="mt-3 text-[0.98rem] leading-7" style={{ color: mutedText }}>
+          <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>
             팬들이 직접 올린 티켓을 사고 팔 수 있어요. NFT 소유권 이전이 블록체인에 기록되며 3% 수수료가 플랫폼에 분배됩니다.
           </p>
         </div>
       </section>
 
       {/* ── 본문 ──────────────────────────────────────────── */}
-      <div className="max-w-[1600px] mx-auto px-6 py-8">
+      <div className="page-strip-wide py-8">
         <div className="grid xl:grid-cols-[220px_1fr_300px] gap-6">
 
           {/* ── 왼쪽 필터 ────────────────────────────────── */}

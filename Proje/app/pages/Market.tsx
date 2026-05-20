@@ -476,15 +476,15 @@ export function Market() {
   return (
     <div className="w-full">
       <section className="border-b" style={{ borderColor: lineColor, background: "radial-gradient(circle at top left, rgba(83,111,141,0.08), transparent 28%), linear-gradient(180deg, #eef2f5 0%, #e9eef2 100%)" }}>
-        <div className="max-w-[1600px] mx-auto px-6 pt-8 pb-7">
+        <div className="page-strip-wide pt-8 pb-7">
           <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} className="grid xl:grid-cols-[minmax(0,1.1fr)_360px] gap-6 items-start">
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.22em]" style={{ background: "#eef4ff", border: "1px solid #c8d8ef", color: actionBlue }}>Fragment Market</span>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <span className="page-eyebrow" style={{ color: actionBlue }}>Fragment Market</span>
                 <span className="rounded-full px-3 py-1 text-[0.72rem] font-semibold" style={{ background: "#edf7f1", border: "1px solid #cbe1d3", color: priceGreen }}>판매자별 등록가 비교</span>
               </div>
-              <h1 className="mt-5" style={{ color: neutralText, fontSize: "clamp(2rem, 3.6vw, 3.3rem)", fontWeight: 800, letterSpacing: "-0.05em", lineHeight: 1.02 }}>파편 장터</h1>
-              <p className="mt-3 max-w-3xl text-[0.98rem] leading-7" style={{ color: mutedText }}>카드 조합에 필요한 파편을 사고팔 수 있는 팬 자산 거래소입니다. 부족한 파편을 찾고, 가장 낮은 가격 매물을 고른 뒤 카드 조합으로 이어가세요.</p>
+              <h1 className="page-title mb-2" style={{ color: neutralText }}>파편 장터</h1>
+              <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>카드 조합에 필요한 파편을 사고팔 수 있는 팬 자산 거래소입니다. 부족한 파편을 찾고, 가장 낮은 가격 매물을 고른 뒤 카드 조합으로 이어가세요.</p>
               {(marketViewMode === "detail" || activeTab === "sell") ? (
                 <div className="grid sm:grid-cols-4 gap-3 mt-6">
                   {[
@@ -547,7 +547,7 @@ export function Market() {
         </div>
       </section>
 
-      <section className="max-w-[1600px] mx-auto px-6 py-8">
+      <section className="page-strip-wide py-8">
         {activeTab === "market" ? (
           marketViewMode === "browse" ? (
             <div className="flex gap-6 items-start">

@@ -83,6 +83,15 @@ h6 {
   padding-block: 2rem 3.5rem;
 }
 
+.page-shell-wide {
+  width: min(1480px, calc(100% - 3rem));
+}
+
+.page-strip-wide {
+  width: min(1480px, calc(100% - 3rem));
+  margin-inline: auto;
+}
+
 .page-header {
   display: flex;
   flex-wrap: wrap;
@@ -90,6 +99,10 @@ h6 {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 2rem;
+}
+
+.page-header-main {
+  max-width: 54rem;
 }
 
 .page-header--center {

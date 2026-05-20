@@ -349,9 +349,9 @@ export function Combine() {
   }
 
   return (
-    <div className="page-shell" style={{ width: "min(1480px, calc(100% - 3rem))" }}>
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <div className="page-shell page-shell-wide">
+      <header className="page-header">
+        <div className="page-header-main">
           <p className="page-eyebrow mb-3" style={{ color: shellTone.accentStrong }}>
             COMBINE
           </p>

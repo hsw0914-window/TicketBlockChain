@@ -184,18 +184,20 @@ export function Membership() {
   ];
 
   return (
-    <div className="page-shell max-w-[1040px] space-y-8">
+    <div className="page-shell space-y-8">
       <Link to="/mypage" className="inline-flex items-center gap-2 text-[0.9rem] font-semibold" style={{ color: "#4d5f78" }}>
         <ChevronLeft className="h-4 w-4" />
         마이페이지로 돌아가기
       </Link>
 
-      <header className="space-y-3">
-        <p className="text-[0.86rem] font-extrabold uppercase tracking-[0.22em]" style={{ color: "#2563eb" }}>Membership</p>
-        <h1 className="text-[2.35rem] font-black leading-tight" style={{ color: "#1f3248" }}>멤버십</h1>
-        <p className="text-[0.98rem]" style={{ color: "#8a98b0" }}>
+      <header className="page-header">
+        <div className="page-header-main">
+        <p className="page-eyebrow mb-3" style={{ color: "#2563eb" }}>Membership</p>
+        <h1 className="page-title mb-2" style={{ color: "#1f3248" }}>멤버십</h1>
+        <p className="page-subtitle" style={{ color: "#8a98b0" }}>
           가입 후 입장 기록을 쌓고, 조건 달성 시 직접 티어업하여 혜택을 받을 수 있습니다.
         </p>
+        </div>
       </header>
 
       <section className="rounded-[24px] border px-9 py-9" style={{ background: "#ffffff", borderColor: "#dce5f2", boxShadow: "inset 0 4px 0 #2563eb, inset -5px 0 0 #2dd4bf, 0 22px 46px rgba(31,50,72,0.06)" }}>

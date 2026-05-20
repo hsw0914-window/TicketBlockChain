@@ -83,9 +83,11 @@ export function EntryScanner() {
   return (
     <div className="page-shell max-w-lg mx-auto">
       <div className="page-header">
+        <div className="page-header-main">
         <p className="page-eyebrow text-[#1456a0] mb-3">Gate</p>
         <h1 className="page-title mb-3" style={{ color: "#14253f" }}>입장 QR 스캐너</h1>
         <p className="page-subtitle" style={{ color: "#55657d" }}>티켓 QR을 카메라로 스캔하세요</p>
+        </div>
       </div>
 
       {/* 게이트 선택 */}
