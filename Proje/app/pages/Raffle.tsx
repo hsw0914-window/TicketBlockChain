@@ -4,7 +4,6 @@ import {
   AlertCircle,
   CalendarCheck,
   CheckCircle2,
-  ChevronLeft,
   Clock,
   Gift,
   Loader2,
@@ -182,23 +181,13 @@ export function Raffle() {
 
   return (
     <div className="page-shell space-y-8">
-      <button
-        type="button"
-        onClick={() => navigate("/mypage/membership")}
-        className="inline-flex items-center gap-2 text-[0.9rem] font-semibold"
-        style={{ color: "#4d5f78" }}
-      >
-        <ChevronLeft className="h-4 w-4" />
-        멤버십으로 돌아가기
-      </button>
-
       <header className="page-header">
         <div className="page-header-main">
-        <p className="page-eyebrow text-[#1456a0] mb-3">Priority Raffle</p>
-        <h1 className="page-title mb-2" style={{ color: "#14253f" }}>우선 예매 응모</h1>
-        <p className="page-subtitle max-w-2xl" style={{ color: "#586981" }}>
-          응모권 NFT로 추첨에 참여하고, 당첨되면 일반 예매 전에 지정된 테이블석을 Toss 결제로 예매할 수 있습니다.
-        </p>
+          <p className="page-eyebrow text-[#1456a0] mb-3">Priority Raffle</p>
+          <h1 className="page-title mb-2" style={{ color: "#14253f" }}>우선 예매 응모</h1>
+          <p className="page-subtitle max-w-2xl" style={{ color: "#586981" }}>
+            응모권 NFT로 추첨에 참여하고, 당첨되면 일반 예매 전에 지정된 테이블석을 Toss 결제로 예매할 수 있습니다.
+          </p>
         </div>
       </header>
 
