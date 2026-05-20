@@ -66,18 +66,17 @@ async function registerTicket({ ticketId, tokenId, gameId, seatId, walletAddress
   const userDidHash = hashDid(walletAddress);
   const record = {
     ticketId,
-    tokenId:       String(tokenId),
+    tokenId:      String(tokenId),
     gameId,
     seatId,
     userDidHash,
-    walletAddress: walletAddress.toLowerCase(),
-    status:        'ACTIVE',
-    purchaseType:  purchaseType || 'PRIMARY',
-    gameDateStr:   gameDate     || '',
-    price:         Number(price),
-    pointUsed:     0,
-    createdAt:     now(),
-    updatedAt:     now(),
+    status:       'ACTIVE',
+    purchaseType: purchaseType || 'PRIMARY',
+    gameDateStr:  gameDate     || '',
+    price:        Number(price),
+    pointUsed:    0,
+    createdAt:    now(),
+    updatedAt:    now(),
   };
 
   _store.tickets[ticketId] = record;
@@ -129,7 +128,7 @@ async function verifyEntry({ ticketId, tokenId, walletAddress, gateId }) {
   _emitEvent('NFT_BURN_REQUESTED', {
     ticketId,
     tokenId: String(tokenId),
-    walletAddress: ticket.walletAddress,
+    userDidHash: ticket.userDidHash,
   });
 
   console.log(`[MockFabric] VerifyEntry: ${ticketId} → ALLOWED (+${earnedPoint}P, ${grade})`);
@@ -372,7 +371,7 @@ async function requestRefund({ ticketId, walletAddress, refundReason, gameDateSt
   record.completedAt  = now();
 
   _emitEvent('PAYMENT_REFUND_REQUESTED', { refundId, ticketId, refundAmount, refundRate: rate });
-  _emitEvent('NFT_INVALIDATE_REQUESTED', { ticketId, tokenId: ticket.tokenId, walletAddress: ticket.walletAddress });
+  _emitEvent('NFT_INVALIDATE_REQUESTED', { ticketId, tokenId: ticket.tokenId, userDidHash: ticket.userDidHash });
   _emitEvent('REFUND_COMPLETED',         { refundId, ticketId, refundAmount });
 
   console.log(`[MockFabric] RequestRefund: ${ticketId} → REFUNDED (${rate}%, ${refundAmount}원)`);
@@ -409,9 +408,8 @@ async function cancelGameRefundAll({ gameId }) {
   for (const ticket of targets) {
     try {
       const result = await requestRefund({
-        ticketId:      ticket.ticketId,
-        walletAddress: ticket.walletAddress,
-        refundReason:  '경기 취소',
+        ticketId:     ticket.ticketId,
+        refundReason: '경기 취소',
         gameDateStr:   futureDateStr,
         purchaseType:  ticket.purchaseType || 'PRIMARY',
       });
@@ -459,15 +457,13 @@ async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, tr
   const ticket = _store.tickets[ticketId];
   if (!ticket) throw new Error('TICKET_NOT_FOUND');
 
-  const fromNorm = fromWalletAddress.toLowerCase();
-  if (ticket.walletAddress && ticket.walletAddress !== fromNorm) {
+  if (ticket.userDidHash !== hashDid(fromWalletAddress)) {
     throw new Error('NOT_OWNER');
   }
 
-  ticket.walletAddress  = toWalletAddress.toLowerCase();
-  ticket.purchaseType   = 'TRANSFERRED';
-  ticket.userDidHash    = hashDid(toWalletAddress);
-  ticket.updatedAt      = now();
+  ticket.purchaseType = 'TRANSFERRED';
+  ticket.userDidHash  = hashDid(toWalletAddress);
+  ticket.updatedAt    = now();
 
   // 판매자 포인트 0.3% 적립
   const earnedPoint = Math.floor(Number(transferPrice) * 0.003);
@@ -644,12 +640,11 @@ async function cancelReservation({ reservationId }) {
 }
 
 // 21. MapTicketNFT
-async function mapTicketNFT({ ticketId, tokenId, walletAddress }) {
+async function mapTicketNFT({ ticketId, tokenId }) {
   const ticket = _store.tickets[ticketId];
   if (!ticket) throw new Error('TICKET_NOT_FOUND');
-  ticket.tokenId       = String(tokenId);
-  ticket.walletAddress = walletAddress.toLowerCase();
-  ticket.updatedAt     = now();
+  ticket.tokenId   = String(tokenId);
+  ticket.updatedAt = now();
   console.log(`[MockFabric] MapTicketNFT: ${ticketId} → tokenId=${tokenId}`);
   return { success: true, txId: `mock-tx-${uuidv4().slice(0, 8)}` };
 }

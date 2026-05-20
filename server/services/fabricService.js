@@ -223,8 +223,8 @@ async function cancelReservation({ reservationId }) {
   return { success: true };
 }
 
-async function mapTicketNFT({ ticketId, tokenId, walletAddress }) {
-  await submitTx('MapTicketNFT', ticketId, String(tokenId), walletAddress);
+async function mapTicketNFT({ ticketId, tokenId }) {
+  await submitTx('MapTicketNFT', ticketId, String(tokenId));
   return { success: true };
 }
 

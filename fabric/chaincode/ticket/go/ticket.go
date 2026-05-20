@@ -14,19 +14,18 @@ import (
 // ─── 데이터 구조체 ─────────────────────────────────────────
 
 type TicketRecord struct {
-	TicketId      string  `json:"ticketId"`
-	TokenId       string  `json:"tokenId"`
-	GameId        string  `json:"gameId"`
-	SeatId        string  `json:"seatId"`
-	UserDidHash   string  `json:"userDidHash"`
-	WalletAddress string  `json:"walletAddress"`
-	Status        string  `json:"status"` // ACTIVE, USED, REFUND_PROCESSING, REFUNDED
-	PurchaseType  string  `json:"purchaseType"` // PRIMARY, TRANSFERRED, PRESALE
-	Price         float64 `json:"price"`
-	PointUsed     float64 `json:"pointUsed"`
-	GameDate      string  `json:"gameDate"` // YYYY-MM-DD
-	CreatedAt     string  `json:"createdAt"`
-	UpdatedAt     string  `json:"updatedAt"`
+	TicketId     string  `json:"ticketId"`
+	TokenId      string  `json:"tokenId"`
+	GameId       string  `json:"gameId"`
+	SeatId       string  `json:"seatId"`
+	UserDidHash  string  `json:"userDidHash"`
+	Status       string  `json:"status"`       // ACTIVE, USED, REFUND_PROCESSING, REFUNDED
+	PurchaseType string  `json:"purchaseType"` // PRIMARY, TRANSFERRED, PRESALE
+	Price        float64 `json:"price"`
+	PointUsed    float64 `json:"pointUsed"`
+	GameDate     string  `json:"gameDate"` // YYYY-MM-DD
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
 }
 
 type PointRecord struct {
@@ -416,18 +415,17 @@ func (t *TicketChaincode) RegisterTicket(
 	}
 
 	r := &TicketRecord{
-		TicketId:      ticketId,
-		TokenId:       tokenId,
-		GameId:        gameId,
-		SeatId:        seatId,
-		UserDidHash:   hashDid(walletAddress),
-		WalletAddress: strings.ToLower(walletAddress),
-		Status:        "ACTIVE",
-		PurchaseType:  purchaseType,
-		Price:         price,
-		GameDate:      gameDate,
-		CreatedAt:     nowISO(ctx),
-		UpdatedAt:     nowISO(ctx),
+		TicketId:     ticketId,
+		TokenId:      tokenId,
+		GameId:       gameId,
+		SeatId:       seatId,
+		UserDidHash:  hashDid(walletAddress),
+		Status:       "ACTIVE",
+		PurchaseType: purchaseType,
+		Price:        price,
+		GameDate:     gameDate,
+		CreatedAt:    nowISO(ctx),
+		UpdatedAt:    nowISO(ctx),
 	}
 	return putTicketRecord(ctx, r)
 }
@@ -897,14 +895,13 @@ func (t *TicketChaincode) TransferTicket(
 	if ticket.PurchaseType == "PRESALE" {
 		return "", fmt.Errorf("TRANSFER_DENIED: 우선 예매 티켓은 2차 거래가 불가합니다")
 	}
-	if strings.ToLower(ticket.WalletAddress) != strings.ToLower(fromWalletAddress) {
+	if ticket.UserDidHash != hashDid(fromWalletAddress) {
 		return "", fmt.Errorf("NOT_OWNER: 티켓 소유자가 아닙니다")
 	}
 
 	fromDidHash := hashDid(fromWalletAddress)
 	toDidHash := hashDid(toWalletAddress)
 
-	ticket.WalletAddress = strings.ToLower(toWalletAddress)
 	ticket.UserDidHash = toDidHash
 	ticket.PurchaseType = "TRANSFERRED"
 	ticket.PointUsed = 0
@@ -927,13 +924,12 @@ func (t *TicketChaincode) TransferTicket(
 	}
 
 	out, _ := json.Marshal(map[string]interface{}{
-		"ticketId":        ticketId,
-		"fromWallet":      strings.ToLower(fromWalletAddress),
-		"toWallet":        strings.ToLower(toWalletAddress),
-		"toDidHash":       toDidHash,
-		"transferPrice":   transferPrice,
+		"ticketId":          ticketId,
+		"fromDidHash":       fromDidHash,
+		"toDidHash":         toDidHash,
+		"transferPrice":     transferPrice,
 		"sellerEarnedPoint": earnedPoint,
-		"status":          "TRANSFERRED",
+		"status":            "TRANSFERRED",
 	})
 	return string(out), nil
 }
@@ -1348,7 +1344,7 @@ func (t *TicketChaincode) CancelReservation(
 
 func (t *TicketChaincode) MapTicketNFT(
 	ctx contractapi.TransactionContextInterface,
-	ticketId, tokenId, walletAddress string,
+	ticketId, tokenId string,
 ) error {
 	if err := requireMSP(ctx, "Org1MSP"); err != nil {
 		return err
@@ -1361,7 +1357,6 @@ func (t *TicketChaincode) MapTicketNFT(
 		return fmt.Errorf("TICKET_NOT_FOUND: %s", ticketId)
 	}
 	ticket.TokenId = tokenId
-	ticket.WalletAddress = strings.ToLower(walletAddress)
 	return putTicketRecord(ctx, ticket)
 }
 
