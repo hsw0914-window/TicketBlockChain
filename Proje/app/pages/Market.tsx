@@ -207,7 +207,6 @@ export function Market() {
 
   const selectedFragment = marketState.find((f) => f.id === selectedId) ?? marketState[0] ?? EMPTY_FRAGMENT;
   const selectedFragmentListings = useMemo(() => [...(selectedFragment.listings ?? [])], [selectedFragment]);
-  const selectedFragmentResultName = getFragmentResultName(selectedFragment);
 
   useEffect(() => {
     const requestedFragmentId = searchParams.get("fragment");
@@ -311,7 +310,6 @@ export function Market() {
     visibleFragmentListings.find((l) => l.id === selectedListingId) ??
     visibleFragmentListings.find((l) => l.sellerHandle !== viewerHandle) ??
     visibleFragmentListings[0] ?? null;
-  const quickBuyListings = visibleFragmentListings.slice(0, 3);
 
   useEffect(() => {
     const defaultListingId =
@@ -715,41 +713,6 @@ export function Market() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="rounded-[22px] p-5" style={panelStyle}>
-                    <div className="flex items-center justify-between gap-3 mb-4">
-                      <div><h3 className="text-[1.02rem] font-semibold" style={{ color: neutralText }}>추천 매물</h3><p className="mt-1 text-[0.8rem]" style={{ color: mutedText }}>클릭하면 오른쪽 구매창에 반영돼요</p></div>
-                    </div>
-                    <div className="rounded-[16px] px-4 py-4 mb-4" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}>
-                      <p className="text-[0.76rem] font-semibold" style={{ color: mutedText }}>이 파편은 어디에 쓰이나요?</p>
-                      <p className="mt-1 text-[0.9rem] font-semibold" style={{ color: neutralText }}>{selectedFragmentResultName} 조합 재료</p>
-                      <p className="mt-2 text-[0.78rem] leading-6" style={{ color: mutedText }}>필요한 수량만 먼저 구매한 뒤 카드 조합 페이지에서 바로 합치면 됩니다.</p>
-                    </div>
-                    <div className="grid lg:grid-cols-3 gap-3">
-                      {quickBuyListings.length > 0 ? quickBuyListings.map((listing, index) => {
-                        const active = selectedListing?.id === listing.id;
-                        const isLowest = index === 0;
-                        return (
-                          <button key={listing.id} onClick={() => setSelectedListingId(listing.id)} className="rounded-[18px] p-4 text-left relative transition-all" style={{ background: active ? accentSurface : subtleSurface, border: active ? `2px solid ${actionBlue}` : `1px solid ${lineColor}`, boxShadow: active ? `0 0 0 3px ${accentBorder}` : "none" }}>
-                            {isLowest && <span className="absolute top-3 right-3 rounded-full px-2 py-0.5 text-[0.6rem] font-black" style={{ background: priceGreen, color: "#fff" }}>최저가</span>}
-                            {active && <span className="absolute top-3 left-3 w-5 h-5 rounded-full flex items-center justify-center text-[0.65rem] font-black" style={{ background: actionBlue, color: "#fff" }}>✓</span>}
-                            <div className="mt-1"><p className="text-[0.82rem] font-semibold" style={{ color: active ? actionBlue : neutralText }}>{listing.sellerName}</p><p className="mt-0.5 text-[0.7rem]" style={{ color: mutedText }}>@{listing.sellerHandle}</p></div>
-                            <p className="mt-3 text-[1.15rem] font-black" style={{ color: priceGreen }}>{formatPrice(listing.price)}</p>
-                            <div className="flex items-center gap-3 mt-2 text-[0.72rem]" style={{ color: mutedText }}>
-                              <span>수량 {listing.quantity}개</span>
-                              {isFreshListing(listing.postedAt) && <span className="rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold" style={{ background: accentSurface, color: actionBlue }}>방금</span>}
-                            </div>
-                            <div className="mt-3 w-full rounded-[10px] py-2 text-center text-[0.74rem] font-semibold" style={{ background: active ? actionBlue : "rgba(255,255,255,0.7)", border: active ? "none" : `1px solid ${lineColor}`, color: active ? "#fff" : mutedText }}>{active ? "✓ 선택됨" : "이 매물 선택"}</div>
-                          </button>
-                        );
-                      }) : (
-                        <div className="lg:col-span-3 rounded-[16px] px-4 py-8 text-center" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}>
-                          <p className="text-[0.88rem] font-semibold" style={{ color: neutralText }}>등록된 매물이 없어요</p>
-                          <p className="mt-1 text-[0.78rem]" style={{ color: mutedText }}>다른 자산을 선택하거나 나중에 다시 확인해보세요.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
                   <div className="rounded-[22px] overflow-hidden" style={panelStyle}>
                     <div className="grid grid-cols-[minmax(0,1.45fr)_120px_72px_90px_96px] gap-3 px-5 py-3 text-[0.7rem] font-bold uppercase tracking-[0.14em]" style={{ color: mutedText, background: "#eef2f5", borderBottom: `1px solid ${lineColor}` }}>
                       <span>판매자</span><span className="text-right">제시가</span><span className="text-right">수량</span><span className="text-right">등록</span><span className="text-right">선택</span>
@@ -821,12 +784,6 @@ export function Market() {
                     <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>최근 체결</p><p className="font-semibold" style={{ color: neutralText }}>{formatPrice(selectedFragment.lastPrice)}</p></div>
                     <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>판매자 수</p><p className="font-semibold" style={{ color: neutralText }}>{selectedFragmentListings.length}명</p></div>
                     <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>내 보유</p><p className="font-semibold" style={{ color: neutralText }}>{getOwnedCount(selectedFragment)}개 → {selectedListing ? getOwnedCount(selectedFragment) + 1 : getOwnedCount(selectedFragment)}개</p></div>
-                  </div>
-
-                  <div className="rounded-[14px] px-4 py-4 mb-4" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}>
-                    <p className="text-[0.74rem] font-semibold" style={{ color: mutedText }}>조합 연결</p>
-                    <p className="mt-1 text-[0.88rem] font-semibold" style={{ color: neutralText }}>이 파편은 {selectedFragmentResultName} 조합에 사용돼요.</p>
-                    <p className="mt-2 text-[0.76rem] leading-6" style={{ color: mutedText }}>지금 사는 건 완성 카드가 아니라 조합에 필요한 재료 파편입니다. 구매 후 카드 조합으로 이동하면 바로 완성 카드 제작을 이어갈 수 있습니다.</p>
                   </div>
 
                   <Button className="w-full h-12 text-sm font-bold disabled:opacity-50" style={{ background: isPurchasing ? "#888" : selectedListing && selectedListing.sellerHandle !== viewerHandle ? priceGreen : "#c8d6cc", color: "#102015" }}
