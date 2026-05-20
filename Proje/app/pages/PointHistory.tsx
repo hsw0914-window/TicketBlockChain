@@ -90,7 +90,7 @@ export function PointHistory() {
 
       <header className="page-header">
         <div className="page-header-main">
-          <p className="page-eyebrow mb-3" style={{ color: "#2563eb" }}>Membership Points</p>
+          <p className="page-eyebrow mb-3" style={{ color: "#1456a0" }}>Membership Points</p>
           <h1 className="page-title mb-2" style={{ color: "#1f3248" }}>포인트 적립·사용 내역</h1>
           <p className="page-subtitle" style={{ color: "#8a98b0" }}>
             적립과 사용 흐름을 월별로 확인할 수 있습니다.

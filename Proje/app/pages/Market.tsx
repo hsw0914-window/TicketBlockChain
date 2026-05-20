@@ -480,7 +480,7 @@ export function Market() {
           <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} className="grid xl:grid-cols-[minmax(0,1.1fr)_360px] gap-6 items-start">
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-3">
-                <span className="page-eyebrow" style={{ color: actionBlue }}>Fragment Market</span>
+                <span className="page-eyebrow" style={{ color: "#1456a0" }}>Fragment Market</span>
                 <span className="rounded-full px-3 py-1 text-[0.72rem] font-semibold" style={{ background: "#edf7f1", border: "1px solid #cbe1d3", color: priceGreen }}>판매자별 등록가 비교</span>
               </div>
               <h1 className="page-title mb-2" style={{ color: neutralText }}>파편 장터</h1>

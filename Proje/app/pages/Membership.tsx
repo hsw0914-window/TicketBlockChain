@@ -81,7 +81,7 @@ export function Membership() {
     ? Math.min(100, Math.max(0, Math.round(((seasonCount - currentMin) / (membership.nextTierCount - currentMin)) * 100)))
     : membership?.joined ? 100 : 0;
 
-  const actionLabel = membership?.joined ? "티어업" : "멤버십 가입하기";
+  const actionLabel = membership?.joined ? "UP!" : "멤버십 가입하기";
   const canAction = membership?.joined ? Boolean(membership.nextTier && membership.canTierUp) : true;
   const monthlyCanClaim = Boolean(membership?.joined && membership.monthlyRaffleRemaining > 0);
 
@@ -192,10 +192,10 @@ export function Membership() {
 
       <header className="page-header">
         <div className="page-header-main">
-        <p className="page-eyebrow mb-3" style={{ color: "#2563eb" }}>Membership</p>
+        <p className="page-eyebrow mb-3" style={{ color: "#1456a0" }}>Membership</p>
         <h1 className="page-title mb-2" style={{ color: "#1f3248" }}>멤버십</h1>
         <p className="page-subtitle" style={{ color: "#8a98b0" }}>
-          가입 후 입장 기록을 쌓고, 조건 달성 시 직접 티어업하여 혜택을 받을 수 있습니다.
+          가입 후 입장 기록을 쌓고, 조건 달성 시 등급을 상승시켜 혜택을 받을 수 있습니다.
         </p>
         </div>
       </header>

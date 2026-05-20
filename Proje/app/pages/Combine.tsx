@@ -352,7 +352,7 @@ export function Combine() {
     <div className="page-shell page-shell-wide">
       <header className="page-header">
         <div className="page-header-main">
-          <p className="page-eyebrow mb-3" style={{ color: shellTone.accentStrong }}>
+          <p className="page-eyebrow mb-3" style={{ color: "#1456a0" }}>
             COMBINE
           </p>
           <h1 className="page-title mb-2" style={{ color: shellTone.text }}>

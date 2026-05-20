@@ -407,7 +407,7 @@ export function TicketResale() {
       }}>
         <div className="page-strip-wide pt-8 pb-7">
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="page-eyebrow" style={{ color: actionBlue }}>
+            <span className="page-eyebrow" style={{ color: "#1456a0" }}>
               Ticket Exchange
             </span>
             <span className="rounded-full px-3 py-1 text-[0.72rem] font-semibold"
@@ -419,7 +419,7 @@ export function TicketResale() {
             티켓 거래소
           </h1>
           <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>
-            팬들이 직접 올린 티켓을 사고팔고, NFT 소유권 이전 내역을 확인할 수 있어요.
+            예매한 티켓을 양도하거나, 다른 팬이 등록한 티켓을 구매할 수 있어요.
           </p>
         </div>
       </section>

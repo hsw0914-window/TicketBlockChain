@@ -3,8 +3,6 @@ import {
   CheckCircle2,
   Copy,
   Wallet,
-  Ticket,
-  ShoppingBag,
   Fingerprint,
   LogIn,
   Loader2,
@@ -217,7 +215,7 @@ export function MyPage() {
     <div className="page-shell space-y-8">
       <div className="page-header">
         <div>
-          <p className="page-eyebrow mb-3" style={{ color: "#526183" }}>My Page</p>
+          <p className="page-eyebrow mb-3" style={{ color: "#1456a0" }}>My Page</p>
           <h1 className="page-title mb-3" style={{ color: "#1f3248" }}>내 설정</h1>
           
         </div>
@@ -247,21 +245,14 @@ export function MyPage() {
                     {user?.email}
                   </span>
                 )}
-                {isDidVerified && (
-                  <span className="rounded-full border px-2.5 py-1 flex items-center gap-1" style={{ background: "#e8f1ec", borderColor: "#c2d8c9", color: "#3d6b4f" }}>
-                    <CheckCircle2 className="w-3 h-3" />
-                    DID 인증 완료
-                  </span>
-                )}
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             {[
-              { icon: Ticket, label: "입장권 알림", value: preferences.ticketAlerts ? "켜짐" : "꺼짐" },
-              { icon: ShoppingBag, label: "거래 보호", value: preferences.requireTradeSignature ? "서명 확인" : "기본" },
               { icon: Wallet, label: "지갑 상태", value: walletConnected ? "연결됨" : "미연결" },
+              { icon: Fingerprint, label: "DID 인증", value: isDidVerified ? "인증" : "미인증" },
             ].map((item) => {
               const Icon = item.icon;
               return (

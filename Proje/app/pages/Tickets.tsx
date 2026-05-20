@@ -86,7 +86,7 @@ export function Tickets() {
             경기 예매
           </h1>
           <p className="page-subtitle max-w-2xl" style={{ color: "#55657d" }}>
-            블록체인 입장권이 적용된 야구 경기 일정을 예매할 수 있어요.
+            원하는 야구 경기를 선택하고 NFT 입장권을 예매할 수 있어요.
           </p>
         </div>
       </div>
