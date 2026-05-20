@@ -416,7 +416,7 @@ export function TicketResale() {
             </span>
           </div>
           <h1 className="page-title mb-2" style={{ color: neutralText }}>
-            티켓 거래소
+            티켓 양도
           </h1>
           <p className="page-subtitle max-w-3xl" style={{ color: mutedText }}>
             예매한 티켓을 양도하거나, 다른 팬이 등록한 티켓을 구매할 수 있어요.

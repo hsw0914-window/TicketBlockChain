@@ -184,7 +184,7 @@ export function Raffle() {
       <header className="page-header">
         <div className="page-header-main">
           <p className="page-eyebrow text-[#1456a0] mb-3">Priority Raffle</p>
-          <h1 className="page-title mb-2" style={{ color: "#14253f" }}>우선 예매 응모</h1>
+          <h1 className="page-title mb-2" style={{ color: "#14253f" }}>응모&선예매</h1>
           <p className="page-subtitle max-w-2xl" style={{ color: "#586981" }}>
             응모권 NFT로 추첨에 참여하고, 당첨되면 우선 예매를 진행할 수 있어요.
           </p>

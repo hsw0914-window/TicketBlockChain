@@ -507,7 +507,7 @@ export function Market() {
           </motion.div>
 
           <div className="flex flex-wrap gap-3 mt-6">
-            {[{ key: "market", label: "파편 장터", icon: ShoppingCart }, { key: "sell", label: "파편 등록&판매", icon: TbMoneybagPlus }].map((tab) => {
+            {[{ key: "market", label: "파편 장터&구매", icon: ShoppingCart }, { key: "sell", label: "파편 등록&판매", icon: TbMoneybagPlus }].map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.key;
               return (

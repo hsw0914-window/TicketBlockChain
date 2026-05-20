@@ -181,7 +181,7 @@ export function Layout() {
     { path: "/ticket-resale", label: "티켓 양도",    icon: Tag },
     { path: "/market",        label: "파편 장터",    icon: ShoppingBag },
     { path: "/exchange",      label: "교환소",       icon: Gift },
-    { path: "/raffle",        label: "우선 응모",    icon: Trophy },
+    { path: "/raffle",        label: "응모&선예매",    icon: Trophy },
     { path: "/community",     label: "커뮤니티",     icon: MessagesSquare },
     { path: "/notice",        label: "공지사항",     icon: Bell },
     ...(user?.email === "root@gmail.com" ? [{ path: "/entry-scanner", label: "QR 입장", icon: QrCode }] : []),

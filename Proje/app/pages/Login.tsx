@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 
 type View = "login" | "findId" | "findPassword";
+const API_BASE = `${(import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? ""}/api`;
 
 export function Login() {
   const navigate = useNavigate();
@@ -74,7 +75,7 @@ export function Login() {
     if (!findIdNickname.trim()) { setFindIdError("닉네임을 입력해주세요."); return; }
     setIsFindIdLoading(true); setFindIdError(null); setFindIdResult(null);
     try {
-      const res = await fetch("http://localhost:4000/api/auth/find-id", {
+      const res = await fetch(`${API_BASE}/auth/find-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nickname: findIdNickname }),
@@ -93,7 +94,7 @@ export function Login() {
     if (!findPwEmail.trim()) { setFindPwError("이메일을 입력해주세요."); return; }
     setIsFindPwLoading(true); setFindPwError(null); setFindPwResult(null);
     try {
-      const res = await fetch("http://localhost:4000/api/auth/find-password", {
+      const res = await fetch(`${API_BASE}/auth/find-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: findPwEmail }),
