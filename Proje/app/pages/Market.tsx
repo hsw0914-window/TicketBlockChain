@@ -109,6 +109,7 @@ const fragmentSortOptions: Array<{ key: FragmentSort; label: string }> = [
   { key: "price_asc", label: "가격 낮은 순" },
 ];
 const KBO_TEAMS = ["LG", "두산", "KIA", "삼성", "SSG", "롯데", "NC", "키움", "한화", "KT"];
+const FRAGMENTS_PER_PAGE = 8;
 
 function getMarketViewerHandle() {
   return localStorage.getItem("nickname") ?? "unknown";
@@ -148,6 +149,7 @@ export function Market() {
   const [marketViewMode, setMarketViewMode] = useState<"browse" | "detail">("browse");
   const [activeFilter, setActiveFilter] = useState("전체");
   const [fragmentSort, setFragmentSort] = useState<FragmentSort>("price_asc");
+  const [fragmentPage, setFragmentPage] = useState(1);
   const [query, setQuery] = useState("");
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [listingSort, setListingSort] = useState<ListingSort>("price_asc");
@@ -265,6 +267,20 @@ export function Market() {
       return left.floorPrice - right.floorPrice;
     });
   }, [activeFilter, fragmentSort, marketState, query, selectedTeams]);
+
+  const totalFragmentPages = Math.max(1, Math.ceil(filteredFragments.length / FRAGMENTS_PER_PAGE));
+  const paginatedFragments = useMemo(() => {
+    const start = (fragmentPage - 1) * FRAGMENTS_PER_PAGE;
+    return filteredFragments.slice(start, start + FRAGMENTS_PER_PAGE);
+  }, [filteredFragments, fragmentPage]);
+
+  useEffect(() => {
+    setFragmentPage(1);
+  }, [activeFilter, fragmentSort, query, selectedTeams]);
+
+  useEffect(() => {
+    if (fragmentPage > totalFragmentPages) setFragmentPage(totalFragmentPages);
+  }, [fragmentPage, totalFragmentPages]);
 
   const ownedFragments = useMemo(() => marketState.filter((f) => getOwnedCount(f) > 0), [marketState]);
   const sellableFragments = useMemo(() => filteredFragments.filter((f) => getOwnedCount(f) > 0), [filteredFragments]);
@@ -555,13 +571,6 @@ export function Market() {
             <div className="flex gap-6 items-start">
               <aside className="w-[220px] shrink-0 sticky top-6 space-y-4">
                 <div className="rounded-[18px] p-4" style={panelStyle}>
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: mutedText }} />
-                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="파편 검색" className="w-full rounded-[12px] pl-8 pr-3 py-2.5 text-[0.82rem] outline-none" style={inputStyle} />
-                  </div>
-                </div>
-
-                <div className="rounded-[18px] p-4" style={panelStyle}>
                   <p className="text-[0.7rem] font-bold uppercase tracking-[0.14em] mb-3" style={{ color: mutedText }}>보기 방식</p>
                   {filterOptions.map((filter) => (
                     <label key={filter} className="flex items-center gap-2.5 cursor-pointer py-1.5">
@@ -606,20 +615,6 @@ export function Market() {
                   </div>
                 )}
 
-                <div className="rounded-[18px] p-4" style={panelStyle}>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-[0.7rem] font-bold uppercase tracking-[0.14em]" style={{ color: mutedText }}>내 파편</p>
-                    <span className="text-[0.68rem] font-semibold" style={{ color: mutedText }}>{ownedFragments.length}종</span>
-                  </div>
-                  <div className="space-y-2">
-                    {ownedFragments.length > 0 ? ownedFragments.slice(0, 3).map((fragment) => (
-                      <button key={fragment.id} onClick={() => openMarketDetail(fragment)} className="w-full rounded-[12px] px-3 py-3 text-left" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}>
-                        <p className="text-[0.78rem] font-semibold truncate" style={{ color: neutralText }}>{fragment.fragmentName}</p>
-                        <p className="mt-1 text-[0.7rem]" style={{ color: mutedText }}>보유 {getOwnedCount(fragment)}개 · {getFragmentResultName(fragment)}</p>
-                      </button>
-                    )) : <p className="text-[0.76rem] leading-6" style={{ color: mutedText }}>아직 가진 파편이 없어요. 필요한 조합 재료를 먼저 골라보세요.</p>}
-                  </div>
-                </div>
               </aside>
 
               <div className="flex-1 min-w-0">
@@ -628,7 +623,7 @@ export function Market() {
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {filteredFragments.map((fragment, index) => (
+                  {paginatedFragments.map((fragment, index) => (
                     <motion.button key={fragment.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }} onClick={() => openMarketDetail(fragment)}
                       className="text-left rounded-[22px] overflow-hidden transition-all hover:-translate-y-1 hover:shadow-md" style={panelStyle}>
                       <div className="w-full h-[280px] overflow-hidden relative" style={{ background: fragment.imageUrl ? "transparent" : `linear-gradient(135deg, ${fragment.color}22, ${fragment.color}08)` }}>
@@ -660,6 +655,36 @@ export function Market() {
                     <button onClick={() => { setSelectedTeams([]); setActiveFilter("전체"); setQuery(""); }} className="mt-4 rounded-[12px] px-4 py-2 text-[0.8rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>필터 초기화</button>
                   </div>
                 )}
+
+                {filteredFragments.length > 0 && (
+                  <div className="mt-6 flex justify-center gap-2">
+                    {Array.from({ length: totalFragmentPages }, (_, index) => index + 1).map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => setFragmentPage(page)}
+                        className="h-9 min-w-9 px-3 text-[0.82rem] font-semibold transition-colors"
+                        style={{
+                          background: fragmentPage === page ? actionBlue : "#fff",
+                          border: `1px solid ${fragmentPage === page ? actionBlue : lineColor}`,
+                          color: fragmentPage === page ? "#fff" : mutedText,
+                        }}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="relative mx-auto mt-4 w-full max-w-[680px]">
+                  <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: mutedText }} />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="파편 검색"
+                    className="w-full rounded-none pl-10 pr-4 py-3 text-[0.9rem] outline-none"
+                    style={inputStyle}
+                  />
+                </div>
               </div>
             </div>
           ) : (
