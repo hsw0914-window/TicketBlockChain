@@ -7,7 +7,7 @@ if [ "$#" -lt 1 ]; then
 fi
 
 CC_NAME=$1
-CC_VERSION=${2:-2}
+CC_VERSION=${2:-1}
 CC_SEQUENCE=${3:-1}
 
 ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
