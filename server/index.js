@@ -79,7 +79,15 @@ async function start() {
     }
   } catch (_) {}
   for (const walletAddress of seedWallets) {
-    mockFabric.seedUser({ walletAddress, pointBalance: 10000, totalEarned: 15000, totalUsed: 5000, entryCount: 7 });
+    await mockFabric.seedUser({
+      walletAddress,
+      pointBalance: 10000,
+      totalEarned: 10000,
+      totalUsed: 0,
+      entryCount: 7,
+      joined: true,
+      grade: 'SILVER',
+    });
   }
   console.log(`[Seed] 포인트 시드 완료: ${seedWallets.join(', ')}`);
 

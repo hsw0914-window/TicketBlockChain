@@ -148,6 +148,40 @@ async function verifyEntry({ ticketId, tokenId, walletAddress, gateId }) {
   };
 }
 
+async function completePointCardExchange({ exchangeId, userDidHash, cardTypeId, nftId, mintTxHash }) {
+  const record = _store.exchanges[exchangeId];
+  if (!record) throw new Error(`EXCHANGE_NOT_FOUND: ${exchangeId}`);
+  if (record.userDidHash !== userDidHash) throw new Error('EXCHANGE_OWNER_MISMATCH');
+  if (record.itemType !== 'CARD_NFT') throw new Error(`INVALID_EXCHANGE_ITEM: ${record.itemType}`);
+  if (record.status !== 'MINT_REQUESTED' && record.status !== 'MINT_COMPLETED') {
+    throw new Error(`INVALID_EXCHANGE_STATUS: ${record.status}`);
+  }
+
+  record.status = 'MINT_COMPLETED';
+  record.cardTypeId = String(cardTypeId);
+  record.nftId = nftId;
+  record.mintTxHash = mintTxHash;
+  record.completedAt = now();
+  _store.exchanges[exchangeId] = record;
+
+  _emitEvent('CARD_NFT_MINT_COMPLETED', {
+    exchangeId,
+    userDidHash,
+    cardTypeId: record.cardTypeId,
+    nftId,
+    mintTxHash,
+  });
+
+  console.log(`[MockFabric] CompletePointCardExchange: ${exchangeId} -> ${nftId}`);
+  return { ...record, txId: `mock-tx-${uuidv4().slice(0, 8)}` };
+}
+
+async function getExchangeRecord({ exchangeId }) {
+  const record = _store.exchanges[exchangeId];
+  if (!record) throw new Error(`EXCHANGE_NOT_FOUND: ${exchangeId}`);
+  return record;
+}
+
 // ─── 3. EarnPointByEntry (내부 호출용) ────────────────────
 async function _earnPointByEntry(userDidHash, price) {
   const membership = _getOrCreateMembership(userDidHash);
@@ -751,7 +785,7 @@ function _emitEvent(name, payload) {
 }
 
 // ─── 서버 시작 시 테스트 계정 포인트/멤버십 사전 세팅 ────────
-function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCount, joined = false }) {
+function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCount, joined = false, grade }) {
   const userDidHash = hashDid(walletAddress);
 
   _store.points[userDidHash] = {
@@ -763,8 +797,8 @@ function seedUser({ walletAddress, pointBalance, totalEarned, totalUsed, entryCo
   };
 
   _store.memberships[userDidHash] = {
-      userDidHash,
-      grade:                        calcGrade(entryCount),
+    userDidHash,
+    grade:                        grade || calcGrade(entryCount),
       joined,
     entryCount,
     monthlyRaffleExchangeCount:   0,
@@ -803,6 +837,8 @@ module.exports = {
   earnPointFromTrade,
   usePointForTicket,
   exchangePointItem,
+  completePointCardExchange,
+  getExchangeRecord,
   requestRefund,
   completeRefund,
   cancelGameRefundAll,

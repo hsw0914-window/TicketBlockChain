@@ -1112,6 +1112,13 @@ async function initDB() {
     [TEST_USER.user_id, TEST_USER.nickname, TEST_USER.email, testPasswordHash]
   );
   await conn.query(
+    `UPDATE users
+        SET membership_tier = '실버',
+            membership_joined_at = NOW()
+      WHERE user_id = ?`,
+    [TEST_USER.user_id]
+  );
+  await conn.query(
     `INSERT INTO user_wallets (user_id, wallet_address, is_verified, verified_at)
      VALUES (?, ?, TRUE, NOW())`,
     [TEST_USER.user_id, TEST_USER.wallet_address]

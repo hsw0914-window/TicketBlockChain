@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,6 +82,10 @@ type ExchangeRecord struct {
 	PointUsed   float64 `json:"pointUsed"`
 	Status      string  `json:"status"`
 	RequestedAt string  `json:"requestedAt"`
+	CardTypeId  string  `json:"cardTypeId"`
+	NftId       string  `json:"nftId"`
+	MintTxHash  string  `json:"mintTxHash"`
+	CompletedAt string  `json:"completedAt"`
 }
 
 type SettlementRecord struct {
@@ -405,6 +410,81 @@ func (t *TicketChaincode) JoinMembership(
 	return string(out), nil
 }
 
+func (t *TicketChaincode) SeedUserForTest(
+	ctx contractapi.TransactionContextInterface,
+	userDidHash string,
+	pointBalanceStr string,
+	totalEarnedStr string,
+	totalUsedStr string,
+	entryCountStr string,
+	grade string,
+	joinedStr string,
+) (string, error) {
+	pointBalance, err := strconv.ParseFloat(pointBalanceStr, 64)
+	if err != nil {
+		return "", fmt.Errorf("INVALID_POINT_BALANCE")
+	}
+	totalEarned, err := strconv.ParseFloat(totalEarnedStr, 64)
+	if err != nil {
+		return "", fmt.Errorf("INVALID_TOTAL_EARNED")
+	}
+	totalUsed, err := strconv.ParseFloat(totalUsedStr, 64)
+	if err != nil {
+		return "", fmt.Errorf("INVALID_TOTAL_USED")
+	}
+	entryCount, err := strconv.Atoi(entryCountStr)
+	if err != nil {
+		return "", fmt.Errorf("INVALID_ENTRY_COUNT")
+	}
+
+	joined := strings.EqualFold(joinedStr, "true") || joinedStr == "1" || strings.EqualFold(joinedStr, "yes")
+	normalizedGrade := strings.ToUpper(strings.TrimSpace(grade))
+	if normalizedGrade == "" {
+		normalizedGrade = "BASIC"
+	}
+	validGrades := map[string]bool{"BASIC": true, "BRONZE": true, "SILVER": true, "GOLD": true}
+	if !validGrades[normalizedGrade] {
+		return "", fmt.Errorf("INVALID_MEMBERSHIP_GRADE: %s", grade)
+	}
+
+	point := &PointRecord{
+		UserDidHash:   userDidHash,
+		Balance:       pointBalance,
+		TotalEarned:   totalEarned,
+		TotalUsed:     totalUsed,
+		LastUpdatedAt: nowISO(ctx),
+	}
+	if err = putPoint(ctx, point); err != nil {
+		return "", err
+	}
+
+	membership := &MembershipRecord{
+		UserDidHash:                 userDidHash,
+		Grade:                       normalizedGrade,
+		Joined:                      joined,
+		EntryCount:                  entryCount,
+		MonthlyRaffleExchangeCount:  0,
+		MonthlyCardExchangeCount:    0,
+		MonthlyRaffleSubmitCount:    0,
+		LastResetMonth:              currentMonth(ctx),
+		UpdatedAt:                   nowISO(ctx),
+	}
+	if err = putMembership(ctx, membership); err != nil {
+		return "", err
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"userDidHash": userDidHash,
+		"balance":     point.Balance,
+		"totalEarned": point.TotalEarned,
+		"totalUsed":   point.TotalUsed,
+		"grade":       membership.Grade,
+		"joined":      membership.Joined,
+		"entryCount":  membership.EntryCount,
+	})
+	return string(out), nil
+}
+
 func (t *TicketChaincode) TierUpMembership(
 	ctx contractapi.TransactionContextInterface,
 	userDidHash, targetGrade string,
@@ -699,6 +779,87 @@ func (t *TicketChaincode) ExchangePointItem(
 		"status":           "MINT_REQUESTED",
 	})
 	return string(out), nil
+}
+
+func (t *TicketChaincode) CompletePointCardExchange(
+	ctx contractapi.TransactionContextInterface,
+	exchangeId, userDidHash, cardTypeId, nftId, mintTxHash string,
+) (string, error) {
+	if exchangeId == "" {
+		return "", fmt.Errorf("EXCHANGE_ID_REQUIRED")
+	}
+	if userDidHash == "" {
+		return "", fmt.Errorf("USER_DID_HASH_REQUIRED")
+	}
+	if cardTypeId == "" {
+		return "", fmt.Errorf("CARD_TYPE_ID_REQUIRED")
+	}
+	if nftId == "" {
+		return "", fmt.Errorf("NFT_ID_REQUIRED")
+	}
+	if mintTxHash == "" {
+		return "", fmt.Errorf("MINT_TX_HASH_REQUIRED")
+	}
+
+	b, err := ctx.GetStub().GetPrivateData(collectionOrg1, keyPrefixExchange+exchangeId)
+	if err != nil {
+		return "", err
+	}
+	if b == nil {
+		return "", fmt.Errorf("EXCHANGE_NOT_FOUND: %s", exchangeId)
+	}
+
+	var rec ExchangeRecord
+	if err = json.Unmarshal(b, &rec); err != nil {
+		return "", err
+	}
+	if rec.UserDidHash != userDidHash {
+		return "", fmt.Errorf("EXCHANGE_OWNER_MISMATCH")
+	}
+	if rec.ItemType != "CARD_NFT" {
+		return "", fmt.Errorf("INVALID_EXCHANGE_ITEM: %s", rec.ItemType)
+	}
+	if rec.Status == "MINT_COMPLETED" {
+		out, _ := json.Marshal(rec)
+		return string(out), nil
+	}
+	if rec.Status != "MINT_REQUESTED" {
+		return "", fmt.Errorf("INVALID_EXCHANGE_STATUS: %s", rec.Status)
+	}
+
+	rec.Status = "MINT_COMPLETED"
+	rec.CardTypeId = cardTypeId
+	rec.NftId = nftId
+	rec.MintTxHash = mintTxHash
+	rec.CompletedAt = nowISO(ctx)
+
+	rb, err := json.Marshal(rec)
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.GetStub().PutPrivateData(collectionOrg1, keyPrefixExchange+exchangeId, rb); err != nil {
+		return "", err
+	}
+
+	out, _ := json.Marshal(rec)
+	return string(out), nil
+}
+
+func (t *TicketChaincode) GetExchangeRecord(
+	ctx contractapi.TransactionContextInterface,
+	exchangeId string,
+) (string, error) {
+	if exchangeId == "" {
+		return "", fmt.Errorf("EXCHANGE_ID_REQUIRED")
+	}
+	b, err := ctx.GetStub().GetPrivateData(collectionOrg1, keyPrefixExchange+exchangeId)
+	if err != nil {
+		return "", err
+	}
+	if b == nil {
+		return "", fmt.Errorf("EXCHANGE_NOT_FOUND: %s", exchangeId)
+	}
+	return string(b), nil
 }
 
 // ─── 환불율 계산 ──────────────────────────────────────────

@@ -126,6 +126,23 @@ async function exchangePointItem({ userDidHash, itemType }) {
   return JSON.parse(raw);
 }
 
+async function completePointCardExchange({ exchangeId, userDidHash, cardTypeId, nftId, mintTxHash }) {
+  const raw = await submitTx(
+    'CompletePointCardExchange',
+    exchangeId,
+    userDidHash,
+    String(cardTypeId),
+    nftId,
+    mintTxHash,
+  );
+  return raw ? JSON.parse(raw) : { success: true, exchangeId };
+}
+
+async function getExchangeRecord({ exchangeId }) {
+  const raw = await evaluateTx('GetExchangeRecord', exchangeId);
+  return raw ? JSON.parse(raw) : null;
+}
+
 // ─── 7. RequestRefund ────────────────────────────────────
 async function requestRefund({ ticketId, refundReason }) {
   const raw = await submitTx('RequestRefund', ticketId, refundReason || '사용자 요청');
@@ -265,8 +282,28 @@ async function transferTicket({ ticketId, fromWalletAddress, toWalletAddress, tr
   return raw ? JSON.parse(raw) : { success: true };
 }
 
-// seedUser는 mock 전용 — real Fabric에서는 불필요
-function seedUser() {}
+async function seedUser({
+  walletAddress,
+  pointBalance = 10000,
+  totalEarned = pointBalance,
+  totalUsed = 0,
+  entryCount = 0,
+  joined = true,
+  grade = 'SILVER',
+}) {
+  const userDidHash = hashDid(walletAddress);
+  const raw = await submitTx(
+    'SeedUserForTest',
+    userDidHash,
+    String(pointBalance),
+    String(totalEarned),
+    String(totalUsed),
+    String(entryCount),
+    grade,
+    joined ? 'true' : 'false',
+  );
+  return raw ? JSON.parse(raw) : { success: true, userDidHash };
+}
 
 module.exports = {
   hashDid,
@@ -276,6 +313,8 @@ module.exports = {
   tierUpMembership,
   usePointForTicket,
   exchangePointItem,
+  completePointCardExchange,
+  getExchangeRecord,
   requestRefund,
   completeRefund,
   cancelGameRefundAll,
