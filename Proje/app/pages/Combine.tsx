@@ -218,7 +218,7 @@ export function Combine() {
       type: "card" as const,
       name: first.resultName,
       image: first.image,
-      description: `${first.name} 2개를 모아 ${first.resultName} 완성 카드가 만들어집니다.`,
+      description: `같은 파편을 조합하여 ${first.resultName} 원본 굿즈 카드를 완성할 수 있어요.`,
     };
   }, [canCombine, selectedFragmentObjects]);
 
@@ -353,13 +353,13 @@ export function Combine() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="page-eyebrow mb-3" style={{ color: shellTone.accentStrong }}>
-            FAN ASSET
+            COMBINE
           </p>
           <h1 className="page-title mb-2" style={{ color: shellTone.text }}>
-            팬 자산 공방
+            카드 조합
           </h1>
           <p className="page-subtitle" style={{ color: shellTone.muted }}>
-            박스를 열어 파편을 얻고, 같은 파편을 모아 완성 카드로 교환할 수 있어요.
+            박스에서 얻은 파편을 조합하여 굿즈 카드를 얻을 수 있어요.
           </p>
         </div>
 
@@ -644,23 +644,20 @@ export function Combine() {
 
               <Card className="p-8 relative overflow-hidden" style={shellTone.panelStrong}>
                 <div className="relative z-10 space-y-8">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
                     <div>
-                      <h2 className="section-title" style={{ color: shellTone.text }}>완성 미리보기</h2>
+                      <h2 className="section-title" style={{ color: shellTone.text }}>조합 미리보기</h2>
                       <p className="mt-2 text-sm leading-6" style={{ color: shellTone.muted }}>
                         현재 선택한 파편이 오른쪽 결과 카드로 어떻게 이어지는지 바로 확인할 수 있어요.
                       </p>
                     </div>
-                    <span className="rounded-full px-3.5 py-1.5 text-[0.72rem] font-semibold" style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}>
-                      2개 선택 기준
-                    </span>
                   </div>
 
-                  <div className="flex items-center gap-4 lg:gap-6">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 lg:gap-6">
                       {[0, 1].map((index) => {
                         const fragment = selectedFragmentObjects[index];
                         return (
-                          <div key={index} className="flex-1">
+                          <div key={index} className="min-w-0">
                             <div
                               className="aspect-square rounded-[22px] flex items-center justify-center relative overflow-hidden"
                               style={fragment ? shellTone.panelSoft : { ...shellTone.surface, border: `2px dashed ${shellTone.dashed}` }}
@@ -684,15 +681,15 @@ export function Combine() {
                         );
                       })}
 
-                    <div className="flex-shrink-0 flex justify-center">
-                      <div className="p-3 rounded-full" style={shellTone.surface}>
+                    <div className="flex justify-center pt-[calc(50%-1.75rem)]">
+                      <div className="p-3 rounded-full shrink-0" style={shellTone.surface}>
                         <ArrowRight className="w-8 h-8" style={{ color: shellTone.accent }} />
                       </div>
                     </div>
 
-                    <div className="flex-1 space-y-4">
+                    <div className="min-w-0 space-y-4">
                       <div
-                        className={`aspect-square rounded-[24px] flex items-center justify-center relative overflow-hidden ${canCombine ? "animate-pulse" : ""}`}
+                        className={`aspect-square rounded-[22px] flex items-center justify-center relative overflow-hidden ${canCombine ? "animate-pulse" : ""}`}
                         style={canCombine ? shellTone.panelSoft : { ...shellTone.surface, border: `2px dashed ${shellTone.dashed}` }}
                       >
                         {canCombine && expectedCombineResult ? (
@@ -718,7 +715,7 @@ export function Combine() {
                         </div>
                       ) : (
                         <p className="text-sm leading-6" style={{ color: shellTone.muted }}>
-                          같은 파편을 2번 선택하면 완성 카드 이름과 결과 방향이 바로 표시됩니다.
+                          같은 파편을 조합하여 원본 굿즈 카드를 완성하세요.
                         </p>
                       )}
                     </div>
@@ -730,7 +727,7 @@ export function Combine() {
                         같은 파편 2개를 아직 고르지 않았어요
                       </p>
                       <p className="mt-2 text-[0.78rem] leading-6" style={{ color: shellTone.muted }}>
-                        왼쪽에서 같은 파편을 두 번 선택하세요. 수량이 1개뿐이면 장터에서 같은 파편을 하나 더 구매한 뒤 완성할 수 있습니다.
+                        수량이 1개뿐이라면 상자 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후 완성할 수 있습니다.
                       </p>
                     </div>
                   )}
@@ -743,7 +740,7 @@ export function Combine() {
                     style={{ background: shellTone.accentStrong, color: "#ffffff" }}
                   >
                     <Layers className="w-5 h-5 mr-2" />
-                    {combining ? "완성 중..." : "완성 카드 만들기"}
+                    {combining ? "완성 중..." : "원본 굿즈 카드 만들기"}
                   </Button>
                 </div>
               </Card>
