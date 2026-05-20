@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   ArrowRight,
@@ -104,6 +104,7 @@ export function Combine() {
   const navigate = useNavigate();
   const { theme, walletAddress } = useAppSettings();
   const isDark = theme === "dark";
+  const rightColumnRef = useRef<HTMLDivElement | null>(null);
 
   // ── 데이터 상태
   const [fragmentInventory, setFragmentInventory] = useState<InventoryFragment[]>([]);
@@ -122,6 +123,7 @@ export function Combine() {
   const [viewMode, setViewMode] = useState<ViewMode>("combine");
   const [opening, setOpening] = useState(false);
   const [openResult, setOpenResult] = useState<RewardResult | null>(null);
+  const [rightColumnHeight, setRightColumnHeight] = useState<number | null>(null);
 
   // ── 인벤토리 로드 ─────────────────────────────────────────
   useEffect(() => {
@@ -154,6 +156,26 @@ export function Combine() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const target = rightColumnRef.current;
+    if (!target) return;
+
+    const updateHeight = () => {
+      setRightColumnHeight(Math.ceil(target.getBoundingClientRect().height));
+    };
+
+    updateHeight();
+
+    if ("ResizeObserver" in window) {
+      const observer = new ResizeObserver(updateHeight);
+      observer.observe(target);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateHeight);
+    return () => window.removeEventListener("resize", updateHeight);
+  }, [viewMode]);
 
   // ── 테마
   const shellTone = isDark
@@ -386,7 +408,10 @@ export function Combine() {
       </header>
 
       <div className="grid lg:grid-cols-[390px_1fr] gap-6">
-        <div className="space-y-4 lg:self-stretch lg:flex lg:flex-col lg:min-h-0">
+        <div
+          className="space-y-4 lg:h-[var(--combine-panel-height)] lg:self-start lg:flex lg:flex-col lg:min-h-0"
+          style={{ "--combine-panel-height": rightColumnHeight ? `${rightColumnHeight}px` : "auto" } as React.CSSProperties}
+        >
           <Card className="p-4" style={shellTone.panelStrong}>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
@@ -542,7 +567,7 @@ export function Combine() {
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div ref={rightColumnRef} className="space-y-6">
           {viewMode === "openBox" ? (
             <>
               <Card className="p-6 relative overflow-hidden" style={shellTone.panel}>
