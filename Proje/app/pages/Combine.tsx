@@ -565,64 +565,97 @@ export function Combine() {
               </Card>
 
               <Card className="p-8 relative overflow-hidden" style={shellTone.panelStrong}>
-                <div className="relative z-10 grid xl:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
-                  <div className="space-y-5">
-                    <div>
-                      <p className="text-[0.72rem] font-semibold tracking-[0.18em] uppercase" style={{ color: shellTone.muted }}>Random Box</p>
-                      <h2 className="mt-2 section-title" style={{ color: shellTone.text }}>랜덤 박스 바로 열기</h2>
-                      <p className="mt-2 text-sm leading-6" style={{ color: shellTone.muted }}>
-                        어떤 파편이 나올지 모르는 박스를 열고, 필요한 파편을 모아 원본 굿즈 카드로 조합해보세요.
+                <div className="relative z-10 space-y-8">
+                  <div>
+                    <h2 className="section-title" style={{ color: shellTone.text }}>박스 개봉</h2>
+                    <p className="mt-2 text-sm leading-6" style={{ color: shellTone.muted }}>
+                      어떤 파편이 나올지 모르는 박스를 열고, 필요한 파편을 모아 원본 굿즈 카드로 조합해보세요.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 lg:gap-6">
+                    <div className="min-w-0">
+                      <div className="aspect-square rounded-[22px] flex items-center justify-center relative overflow-hidden" style={shellTone.panelSoft}>
+                        <Package className="w-20 h-20" style={{ color: "#d39a49" }} />
+                      </div>
+                      <p className="text-xs text-center mt-3 leading-5" style={{ color: shellTone.text }}>
+                        랜덤 박스
                       </p>
                     </div>
-                    <div className="rounded-[22px] p-5 flex items-center gap-5" style={shellTone.surface}>
-                      <div className="w-24 h-24 rounded-[20px] flex items-center justify-center text-5xl" style={shellTone.panelSoft}>📦</div>
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}>랜덤 박스</span>
-                          <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: "#d39a49", color: "#ffffff" }}>보유 {seasonBoxCount}개</span>
+
+                    <div className="min-w-0">
+                      <div className="aspect-square rounded-[22px] p-5 overflow-hidden" style={shellTone.surface}>
+                        <p className="text-sm font-semibold mb-3" style={{ color: shellTone.text }}>나올 수 있는 보상</p>
+                        <div className="space-y-3 h-[calc(100%-2rem)] overflow-y-auto pr-1">
+                          {(allBoxRewards.length > 0 ? allBoxRewards : boxRewardsPreview).map((reward, index) => (
+                            <div key={index} className="flex items-center gap-3 rounded-[16px] px-3 py-3" style={shellTone.panelSoft}>
+                              <div className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0" style={shellTone.surface}>
+                                {reward.image ? (
+                                  <img src={reward.image} alt={reward.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <span className="text-2xl">🃏</span>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold truncate" style={{ color: shellTone.text }}>{reward.name}</p>
+                                {reward.type && (
+                                  <span className="text-[0.65rem] px-2 py-0.5 rounded-full font-medium mt-0.5 inline-block" style={{ background: reward.type === 'goods' ? '#d39a49' : shellTone.accentSoft, color: reward.type === 'goods' ? '#ffffff' : shellTone.accent }}>
+                                    {reward.type === 'goods' ? '원본 NFT' : '파편'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                          {allBoxRewards.length === 0 && boxRewardsPreview.length === 0 && (
+                            <p className="text-sm text-center py-8" style={{ color: shellTone.muted }}>보상 목록을 불러오는 중이에요.</p>
+                          )}
                         </div>
-                        <p className="text-lg font-bold" style={{ color: shellTone.text }}>랜덤 박스</p>
-                        <p className="text-sm leading-6" style={{ color: shellTone.muted }}>별도 선택 없이 바로 열리며, 개봉 결과는 왼쪽 인벤토리에 자동 반영됩니다.</p>
+                      </div>
+                      <p className="text-xs text-center mt-3 leading-5" style={{ color: shellTone.muted }}>
+                        박스를 열면 목록 중 하나가 지급됩니다
+                      </p>
+                    </div>
+
+                    <div className="flex justify-center pt-[calc(50%-1.75rem)]">
+                      <div className="p-3 rounded-full shrink-0" style={shellTone.surface}>
+                        <ArrowRight className="w-8 h-8" style={{ color: shellTone.accent }} />
                       </div>
                     </div>
-                  </div>
 
-                  <div className="rounded-[20px] p-5" style={shellTone.surface}>
-                    <p className="text-sm font-semibold mb-3" style={{ color: shellTone.text }}>나올 수 있는 보상</p>
-                    <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                      {(allBoxRewards.length > 0 ? allBoxRewards : boxRewardsPreview).map((reward, index) => (
-                        <div key={index} className="flex items-center gap-3 rounded-[16px] px-3 py-3" style={shellTone.panelSoft}>
-                          <div className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0" style={shellTone.surface}>
-                            {reward.image ? (
-                              <img src={reward.image} alt={reward.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <span className="text-2xl">🃏</span>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold truncate" style={{ color: shellTone.text }}>{reward.name}</p>
-                            {reward.type && (
-                              <span className="text-[0.65rem] px-2 py-0.5 rounded-full font-medium mt-0.5 inline-block" style={{ background: reward.type === 'goods' ? '#d39a49' : shellTone.accentSoft, color: reward.type === 'goods' ? '#ffffff' : shellTone.accent }}>
-                                {reward.type === 'goods' ? '원본 NFT' : '파편'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                    <div className="min-w-0 space-y-4">
+                      <div
+                        className="aspect-square rounded-[22px] flex items-center justify-center relative overflow-hidden"
+                        style={{ ...shellTone.surface, border: `2px dashed ${shellTone.dashed}` }}
+                      >
+                        <Sparkles className="w-16 h-16" style={{ color: shellTone.muted }} />
+                      </div>
+                      <p className="text-sm leading-6" style={{ color: shellTone.muted }}>
+                        개봉 결과는 왼쪽 인벤토리에<br />
+                        자동으로 반영됩니다.
+                      </p>
                     </div>
                   </div>
-                </div>
 
-                <Button
-                  onClick={handleOpenBox}
-                  disabled={!canOpen || opening}
-                  size="lg"
-                  className="mt-6 w-full font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: shellTone.accentStrong, color: "#ffffff" }}
-                >
-                  <Package className="w-5 h-5 mr-2" />
-                  {opening ? "박스 여는 중..." : "랜덤 박스 열기"}
-                </Button>
+                  <div className="rounded-[18px] px-4 py-4" style={shellTone.surface}>
+                    <p className="text-[0.82rem] font-semibold" style={{ color: shellTone.text }}>
+                      보유한 랜덤 박스 {seasonBoxCount}개
+                    </p>
+                    <p className="mt-2 text-[0.78rem] leading-6" style={{ color: shellTone.muted }}>
+                      랜덤 박스를 열어 파편을 획득하고, 같은 파편 2개를 모아 원본 굿즈 카드로 조합할 수 있습니다.
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={handleOpenBox}
+                    disabled={!canOpen || opening}
+                    size="lg"
+                    className="w-full font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ background: shellTone.accentStrong, color: "#ffffff" }}
+                  >
+                    <Package className="w-5 h-5 mr-2" />
+                    {opening ? "박스 여는 중..." : "랜덤 박스 열기"}
+                  </Button>
+                </div>
               </Card>
             </>
           ) : (
