@@ -6,8 +6,8 @@ import {
   Package,
   Search,
   ShoppingCart,
-  SlidersHorizontal,
 } from "lucide-react";
+import { TbMoneybagPlus } from "react-icons/tb";
 import { Button } from "../components/ui/button";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
@@ -509,7 +509,7 @@ export function Market() {
           </motion.div>
 
           <div className="flex flex-wrap gap-3 mt-6">
-            {[{ key: "market", label: "파편 장터", icon: ShoppingCart }, { key: "sell", label: "내 파편 판매", icon: Package }].map((tab) => {
+            {[{ key: "market", label: "파편 장터", icon: ShoppingCart }, { key: "sell", label: "파편 등록&판매", icon: TbMoneybagPlus }].map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.key;
               return (
@@ -653,63 +653,15 @@ export function Market() {
             </div>
           ) : (
             <div className="grid xl:grid-cols-[280px_minmax(0,1fr)_340px] gap-5 items-start">
-              <motion.aside initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }} className="space-y-4">
-                <div className="rounded-[22px] p-4" style={panelStyle}>
-                  <div className="flex items-center justify-between gap-3 mb-4">
-                    <div><p className="market-eyebrow" style={{ color: mutedText }}>브라우즈</p><p className="mt-1 text-[0.92rem] font-semibold" style={{ color: neutralText }}>파편 탐색</p></div>
-                    <SlidersHorizontal className="w-4 h-4" style={{ color: mutedText }} />
-                  </div>
-                  <div className="relative mb-4">
-                    <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: mutedText }} />
-                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="구단명 또는 자산명 검색" className="w-full rounded-[14px] pl-10 pr-4 py-3 text-[0.92rem] outline-none" style={inputStyle} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {filterOptions.map((filter) => (
-                      <button key={filter} onClick={() => setActiveFilter(filter)} className="rounded-[12px] px-3 py-2.5 text-[0.78rem] font-semibold transition-all" style={{ background: activeFilter === filter ? accentSurface : subtleSurface, border: activeFilter === filter ? `1px solid ${accentBorder}` : `1px solid ${lineColor}`, color: activeFilter === filter ? neutralText : mutedText }}>{filter}</button>
-                    ))}
-                  </div>
-                  <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${lineColor}` }}>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <p className="text-[0.72rem] font-semibold" style={{ color: mutedText }}>카테고리</p>
-                      {(selectedTeams.length > 0 || query.trim()) && <button onClick={resetCategoryFilters} className="text-[0.68rem] font-semibold" style={{ color: actionBlue }}>초기화</button>}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {KBO_TEAMS.map((team) => <button key={team} onClick={() => toggleTeam(team)} className="rounded-full px-2.5 py-1 text-[0.68rem] font-semibold" style={{ background: selectedTeams.includes(team) ? accentSurface : subtleSurface, border: selectedTeams.includes(team) ? `1px solid ${accentBorder}` : `1px solid ${lineColor}`, color: selectedTeams.includes(team) ? actionBlue : mutedText }}>{team}</button>)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-[22px] overflow-hidden" style={panelStyle}>
-                  <div className="px-4 py-3 border-b" style={{ borderColor: lineColor }}>
-                    <p className="text-[0.92rem] font-semibold" style={{ color: neutralText }}>파편 목록</p>
-                    <p className="mt-0.5 text-[0.72rem]" style={{ color: mutedText }}>구매할 파편을 선택하세요</p>
-                  </div>
-                  <div className="max-h-[720px] overflow-auto">
-                    {filteredFragments.map((fragment, index) => {
-                      const selected = fragment.id === selectedId;
-                      return (
-                        <motion.button key={fragment.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }}
-                          onClick={() => { setSelectedId(fragment.id); setSellPrice(fragment.floorPrice + 1200); setSellQuantity(Math.min(2, Math.max(getOwnedCount(fragment), 1))); }}
-                          className="w-full px-4 py-4 text-left border-b last:border-b-0 transition-colors" style={{ borderColor: lineColor, background: selected ? accentSurface : "transparent" }}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[0.68rem] font-bold" style={{ background: `${fragment.color}18`, border: `1px solid ${fragment.color}33`, color: fragment.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: fragment.color }} />{fragment.idol}</span>
-                                <span className="text-[0.72rem]" style={{ color: mutedText }}>보유 {getOwnedCount(fragment)}개</span>
-                              </div>
-                              <p className="text-[0.94rem] font-semibold leading-6" style={{ color: neutralText }}>{fragment.fragmentName}</p>
-                              <p className="mt-1 text-[0.76rem]" style={{ color: mutedText }}>최저가 {formatPrice(fragment.floorPrice)} · 조합 결과 {getFragmentResultName(fragment)}</p>
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <div className="text-[0.9rem] font-bold" style={{ color: priceGreen }}>{formatPrice(fragment.floorPrice)}</div>
-                              <p className="mt-2 text-[0.72rem]" style={{ color: mutedText }}>판매자 {fragment.listings.length}명</p>
-                            </div>
-                          </div>
-                        </motion.button>
-                      );
-                    })}
-                  </div>
-                </div>
+              <motion.aside initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }}>
+                <button
+                  onClick={() => setMarketViewMode("browse")}
+                  className="inline-flex items-center gap-2 text-[0.86rem] font-semibold"
+                  style={{ color: actionBlue }}
+                >
+                  <ArrowRight className="w-4 h-4 rotate-180" />
+                  장터로 돌아가기
+                </button>
               </motion.aside>
 
               <motion.main initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05 }} className="space-y-5">
