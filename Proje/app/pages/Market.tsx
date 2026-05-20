@@ -48,6 +48,7 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
 }
 
 type ListingSort = "price_asc" | "latest" | "quantity";
+type FragmentSort = "price_asc" | "price_desc";
 
 type MarketListing = {
   id: string;
@@ -103,6 +104,10 @@ type SaleHistoryItem = {
 };
 
 const filterOptions = ["전체", "보유 중"];
+const fragmentSortOptions: Array<{ key: FragmentSort; label: string }> = [
+  { key: "price_desc", label: "가격 높은 순" },
+  { key: "price_asc", label: "가격 낮은 순" },
+];
 const KBO_TEAMS = ["LG", "두산", "KIA", "삼성", "SSG", "롯데", "NC", "키움", "한화", "KT"];
 
 function getMarketViewerHandle() {
@@ -130,11 +135,6 @@ function isFreshListing(postedAt: string) {
   return parsePostedAtScore(postedAt) <= 2;
 }
 
-function shortWallet(address: string | null | undefined) {
-  if (!address) return "알 수 없음";
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
 export function Market() {
   const [searchParams] = useSearchParams();
   const viewerHandle = getMarketViewerHandle();
@@ -147,6 +147,7 @@ export function Market() {
   const [activeTab, setActiveTab] = useState<"market" | "sell">("market");
   const [marketViewMode, setMarketViewMode] = useState<"browse" | "detail">("browse");
   const [activeFilter, setActiveFilter] = useState("전체");
+  const [fragmentSort, setFragmentSort] = useState<FragmentSort>("price_asc");
   const [query, setQuery] = useState("");
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [listingSort, setListingSort] = useState<ListingSort>("price_asc");
@@ -259,8 +260,11 @@ export function Market() {
       const matchesFilter = activeFilter === "전체" || (activeFilter === "보유 중" && getOwnedCount(fragment) > 0);
       const matchesTeam = selectedTeams.length === 0 || selectedTeams.includes(fragment.idol);
       return matchesQuery && matchesFilter && matchesTeam;
+    }).sort((left, right) => {
+      if (fragmentSort === "price_desc") return right.floorPrice - left.floorPrice;
+      return left.floorPrice - right.floorPrice;
     });
-  }, [activeFilter, marketState, query, selectedTeams]);
+  }, [activeFilter, fragmentSort, marketState, query, selectedTeams]);
 
   const ownedFragments = useMemo(() => marketState.filter((f) => getOwnedCount(f) > 0), [marketState]);
   const sellableFragments = useMemo(() => filteredFragments.filter((f) => getOwnedCount(f) > 0), [filteredFragments]);
@@ -433,9 +437,6 @@ export function Market() {
   const totalViewerListingCount = useMemo(() => marketState.reduce((sum, f) => sum + (f.myListings?.length ?? 0), 0), [marketState]);
   const totalViewerListingQuantity = useMemo(() => marketState.reduce((sum, f) => sum + (f.myListings ?? []).reduce((q, l) => q + l.quantity, 0), 0), [marketState]);
   const selectedListingVsFloor = selectedListing ? selectedListing.price - selectedFragment.floorPrice : null;
-  const totalSalesSettlement = useMemo(() => salesHistory.reduce((sum, s) => sum + Number(s.settlementAmount ?? 0), 0), [salesHistory]);
-  const totalSalesCount = useMemo(() => salesHistory.reduce((sum, s) => sum + Number(s.quantity ?? 0), 0), [salesHistory]);
-  const recentSales = useMemo(() => salesHistory.slice(0, 3), [salesHistory]);
 
   const panelStyle = { background: "#f8fafc", border: "1px solid #d6dee8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" };
   const mutedPanelStyle = { background: "#eef2f5", border: "1px solid #dde4ec" };
@@ -571,6 +572,16 @@ export function Market() {
                 </div>
 
                 <div className="rounded-[18px] p-4" style={panelStyle}>
+                  <p className="text-[0.7rem] font-bold uppercase tracking-[0.14em] mb-3" style={{ color: mutedText }}>필터</p>
+                  {fragmentSortOptions.map((option) => (
+                    <label key={option.key} className="flex items-center gap-2.5 cursor-pointer py-1.5">
+                      <input type="radio" name="fragmentSort" checked={fragmentSort === option.key} onChange={() => setFragmentSort(option.key)} className="accent-[#4b6581] w-4 h-4" />
+                      <span className="text-[0.84rem] font-medium" style={{ color: fragmentSort === option.key ? neutralText : mutedText }}>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="rounded-[18px] p-4" style={panelStyle}>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[0.7rem] font-bold uppercase tracking-[0.14em]" style={{ color: mutedText }}>구단</p>
                     {selectedTeams.length > 0 && <button onClick={() => setSelectedTeams([])} className="text-[0.68rem] font-semibold" style={{ color: actionBlue }}>초기화</button>}
@@ -613,8 +624,7 @@ export function Market() {
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-4">
-                  <p className="text-[0.84rem] font-semibold" style={{ color: mutedText }}>조합 재료 파편 <span style={{ color: neutralText }}>{filteredFragments.length}종</span>{selectedTeams.length > 0 && " (필터 적용 중)"}</p>
-                  <div className="flex items-center gap-2"><SlidersHorizontal className="w-3.5 h-3.5" style={{ color: mutedText }} /><span className="text-[0.78rem]" style={{ color: mutedText }}>최저가순</span></div>
+                  <p className="text-[0.84rem] font-semibold" style={{ color: mutedText }}>굿즈 파편 <span style={{ color: neutralText }}>{filteredFragments.length}종</span>{selectedTeams.length > 0 && " (필터 적용 중)"}</p>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -969,23 +979,6 @@ export function Market() {
                 </div>
               </div>
 
-              <div className="rounded-[22px] p-4" style={panelStyle}>
-                <p className="market-eyebrow" style={{ color: mutedText }}>내 정산 현황</p>
-                <p className="mt-1 text-[0.92rem] font-semibold" style={{ color: neutralText }}>판매 후 들어온 금액</p>
-                <div className="grid grid-cols-2 gap-2 mt-4">
-                  <div className="rounded-[14px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p className="text-[0.7rem]" style={{ color: mutedText }}>총 정산액</p><p className="mt-1 text-[0.95rem] font-semibold" style={{ color: priceGreen }}>{formatPrice(totalSalesSettlement)}</p></div>
-                  <div className="rounded-[14px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p className="text-[0.7rem]" style={{ color: mutedText }}>판매 완료 수량</p><p className="mt-1 text-[0.95rem] font-semibold" style={{ color: neutralText }}>{totalSalesCount}개</p></div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {recentSales.length > 0 ? recentSales.map((sale) => (
-                    <div key={sale.id} className="rounded-[12px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}>
-                      <div className="flex items-center justify-between gap-2"><p className="text-[0.8rem] font-semibold truncate" style={{ color: neutralText }}>{sale.fragmentName}</p><span className="text-[0.78rem] font-semibold" style={{ color: priceGreen }}>+{formatPrice(sale.settlementAmount)}</span></div>
-                      <p className="mt-1 text-[0.72rem] leading-5" style={{ color: mutedText }}>{sale.tradedAt} · {sale.quantity}개 판매 · 수수료 {formatPrice(sale.platformFee)}</p>
-                      <p className="mt-1 text-[0.7rem]" style={{ color: actionBlue }}>구매자 {shortWallet(sale.buyerWalletAddress)}</p>
-                    </div>
-                  )) : <div className="rounded-[14px] px-4 py-4 text-[0.8rem] leading-6" style={{ background: subtleSurface, border: `1px solid ${lineColor}`, color: mutedText }}>아직 판매 완료된 파편이 없어요. 판매가 체결되면 여기서 실제로 들어온 정산액을 바로 확인할 수 있습니다.</div>}
-                </div>
-              </div>
             </div>
 
             <div className="space-y-5">
@@ -994,7 +987,7 @@ export function Market() {
                   <div>
                     <p className="market-eyebrow" style={{ color: mutedText }}>판매 등록</p>
                     <h2 className="mt-1 text-[1.4rem] font-bold tracking-[-0.04em]" style={{ color: neutralText }}>{selectedFragment.fragmentName} 올리기</h2>
-                    <p className="mt-2 text-[0.9rem] leading-6" style={{ color: mutedText }}>내가 가진 조합 재료 파편 중에서 필요한 것만 골라 가격과 수량을 입력하면 바로 등록돼요.</p>
+                    <p className="mt-2 text-[0.9rem] leading-6" style={{ color: mutedText }}>판매할 파편을 골라 가격과 수량을 입력하면 바로 등록돼요.</p>
                   </div>
                   <div className="rounded-[16px] px-4 py-3 min-w-[220px]" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}>
                     <div className="grid grid-cols-2 gap-y-2 text-[0.82rem]">
