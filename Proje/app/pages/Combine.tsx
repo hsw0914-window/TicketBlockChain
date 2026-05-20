@@ -409,8 +409,11 @@ export function Combine() {
 
       <div className="grid lg:grid-cols-[390px_1fr] gap-6">
         <div
-          className="space-y-4 lg:h-[var(--combine-panel-height)] lg:self-start lg:flex lg:flex-col lg:min-h-0"
-          style={{ "--combine-panel-height": rightColumnHeight ? `${rightColumnHeight}px` : "auto" } as React.CSSProperties}
+          className="space-y-4 lg:self-start lg:flex lg:flex-col lg:min-h-0 lg:overflow-hidden"
+          style={{
+            height: rightColumnHeight ? `${rightColumnHeight}px` : undefined,
+            maxHeight: rightColumnHeight ? `${rightColumnHeight}px` : undefined,
+          }}
         >
           <Card className="p-4" style={shellTone.panelStrong}>
             <div className="grid grid-cols-2 gap-3">
@@ -436,7 +439,7 @@ export function Combine() {
           </Card>
 
           <Card className="overflow-hidden lg:flex-1 lg:min-h-0" style={shellTone.panelStrong}>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full lg:h-full lg:flex lg:flex-col lg:min-h-0">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full h-full lg:flex lg:flex-col lg:min-h-0">
               <TabsList className="grid w-full grid-cols-2 border-b lg:shrink-0" style={{ background: isDark ? "#22303d" : "#edf1f5", borderColor: isDark ? "#334657" : "#d4dbe4" }}>
                 <TabsTrigger value="fragments" className="data-[state=active]:bg-transparent">
                   <Gem className="w-4 h-4 mr-2" />
@@ -753,7 +756,7 @@ export function Combine() {
                         같은 파편 2개를 아직 고르지 않았어요
                       </p>
                       <p className="mt-2 text-[0.78rem] leading-6" style={{ color: shellTone.muted }}>
-                        수량이 1개뿐이라면 상자 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후, 완성할 수 있습니다.
+                        파편이 1개뿐이라면 상자 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후, 완성할 수 있습니다.
                       </p>
                     </div>
                   )}
