@@ -2,7 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 
-const ALLOWED_CATEGORIES = new Set(['TRADE', 'POINT', 'BOX', 'SYSTEM']);
+const ALLOWED_CATEGORIES = new Set(['TRADE', 'RAFFLE', 'MEMBERSHIP', 'POINT', 'BOX', 'SYSTEM']);
 
 function normalizeCategory(category) {
   const value = String(category || '').toUpperCase();

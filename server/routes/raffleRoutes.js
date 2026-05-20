@@ -4,16 +4,24 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const membershipService = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 let _pool;
 function setPool(pool) { _pool = pool; }
 
 const TIER_MAX_TICKETS = { '베이직': 1, '브론즈': 1, '실버': 2, '골드': 2 };
+const RAFFLE_APPLY_WINDOW_MS = 2 * 60 * 60 * 1000;
+const RAFFLE_RESULT_DELAY_MS = Math.max(1, Number(process.env.RAFFLE_RESULT_DELAY_SECONDS || 10)) * 1000;
 
-function raffleCloseAt(openAt) {
+function raffleApplyCloseAt(openAt) {
   if (!openAt) return null;
-  return new Date(new Date(openAt).getTime() + 2 * 60 * 60 * 1000);
+  return new Date(new Date(openAt).getTime() + RAFFLE_APPLY_WINDOW_MS);
+}
+
+function raffleResultAt(appliedAt) {
+  if (!appliedAt) return null;
+  return new Date(new Date(appliedAt).getTime() + RAFFLE_RESULT_DELAY_MS);
 }
 
 function parseJsonArray(value) {
@@ -32,7 +40,10 @@ async function ensureDraw(conn, gameId) {
     'SELECT * FROM draws WHERE game_id = ? ORDER BY created_at DESC LIMIT 1',
     [gameId],
   );
-  if (existing) return existing;
+  if (existing) {
+    console.log(`[raffle] 기존 추첨 사용: game=${gameId}, draw=${existing.id}, status=${existing.status}`);
+    return existing;
+  }
 
   const [[game]] = await conn.query(
     'SELECT raffle_winners_count FROM games WHERE id = ?',
@@ -47,6 +58,7 @@ async function ensureDraw(conn, gameId) {
   );
   try {
     await fabricService.createDraw({ drawId, gameId, winnerCount });
+    console.log(`[raffle] 체인코드 추첨 생성 완료: game=${gameId}, draw=${drawId}, winners=${winnerCount}`);
   } catch (err) {
     console.error('[raffleRoutes] Fabric createDraw 실패 (무시):', err.message);
   }
@@ -56,6 +68,7 @@ async function ensureDraw(conn, gameId) {
 async function runRaffleDraw(gameId) {
   const conn = await _pool.getConnection();
   try {
+    console.log(`[raffle] 자동 추첨 확인 시작: game=${gameId}`);
     await conn.beginTransaction();
     const [[draw]] = await conn.query(
       `SELECT d.*, g.raffle_winners_count
@@ -69,6 +82,7 @@ async function runRaffleDraw(gameId) {
     );
     if (!draw || draw.status === 'COMPLETED') {
       await conn.commit();
+      console.log(`[raffle] 자동 추첨 스킵: game=${gameId}, reason=${!draw ? 'draw 없음' : '이미 완료'}`);
       return;
     }
 
@@ -81,6 +95,7 @@ async function runRaffleDraw(gameId) {
     if (entries.length === 0) {
       await conn.query(`UPDATE draws SET status = 'COMPLETED', executed_at = NOW() WHERE id = ?`, [draw.id]);
       await conn.commit();
+      console.log(`[raffle] 자동 추첨 완료: game=${gameId}, draw=${draw.id}, 응모자 없음`);
       return;
     }
 
@@ -96,11 +111,13 @@ async function runRaffleDraw(gameId) {
 
     let winnerIds = [];
     try {
+      console.log(`[raffle] 체인코드 추첨 실행 요청: game=${gameId}, draw=${draw.id}, entries=${entryIds.length}`);
       const fabricResult = await fabricService.executeDraw({ drawId: draw.id, entryIds });
       winnerIds = Array.isArray(fabricResult?.winners) ? fabricResult.winners : [];
     } catch (err) {
       if (err.message && err.message.includes('DRAW_NOT_FOUND')) {
         await fabricService.createDraw({ drawId: draw.id, gameId, winnerCount: draw.winner_count });
+        console.log(`[raffle] 체인코드 추첨 재생성 후 실행: game=${gameId}, draw=${draw.id}`);
         const fabricResult = await fabricService.executeDraw({ drawId: draw.id, entryIds });
         winnerIds = Array.isArray(fabricResult?.winners) ? fabricResult.winners : [];
       } else {
@@ -109,10 +126,12 @@ async function runRaffleDraw(gameId) {
     }
 
     const winnerSet = new Set(winnerIds);
+    const resultNotifications = [];
     for (const { entry, ids } of entryNfts) {
       const winningId = ids.find((id) => winnerSet.has(id));
       const status = winningId ? 'won' : 'lost';
       await conn.query(`UPDATE game_raffle_entries SET status = ? WHERE id = ?`, [status, entry.id]);
+      resultNotifications.push({ userId: entry.user_id, entryId: entry.id, status, winningId });
 
       if (winningId) {
         await conn.query(
@@ -143,7 +162,18 @@ async function runRaffleDraw(gameId) {
       [uuidv4(), gameId, JSON.stringify({ drawId: draw.id, winners: winnerIds })],
     );
     await conn.commit();
-    console.log(`[raffle] 추첨 완료: ${gameId} | winners=${winnerIds.length} | entries=${entries.length}`);
+    for (const item of resultNotifications) {
+      await notificationService.recordNotification(_pool, {
+        userId: item.userId,
+        category: 'RAFFLE',
+        title: item.status === 'won' ? '응모 당첨' : '응모 결과 확인',
+        message: item.status === 'won'
+          ? '응모에 당첨되었습니다. 우선 예매 화면에서 1좌석을 예매할 수 있습니다.'
+          : '응모 결과가 공개되었습니다. 아쉽게도 이번 응모는 당첨되지 않았습니다.',
+        metadata: { gameId, drawId: draw.id, entryId: item.entryId, status: item.status, raffleNftId: item.winningId || null },
+      });
+    }
+    console.log(`[raffle] 추첨 완료: game=${gameId}, draw=${draw.id}, winners=${winnerIds.length}, entries=${entries.length}, winnerNfts=${winnerIds.join(',') || '-'}`);
   } catch (err) {
     await conn.rollback();
     console.error('[raffle] 추첨 실패:', err.message);
@@ -489,7 +519,7 @@ router.post('/apply', requireAuth, async (req, res) => {
     }
 
     const openAt = new Date(game.raffle_open_at);
-    const closeAt = raffleCloseAt(game.raffle_open_at);
+    const closeAt = raffleApplyCloseAt(game.raffle_open_at);
     const now = new Date();
     if (now < openAt) {
       await conn.rollback();
@@ -546,6 +576,9 @@ router.post('/apply', requireAuth, async (req, res) => {
 
     const draw = await ensureDraw(conn, gameId);
     const nftIds = nfts.map((nft) => nft.id);
+    const appliedAt = new Date();
+    const resultAt = raffleResultAt(appliedAt);
+    console.log(`[raffle] 응모 접수: user=${userId}, game=${gameId}, draw=${draw.id}, tickets=${ticketsUsed}, nftIds=${nftIds.join(',')}, resultAt=${resultAt?.toISOString()}`);
     const placeholders = nftIds.map(() => '?').join(',');
     await conn.query(
       `UPDATE raffle_nfts
@@ -569,6 +602,7 @@ router.post('/apply', requireAuth, async (req, res) => {
         userDidHash: nft.user_did_hash || fabricService.hashDid(wallet.wallet_address),
         drawId: draw.id,
       });
+      console.log(`[raffle] 체인코드 응모 참여 완료: nft=${nft.id}, draw=${draw.id}`);
     }
 
     await conn.query(
@@ -577,7 +611,15 @@ router.post('/apply', requireAuth, async (req, res) => {
       [uuidv4(), fabricService.hashDid(wallet.wallet_address), gameId, JSON.stringify({ drawId: draw.id, nftIds, ticketsUsed })],
     );
     await conn.commit();
-    res.json({ success: true, message: '응모 완료', raffle_close_at: closeAt?.toISOString() ?? null });
+    await notificationService.recordNotification(_pool, {
+      userId,
+      category: 'RAFFLE',
+      title: '응모 참여 완료',
+      message: `${ticketsUsed}장의 응모권으로 응모가 완료되었습니다. 결과는 약 10초 후 확인할 수 있습니다.`,
+      amount: ticketsUsed,
+      metadata: { gameId, drawId: draw.id, raffleNftIds: nftIds, resultAt: resultAt?.toISOString() },
+    });
+    res.json({ success: true, message: '응모 완료', raffle_close_at: raffleResultAt(appliedAt)?.toISOString() ?? null });
   } catch (err) {
     await conn.rollback();
     console.error('[raffle/apply]', err);
@@ -612,7 +654,7 @@ router.get('/my-entries', requireAuth, async (req, res) => {
     const gamesToDraw = new Set();
     for (const row of rows) {
       if (row.status !== 'applied') continue;
-      const closeAt = raffleCloseAt(row.raffle_open_at);
+      const closeAt = raffleResultAt(row.applied_at);
       if (closeAt && now >= closeAt) gamesToDraw.add(row.game_id);
     }
     for (const gameId of gamesToDraw) {
@@ -620,7 +662,7 @@ router.get('/my-entries', requireAuth, async (req, res) => {
     }
     const [finalRows] = gamesToDraw.size > 0 ? await fetchEntries() : [rows];
     const data = finalRows.map((row) => {
-      const closeAt = raffleCloseAt(row.raffle_open_at);
+      const closeAt = raffleResultAt(row.applied_at);
       const resultVisible = closeAt ? now >= closeAt : true;
       return {
         ...row,

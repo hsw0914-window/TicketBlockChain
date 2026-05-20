@@ -319,6 +319,7 @@ export function TicketBooking() {
   const serviceFee = Math.round(ticketTotal * 0.03); // 3% 서비스 이용료
   const finalTotal = Math.max(0, ticketTotal + serviceFee - pointDiscount);
   const paymentReady = selectedTickets.length > 0;
+  const maxSelectableTickets = isPriorityMode ? 1 : (event?.maxTickets ?? 4);
   const bookingDeadlinePassed = event
     ? Date.now() > new Date(event.dateTime).getTime() + 60 * 60 * 1000
     : false;
@@ -354,7 +355,11 @@ export function TicketBooking() {
         return previous.filter((item) => item !== seatKey);
       }
 
-      if (previous.length >= event.maxTickets) {
+      if (isPriorityMode) {
+        return [seatKey];
+      }
+
+      if (previous.length >= maxSelectableTickets) {
         return previous;
       }
 
@@ -631,7 +636,7 @@ export function TicketBooking() {
                   예매 규칙
                 </p>
                 <p className="mt-2 text-[0.95rem] font-semibold" style={{ color: "#162840" }}>
-                  회차당 최대 {event.maxTickets}매
+                  회차당 최대 {maxSelectableTickets}매
                 </p>
                 <p className="mt-1 text-[0.86rem]" style={{ color: "#5e7088" }}>
                   공식 재판매 마켓만 연동되고 좌석 선택 후 5분 안에 결제를 완료해야 합니다.
@@ -1033,7 +1038,7 @@ export function TicketBooking() {
                     {selectedGrade.name} · {selectedBlock.label}블록 좌석번호 선택
                   </h3>
                   <p className="mt-2 text-[0.93rem]" style={{ color: "#5c6f87" }}>
-                    선택 좌석은 최대 {event.maxTickets}매까지 가능하며, 예매 완료 시 좌석번호가 NFT 티켓에 저장됩니다.
+                    선택 좌석은 최대 {maxSelectableTickets}매까지 가능하며, 예매 완료 시 좌석번호가 NFT 티켓에 저장됩니다.
                   </p>
                 </div>
 

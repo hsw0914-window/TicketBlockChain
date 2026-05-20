@@ -17,6 +17,7 @@ const Notice         = lazy(() => import("./pages/Notice").then((m) => ({ defaul
 const NoticeWrite    = lazy(() => import("./pages/NoticeWrite").then((m) => ({ default: m.NoticeWrite })));
 const MyPage         = lazy(() => import("./pages/MyPage").then((m) => ({ default: m.MyPage })));
 const Membership     = lazy(() => import("./pages/Membership").then((m) => ({ default: m.Membership })));
+const PointHistory   = lazy(() => import("./pages/PointHistory").then((m) => ({ default: m.PointHistory })));
 const TicketResale        = lazy(() => import("./pages/TicketResale").then((m) => ({ default: m.TicketResale })));
 const TicketResaleSuccess = lazy(() => import("./pages/TicketResaleSuccess").then((m) => ({ default: m.TicketResaleSuccess })));
 const MarketBuySuccess    = lazy(() => import("./pages/MarketBuySuccess").then((m) => ({ default: m.MarketBuySuccess })));
@@ -65,6 +66,7 @@ export const router = createBrowserRouter([
       { path: "notice/write/:id",         Component: withSuspense(NoticeWrite) },
       { path: "mypage",                   Component: withSuspense(MyPage) },
       { path: "mypage/membership",        Component: withSuspense(Membership) },
+      { path: "mypage/points",            Component: withSuspense(PointHistory) },
       { path: "mypage/raffle",            Component: withSuspense(Raffle) },
       { path: "raffle",                   Component: withSuspense(Raffle) },
       { path: "ticket-resale",            Component: withSuspense(TicketResale) },

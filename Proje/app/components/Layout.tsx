@@ -6,11 +6,11 @@ import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 
-type NotificationFilter = "all" | "trade" | "point" | "box";
+type NotificationFilter = "all" | "trade" | "raffle" | "membership" | "point" | "box";
 
 interface NotificationItem {
   id: string;
-  category: "TRADE" | "POINT" | "BOX" | "SYSTEM";
+  category: "TRADE" | "RAFFLE" | "MEMBERSHIP" | "POINT" | "BOX" | "SYSTEM";
   title: string;
   message: string;
   amount?: number | null;
@@ -83,18 +83,54 @@ export function Layout() {
     void fetchNotifications(notificationFilter);
   }, [isLoggedIn, location.pathname, notificationFilter]);
 
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        void fetchNotifications(notificationFilter);
+      }
+    };
+
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [isLoggedIn, notificationFilter]);
+
   const openPointMenu = async () => {
     const next = !pointMenuOpen;
     setPointMenuOpen(next);
     if (next) {
       await fetchNotifications(notificationFilter);
-      const token = localStorage.getItem("auth_token");
-      if (token) {
-        void fetch(`${import.meta.env.VITE_API_URL}/api/notifications/read`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).then(() => setNotificationUnread(0)).catch(() => {});
+    }
+  };
+
+  const markNotificationRead = async (id: string) => {
+    const token = localStorage.getItem("auth_token");
+    setNotifications((prev) => prev.filter((item) => item.id !== id));
+    setNotificationUnread((prev) => Math.max(0, prev - 1));
+    if (!token) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/notifications/read`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        await fetchNotifications(notificationFilter);
       }
+    } catch {
+      await fetchNotifications(notificationFilter);
     }
   };
 
@@ -123,13 +159,17 @@ export function Layout() {
   const dropdownBorder = theme === "dark" ? "rgba(90,116,146,0.22)" : "#d0d8e2";
   const notificationTabs: Array<{ id: NotificationFilter; label: string }> = [
     { id: "all", label: "전체" },
-    { id: "trade", label: "거래 내역" },
+    { id: "trade", label: "예매·거래" },
+    { id: "raffle", label: "응모" },
+    { id: "membership", label: "멤버십" },
     { id: "point", label: "포인트" },
     { id: "box", label: "상자" },
   ];
   const notificationAccent = (category: NotificationItem["category"]) => {
-    if (category === "POINT") return { background: "#eaf8f0", color: "#168557", label: "포인트" };
-    if (category === "TRADE") return { background: "#edf3ff", color: "#1456a0", label: "거래" };
+    if (category === "TRADE") return { background: "#edf3ff", color: "#1456a0", label: "예매·거래" };
+    if (category === "RAFFLE") return { background: "#f1efff", color: "#5b4bb7", label: "응모" };
+    if (category === "MEMBERSHIP") return { background: "#eaf8f0", color: "#168557", label: "멤버십" };
+    if (category === "POINT") return { background: "#edf7f5", color: "#0f766e", label: "포인트" };
     if (category === "BOX") return { background: "#fff7ed", color: "#c05621", label: "상자" };
     return { background: "#edf2f7", color: "#50647d", label: "알림" };
   };
@@ -267,11 +307,11 @@ export function Layout() {
                   </button>
 
                   {pointMenuOpen && (
-                    <div className="absolute right-0 top-12 w-80 rounded-[16px] border shadow-xl z-50 overflow-hidden"
+                    <div className="absolute right-0 top-12 w-[360px] rounded-[16px] border shadow-xl z-50 overflow-hidden"
                       style={{ background: dropdownBg, borderColor: dropdownBorder, boxShadow: "0 12px 32px rgba(17,40,73,0.12)" }}>
                       <div className="px-4 py-3 border-b" style={{ borderColor: dropdownBorder }}>
                         <p className="text-[0.84rem] font-black" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>알림</p>
-                        <div className="mt-3 grid grid-cols-4 gap-1 rounded-xl p-1" style={{ background: theme === "dark" ? "rgba(90,116,146,0.14)" : "#edf2f7" }}>
+                        <div className="mt-3 grid grid-cols-3 gap-1 rounded-xl p-1" style={{ background: theme === "dark" ? "rgba(90,116,146,0.14)" : "#edf2f7" }}>
                           {notificationTabs.map((tab) => {
                             const active = notificationFilter === tab.id;
                             return (
@@ -301,7 +341,13 @@ export function Layout() {
                         ) : notifications.map((event) => {
                           const accent = notificationAccent(event.category);
                           return (
-                          <div key={event.id} className="px-4 py-3 border-b last:border-b-0" style={{ borderColor: dropdownBorder }}>
+                          <button
+                            key={event.id}
+                            type="button"
+                            onClick={() => void markNotificationRead(event.id)}
+                            className="block w-full px-4 py-3 text-left border-b last:border-b-0 transition-colors hover:bg-black/[0.03]"
+                            style={{ borderColor: dropdownBorder }}
+                          >
                             <div className="flex items-start justify-between gap-4">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -316,12 +362,12 @@ export function Layout() {
                                 <p className="mt-1 text-[0.72rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>{new Date(event.created_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
                               </div>
                               {event.category === "POINT" && (
-                                <span className="shrink-0 rounded-full px-3 py-1 text-[0.78rem] font-black" style={{ background: "#eaf8f0", color: "#168557" }}>
-                                  +{Number(event.amount || 0).toLocaleString()}P
+                                <span className="shrink-0 rounded-full px-3 py-1 text-[0.78rem] font-black" style={{ background: Number(event.amount || 0) >= 0 ? "#eaf8f0" : "#fff1f2", color: Number(event.amount || 0) >= 0 ? "#168557" : "#be123c" }}>
+                                  {Number(event.amount || 0) >= 0 ? "+" : "-"}{Math.abs(Number(event.amount || 0)).toLocaleString()}P
                                 </span>
                               )}
                             </div>
-                          </div>
+                          </button>
                           );
                         })}
                       </div>

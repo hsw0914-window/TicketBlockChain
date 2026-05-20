@@ -179,7 +179,7 @@ export function Membership() {
 
   const stats = [
     { icon: Clock3, label: "멤버십 입장 횟수", value: seasonCount.toLocaleString(), unit: "회" },
-    { icon: Star, label: "누적 적립 포인트", value: point.totalEarned.toLocaleString(), unit: "P" },
+    { icon: Star, label: "현재 포인트", value: point.balance.toLocaleString(), unit: "P" },
     { icon: Ticket, label: "사용 가능 응모권", value: raffleCount.toLocaleString(), unit: "장" },
   ];
 
@@ -288,13 +288,20 @@ export function Membership() {
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <div className="rounded-[18px] border px-6 py-5" style={{ borderColor: "#dce5f2", background: "#fff" }}>
+          <button
+            type="button"
+            onClick={() => navigate("/mypage/points")}
+            className="rounded-[18px] border px-6 py-5 text-left transition hover:-translate-y-0.5"
+            style={{ borderColor: "#dce5f2", background: "#fff", boxShadow: "0 12px 24px rgba(31,50,72,0.04)" }}
+          >
             <div className="flex items-center gap-2">
               <Award className="h-4 w-4" style={{ color: "#2563eb" }} />
-              <p className="font-black" style={{ color: "#20355b" }}>포인트</p>
+              <p className="font-black" style={{ color: "#20355b" }}>포인트 적립·사용 내역</p>
             </div>
-            <p className="mt-3 text-[0.88rem]" style={{ color: "#72819a" }}>보유 {point.balance.toLocaleString()}P · 누적 {point.totalEarned.toLocaleString()}P · 사용 {point.totalUsed.toLocaleString()}P</p>
-          </div>
+            <p className="mt-3 text-[0.88rem] leading-6" style={{ color: "#72819a" }}>
+              월별 적립과 사용 내역을 한 화면에서 확인합니다.
+            </p>
+          </button>
           <div className="rounded-[18px] border px-6 py-5" style={{ borderColor: monthlyCanClaim ? "#a7d7c0" : "#dce5f2", background: monthlyCanClaim ? "#f0faf4" : "#fff" }}>
             <div className="flex items-center justify-between gap-4">
               <div>

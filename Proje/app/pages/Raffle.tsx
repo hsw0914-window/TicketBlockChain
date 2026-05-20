@@ -96,7 +96,7 @@ export function Raffle() {
   const [nowMs, setNowMs] = useState(Date.now());
 
   useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    const id = window.setInterval(() => setNowMs(Date.now()), 1_000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -136,6 +136,15 @@ export function Raffle() {
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    if (!currentEntry || currentEntry.status !== "applied" || !currentEntry.raffle_close_at) return;
+    const delay = Math.max(0, new Date(currentEntry.raffle_close_at).getTime() - Date.now() + 500);
+    const id = window.setTimeout(() => {
+      void loadData();
+    }, delay);
+    return () => window.clearTimeout(id);
+  }, [currentEntry?.id, currentEntry?.status, currentEntry?.raffle_close_at]);
 
   async function applyRaffle() {
     if (!selected) return;

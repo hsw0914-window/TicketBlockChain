@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const membershipService = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 let _pool;
@@ -121,6 +122,23 @@ router.post('/buy-raffle', requireAuth, async (req, res) => {
        VALUES (?, 'RAFFLE_NFT_MINT_REQUESTED', ?, ?, ?)`,
       [uuidv4(), userDidHash, JSON.stringify({ count, raffleNftIds: issued, pointUsed: count * 1500 }), lastResult?.txId || null],
     );
+
+    await membershipService.recordPointEvent(_pool, {
+      userId,
+      walletAddress,
+      eventType: 'POINT_EXCHANGE_RAFFLE',
+      reason: '응모권 교환',
+      amount: -Math.abs(Number(lastResult?.pointUsed || 1500) * count),
+      metadata: { count, raffleNftIds: issued },
+    });
+    await notificationService.recordNotification(_pool, {
+      userId,
+      category: 'RAFFLE',
+      title: '응모권 획득',
+      message: `포인트 교환으로 응모권 NFT ${count}장이 지급되었습니다.`,
+      amount: count,
+      metadata: { raffleNftIds: issued },
+    });
 
     const [[row]] = await _pool.query(
       `SELECT COUNT(*) AS cnt

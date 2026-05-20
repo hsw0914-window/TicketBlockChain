@@ -7,6 +7,7 @@ const { confirmPayment, cancelPayment } = require("../services/tossPayService");
 const { requireAuth } = require("../middleware/auth");
 const { isWithinGamePlus1h } = require("../utils/gameTime");
 const membershipService = require("../services/membershipService");
+const notificationService = require("../services/notificationService");
 
 const router = express.Router();
 let _pool;
@@ -377,6 +378,9 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
   }
 
   if (isPriorityMode) {
+    if (seats.length !== 1) {
+      return res.status(400).json({ success: false, message: '우선 예매는 1인 1좌석만 선택할 수 있습니다' });
+    }
     if (!priorityEntryId) {
       return res.status(400).json({ success: false, message: '우선 예매 응모 당첨 정보가 필요합니다' });
     }
@@ -546,6 +550,14 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
           ticketId: ticketResults[0].ticketId,
           pointAmount: Number(pointDiscount),
         });
+        await membershipService.recordPointEvent(_pool, {
+          userId: req.user.user_id,
+          walletAddress: verifiedWalletAddress,
+          eventType: 'POINT_USE_TICKET',
+          reason: '티켓 예매 포인트 할인',
+          amount: -Math.abs(Number(pointDiscount)),
+          metadata: { ticketId: ticketResults[0].ticketId, gameId, seats: seats.length },
+        });
         console.log(`[toss] 포인트 차감 완료: ${pointDiscount}P (티켓 ${ticketResults[0].ticketId})`);
       } catch (pointErr) {
         console.error('[toss] 포인트 차감 실패 (무시):', pointErr.message);
@@ -575,10 +587,26 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
           );
         }
         console.log(`[toss] 우선 예매 응모권 사용 완료: entry=${priorityEntry.id}, ticket=${ticketResults[0].ticketId}`);
+        await notificationService.recordNotification(_pool, {
+          userId: req.user.user_id,
+          category: 'RAFFLE',
+          title: '우선 예매권 사용 완료',
+          message: `${gameRow?.home_team} vs ${gameRow?.away_team} 우선 예매가 완료되었습니다.`,
+          metadata: { entryId: priorityEntry.id, ticketId: ticketResults[0].ticketId, gameId, raffleNftId: priorityRaffleNftId },
+        });
       } catch (priorityErr) {
         console.error('[toss] 우선 예매 응모권 사용 처리 실패 (무시):', priorityErr.message);
       }
     }
+
+    await notificationService.recordNotification(_pool, {
+      userId: req.user.user_id,
+      category: 'TRADE',
+      title: isPriorityMode ? '우선 예매 완료' : '티켓 예매 완료',
+      message: `${gameRow?.home_team} vs ${gameRow?.away_team} ${seats.length}석 예매가 완료되었습니다.`,
+      amount: Number(amount),
+      metadata: { gameId, paymentKey, ticketIds: ticketResults.map((ticket) => ticket.ticketId), seats: ticketRows },
+    });
 
     res.json({ success: true, data: { tickets: ticketResults, paymentKey } });
 

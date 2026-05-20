@@ -11,6 +11,8 @@ function setPool(pool) { _pool = pool; }
 const FILTERS = {
   all: null,
   trade: 'TRADE',
+  raffle: 'RAFFLE',
+  membership: 'MEMBERSHIP',
   point: 'POINT',
   box: 'BOX',
 };
@@ -20,7 +22,7 @@ router.get('/', requireAuth, async (req, res) => {
     const type = String(req.query.type || 'all').toLowerCase();
     const category = Object.prototype.hasOwnProperty.call(FILTERS, type) ? FILTERS[type] : null;
     const params = [req.user.user_id];
-    let where = 'WHERE user_id = ?';
+    let where = 'WHERE user_id = ? AND read_at IS NULL';
     if (category) {
       where += ' AND category = ?';
       params.push(category);
@@ -50,6 +52,17 @@ router.get('/', requireAuth, async (req, res) => {
 
 router.post('/read', requireAuth, async (req, res) => {
   try {
+    const notificationId = String(req.body?.id || req.query.id || '').trim();
+    if (notificationId) {
+      const [result] = await _pool.query(
+        `UPDATE notification_events
+            SET read_at = NOW()
+          WHERE id = ? AND user_id = ? AND read_at IS NULL`,
+        [notificationId, req.user.user_id],
+      );
+      return res.json({ success: true, updated: result.affectedRows || 0 });
+    }
+
     const type = String(req.body?.type || req.query.type || 'all').toLowerCase();
     const category = Object.prototype.hasOwnProperty.call(FILTERS, type) ? FILTERS[type] : null;
     const params = [req.user.user_id];

@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { requireAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const membershipService = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 let _pool;
@@ -247,6 +248,13 @@ router.post('/join-membership', requireAuth, async (req, res) => {
        ON DUPLICATE KEY UPDATE season_count = season_count`,
       [req.user.user_id],
     );
+    await notificationService.recordNotification(_pool, {
+      userId: req.user.user_id,
+      category: 'MEMBERSHIP',
+      title: '멤버십 가입 완료',
+      message: '베이직 등급으로 시작합니다. 이제 포인트 적립과 티어업 혜택을 받을 수 있습니다.',
+      metadata: { tier: '베이직' },
+    });
 
     res.json({ success: true, message: '멤버십 가입 완료! 베이직 등급으로 시작합니다.', currentTier: '베이직' });
   } catch (err) {
@@ -342,6 +350,27 @@ router.post('/tier-up', requireAuth, async (req, res) => {
         JSON.stringify(issuedRaffleNftIds),
       ],
     );
+    const rewardMessage = [
+      reward.cards > 0 ? `실물 NFT ${reward.cards}장` : '',
+      reward.raffles > 0 ? `응모권 ${reward.raffles}장` : '',
+    ].filter(Boolean).join(', ');
+    await notificationService.recordNotification(_pool, {
+      userId: req.user.user_id,
+      category: 'MEMBERSHIP',
+      title: `${nextTier} 티어업 완료`,
+      message: rewardMessage ? `최초 달성 혜택으로 ${rewardMessage}이 지급되었습니다.` : '새 멤버십 등급이 적용되었습니다.',
+      metadata: { tier: nextTier, rewardCards: reward.cards, rewardRaffles: reward.raffles, issuedRaffleNftIds },
+    });
+    if (issuedRaffleNftIds.length > 0) {
+      await notificationService.recordNotification(_pool, {
+        userId: req.user.user_id,
+        category: 'RAFFLE',
+        title: '응모권 획득',
+        message: `${nextTier} 최초 혜택으로 응모권 ${issuedRaffleNftIds.length}장이 지급되었습니다.`,
+        amount: issuedRaffleNftIds.length,
+        metadata: { source: 'TIER_REWARD', tier: nextTier, raffleNftIds: issuedRaffleNftIds },
+      });
+    }
 
     res.json({
       success: true,
@@ -398,6 +427,22 @@ router.post('/claim-monthly-raffles', requireAuth, async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [crypto.randomUUID(), req.user.user_id, claimMonth, membership.tier, limit, JSON.stringify(issuedRaffleNftIds), expiresAt],
     );
+    await notificationService.recordNotification(_pool, {
+      userId: req.user.user_id,
+      category: 'MEMBERSHIP',
+      title: '월 응모권 수령 완료',
+      message: `${claimMonth} 월 응모권 ${limit}장이 지급되었습니다.`,
+      amount: limit,
+      metadata: { claimMonth, tier: membership.tier, raffleNftIds: issuedRaffleNftIds },
+    });
+    await notificationService.recordNotification(_pool, {
+      userId: req.user.user_id,
+      category: 'RAFFLE',
+      title: '응모권 획득',
+      message: `멤버십 월 혜택으로 응모권 ${limit}장이 지급되었습니다.`,
+      amount: limit,
+      metadata: { source: 'MONTHLY_GRANT', claimMonth, raffleNftIds: issuedRaffleNftIds },
+    });
 
     res.json({
       success: true,

@@ -189,7 +189,7 @@ async function recordPointEvent(pool, {
   metadata = {},
 }) {
   const pointAmount = Number(amount || 0);
-  if (!userId || pointAmount <= 0) return null;
+  if (!userId || pointAmount === 0) return null;
   const id = uuidv4();
   await pool.query(
     `INSERT INTO point_events
@@ -198,11 +198,13 @@ async function recordPointEvent(pool, {
     [id, userId, walletAddress || null, eventType, reason, pointAmount, JSON.stringify(metadata)],
   );
   try {
+    const isEarn = pointAmount > 0;
+    const absAmount = Math.abs(pointAmount);
     await notificationService.recordNotification(pool, {
       userId,
       category: 'POINT',
       title: reason,
-      message: `${pointAmount.toLocaleString('ko-KR')}P가 적립되었습니다.`,
+      message: `${absAmount.toLocaleString('ko-KR')}P가 ${isEarn ? '적립' : '사용'}되었습니다.`,
       amount: pointAmount,
       metadata: { eventType, walletAddress, ...metadata },
     });

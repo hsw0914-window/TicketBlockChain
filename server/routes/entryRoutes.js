@@ -142,7 +142,9 @@ router.post('/verify', async (req, res) => {
       ]
     );
 
-    // 7. 멤버십 가입자에게만 입장 횟수/박스/포인트 알림 반영
+    // 7. QR 입장 보상 반영
+    // - 상자는 멤버십 가입 여부와 무관하게 실제 입장 완료 시 지급
+    // - 포인트는 멤버십 가입자에게만 적립
     let boxTxHash = null;
     let memberJoined = false;
     let ownerUserId = null;
@@ -154,23 +156,43 @@ router.post('/verify', async (req, res) => {
       if (walletRow) {
         ownerUserId = walletRow.user_id;
         memberJoined = await membershipService.isMembershipActive(_pool, walletRow.user_id);
+        await _pool.query(
+          `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 1)
+           ON DUPLICATE KEY UPDATE season_count = season_count + 1`,
+          [walletRow.user_id]
+        );
+        if (process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS) {
+          boxTxHash = await mintBoxOnChain(ticket.wallet_address);
+        }
+        await notificationService.recordNotification(_pool, {
+          userId: walletRow.user_id,
+          category: 'BOX',
+          title: '시즌 박스 획득',
+          message: 'QR 입장이 완료되어 시즌 굿즈 박스 1개가 지급되었습니다.',
+          amount: 1,
+          metadata: { ticketId, gameId: ticket.game_id, gateId: gateId || 'GATE_DEFAULT', boxTxHash },
+        });
+        console.log(`[entry] 입장 상자 지급 완료: user=${walletRow.user_id}, ticket=${ticketId}, member=${memberJoined}`);
+
         if (memberJoined) {
-          await _pool.query(
-            `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 1)
-             ON DUPLICATE KEY UPDATE season_count = season_count + 1`,
-            [walletRow.user_id]
-          );
-          if (process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS) {
-            boxTxHash = await mintBoxOnChain(ticket.wallet_address);
+          const membershipSummary = await membershipService.getMembershipSummary(_pool, walletRow.user_id);
+          if (membershipSummary.canTierUp && membershipSummary.nextTier) {
+            const [[existingTierNotice]] = await _pool.query(
+              `SELECT id FROM notification_events
+                WHERE user_id = ? AND category = 'MEMBERSHIP' AND title = ?
+                LIMIT 1`,
+              [walletRow.user_id, `${membershipSummary.nextTier} 티어업 조건 달성`],
+            );
+            if (!existingTierNotice) {
+              await notificationService.recordNotification(_pool, {
+                userId: walletRow.user_id,
+                category: 'MEMBERSHIP',
+                title: `${membershipSummary.nextTier} 티어업 조건 달성`,
+                message: '멤버십 페이지에서 티어업을 완료하고 최초 혜택을 받으세요.',
+                metadata: { nextTier: membershipSummary.nextTier, seasonCount: membershipSummary.season_count },
+              });
+            }
           }
-          await notificationService.recordNotification(_pool, {
-            userId: walletRow.user_id,
-            category: 'BOX',
-            title: '시즌 박스 획득',
-            message: 'QR 입장이 완료되어 시즌 굿즈 박스 1개가 지급되었습니다.',
-            amount: 1,
-            metadata: { ticketId, gameId: ticket.game_id, gateId: gateId || 'GATE_DEFAULT', boxTxHash },
-          });
           await membershipService.recordPointEvent(_pool, {
             userId: walletRow.user_id,
             walletAddress: ticket.wallet_address,
@@ -179,11 +201,11 @@ router.post('/verify', async (req, res) => {
             amount: fabricResult.earnedPoint || 0,
             metadata: { ticketId, gameId: ticket.game_id, gateId: gateId || 'GATE_DEFAULT' },
           });
-          console.log(`[entry] 멤버십 입장 보상 완료 (user: ${walletRow.user_id})`);
+          console.log(`[entry] 멤버십 입장 포인트 적립 완료: user=${walletRow.user_id}, point=${fabricResult.earnedPoint || 0}`);
         }
       }
     } catch (boxErr) {
-      console.error('[entry] 멤버십 보상 처리 실패 (입장은 유효):', boxErr.message);
+      console.error('[entry] 입장 보상 처리 실패 (입장은 유효):', boxErr.message);
     }
 
     const earnedPoint = memberJoined ? Number(fabricResult.earnedPoint ?? 0) : 0;
