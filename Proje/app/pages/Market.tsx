@@ -569,8 +569,8 @@ export function Market() {
         {activeTab === "market" ? (
           marketViewMode === "browse" ? (
             <div className="flex gap-6 items-start">
-              <aside className="w-[220px] shrink-0 sticky top-6 space-y-4">
-                <div className="rounded-[18px] p-4" style={panelStyle}>
+              <aside className="w-[220px] h-[716px] shrink-0 sticky top-6 flex flex-col gap-4">
+                <div className="rounded-[18px] p-4 flex-1" style={panelStyle}>
                   <p className="text-[0.7rem] font-bold uppercase tracking-[0.14em] mb-3" style={{ color: mutedText }}>보기 방식</p>
                   {filterOptions.map((filter) => (
                     <label key={filter} className="flex items-center gap-2.5 cursor-pointer py-1.5">
@@ -618,10 +618,6 @@ export function Market() {
               </aside>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-4">
-                  <p className="text-[0.84rem] font-semibold" style={{ color: mutedText }}>굿즈 파편 <span style={{ color: neutralText }}>{filteredFragments.length}종</span>{selectedTeams.length > 0 && " (필터 적용 중)"}</p>
-                </div>
-
                 <div className="min-h-[716px]">
                   <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
                     {paginatedFragments.map((fragment, index) => (
@@ -689,7 +685,7 @@ export function Market() {
                     type="button"
                     aria-label="파편 검색"
                     className="h-12 w-14 shrink-0 inline-flex items-center justify-center border border-l-0"
-                    style={{ background: "#6f7f94", borderColor: "#6f82a0", color: "#fff" }}
+                    style={{ background: actionBlue, borderColor: actionBlue, color: "#fff" }}
                   >
                     <Search className="w-4 h-4" />
                   </button>
