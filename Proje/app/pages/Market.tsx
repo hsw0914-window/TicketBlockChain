@@ -622,39 +622,41 @@ export function Market() {
                   <p className="text-[0.84rem] font-semibold" style={{ color: mutedText }}>굿즈 파편 <span style={{ color: neutralText }}>{filteredFragments.length}종</span>{selectedTeams.length > 0 && " (필터 적용 중)"}</p>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {paginatedFragments.map((fragment, index) => (
-                    <motion.button key={fragment.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }} onClick={() => openMarketDetail(fragment)}
-                      className="text-left rounded-[22px] overflow-hidden transition-all hover:-translate-y-1 hover:shadow-md" style={panelStyle}>
-                      <div className="w-full h-[280px] overflow-hidden relative" style={{ background: fragment.imageUrl ? "transparent" : `linear-gradient(135deg, ${fragment.color}22, ${fragment.color}08)` }}>
-                        {fragment.imageUrl ? (
-                          <img src={fragment.imageUrl} alt={fragment.fragmentName} className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <div className="rounded-full w-16 h-16 flex items-center justify-center text-[1.6rem] font-black" style={{ background: `${fragment.color}28`, color: fragment.color }}>{fragment.idol.slice(0, 1)}</div>
-                          </div>
-                        )}
-                        <span className="absolute top-2.5 left-2.5 rounded-full px-2 py-0.5 text-[0.62rem] font-bold" style={{ background: `${fragment.color}dd`, color: "#fff" }}>{fragment.idol}</span>
-                        {fragment.listings.length > 0 && <span className="absolute top-2.5 right-2.5 rounded-full px-2 py-0.5 text-[0.62rem] font-bold" style={{ background: "rgba(255,255,255,0.92)", border: "1px solid #cbe1d3", color: priceGreen }}>{fragment.listings.length}명</span>}
-                      </div>
-                      <div className="px-3 py-2.5">
-                        <h3 className="text-[0.82rem] font-bold leading-snug line-clamp-1" style={{ color: neutralText }}>{fragment.fragmentName}</h3>
-                        <div className="mt-1.5 flex items-center justify-between gap-2">
-                          <p className="text-[0.92rem] font-bold" style={{ color: priceGreen }}>{formatPrice(fragment.floorPrice)}</p>
-                          <span className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[0.68rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>구매 <ArrowRight className="w-2.5 h-2.5" /></span>
+                <div className="min-h-[716px]">
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {paginatedFragments.map((fragment, index) => (
+                      <motion.button key={fragment.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }} onClick={() => openMarketDetail(fragment)}
+                        className="text-left rounded-[22px] overflow-hidden transition-all hover:-translate-y-1 hover:shadow-md" style={panelStyle}>
+                        <div className="w-full h-[280px] overflow-hidden relative" style={{ background: fragment.imageUrl ? "transparent" : `linear-gradient(135deg, ${fragment.color}22, ${fragment.color}08)` }}>
+                          {fragment.imageUrl ? (
+                            <img src={fragment.imageUrl} alt={fragment.fragmentName} className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <div className="rounded-full w-16 h-16 flex items-center justify-center text-[1.6rem] font-black" style={{ background: `${fragment.color}28`, color: fragment.color }}>{fragment.idol.slice(0, 1)}</div>
+                            </div>
+                          )}
+                          <span className="absolute top-2.5 left-2.5 rounded-full px-2 py-0.5 text-[0.62rem] font-bold" style={{ background: `${fragment.color}dd`, color: "#fff" }}>{fragment.idol}</span>
+                          {fragment.listings.length > 0 && <span className="absolute top-2.5 right-2.5 rounded-full px-2 py-0.5 text-[0.62rem] font-bold" style={{ background: "rgba(255,255,255,0.92)", border: "1px solid #cbe1d3", color: priceGreen }}>{fragment.listings.length}명</span>}
                         </div>
-                      </div>
-                    </motion.button>
-                  ))}
-                </div>
-
-                {filteredFragments.length === 0 && (
-                  <div className="rounded-[22px] px-5 py-16 text-center" style={panelStyle}>
-                    <p className="text-[0.92rem] font-semibold mb-2" style={{ color: neutralText }}>{activeFilter === "보유 중" ? "보유한 파편이 없습니다" : "검색 결과가 없습니다"}</p>
-                    <p className="text-[0.82rem]" style={{ color: mutedText }}>{activeFilter === "보유 중" ? "장터에서 파편을 구매하거나 카드 조합 페이지에서 박스를 개봉해보세요." : "필터를 조정하거나 다른 검색어를 입력해보세요."}</p>
-                    <button onClick={() => { setSelectedTeams([]); setActiveFilter("전체"); setQuery(""); }} className="mt-4 rounded-[12px] px-4 py-2 text-[0.8rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>필터 초기화</button>
+                        <div className="px-3 py-2.5">
+                          <h3 className="text-[0.82rem] font-bold leading-snug line-clamp-1" style={{ color: neutralText }}>{fragment.fragmentName}</h3>
+                          <div className="mt-1.5 flex items-center justify-between gap-2">
+                            <p className="text-[0.92rem] font-bold" style={{ color: priceGreen }}>{formatPrice(fragment.floorPrice)}</p>
+                            <span className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[0.68rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>구매 <ArrowRight className="w-2.5 h-2.5" /></span>
+                          </div>
+                        </div>
+                      </motion.button>
+                    ))}
                   </div>
-                )}
+
+                  {filteredFragments.length === 0 && (
+                    <div className="rounded-[22px] px-5 py-16 text-center" style={panelStyle}>
+                      <p className="text-[0.92rem] font-semibold mb-2" style={{ color: neutralText }}>{activeFilter === "보유 중" ? "보유한 파편이 없습니다" : "검색 결과가 없습니다"}</p>
+                      <p className="text-[0.82rem]" style={{ color: mutedText }}>{activeFilter === "보유 중" ? "장터에서 파편을 구매하거나 카드 조합 페이지에서 박스를 개봉해보세요." : "필터를 조정하거나 다른 검색어를 입력해보세요."}</p>
+                      <button onClick={() => { setSelectedTeams([]); setActiveFilter("전체"); setQuery(""); }} className="mt-4 rounded-[12px] px-4 py-2 text-[0.8rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>필터 초기화</button>
+                    </div>
+                  )}
+                </div>
 
                 {filteredFragments.length > 0 && (
                   <div className="mt-6 flex justify-center gap-2">
@@ -675,15 +677,22 @@ export function Market() {
                   </div>
                 )}
 
-                <div className="relative mx-auto mt-4 w-full max-w-[680px]">
-                  <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: mutedText }} />
+                <div className="mx-auto mt-4 flex w-full max-w-[860px]">
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="파편 검색"
-                    className="w-full rounded-none pl-10 pr-4 py-3 text-[0.9rem] outline-none"
-                    style={inputStyle}
+                    className="h-12 flex-1 rounded-none border px-4 text-[0.9rem] outline-none"
+                    style={{ background: "#fff", borderColor: "#6f82a0", color: neutralText }}
                   />
+                  <button
+                    type="button"
+                    aria-label="파편 검색"
+                    className="h-12 w-14 shrink-0 inline-flex items-center justify-center border border-l-0"
+                    style={{ background: "#6f7f94", borderColor: "#6f82a0", color: "#fff" }}
+                  >
+                    <Search className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             </div>
