@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   ArrowRight,
@@ -104,7 +104,6 @@ export function Combine() {
   const navigate = useNavigate();
   const { theme, walletAddress } = useAppSettings();
   const isDark = theme === "dark";
-  const rightColumnRef = useRef<HTMLDivElement | null>(null);
 
   // ── 데이터 상태
   const [fragmentInventory, setFragmentInventory] = useState<InventoryFragment[]>([]);
@@ -123,7 +122,6 @@ export function Combine() {
   const [viewMode, setViewMode] = useState<ViewMode>("combine");
   const [opening, setOpening] = useState(false);
   const [openResult, setOpenResult] = useState<RewardResult | null>(null);
-  const [rightColumnHeight, setRightColumnHeight] = useState<number | null>(null);
 
   // ── 인벤토리 로드 ─────────────────────────────────────────
   useEffect(() => {
@@ -156,26 +154,6 @@ export function Combine() {
       })
       .catch(() => {});
   }, []);
-
-  useEffect(() => {
-    const target = rightColumnRef.current;
-    if (!target) return;
-
-    const updateHeight = () => {
-      setRightColumnHeight(Math.ceil(target.getBoundingClientRect().height));
-    };
-
-    updateHeight();
-
-    if ("ResizeObserver" in window) {
-      const observer = new ResizeObserver(updateHeight);
-      observer.observe(target);
-      return () => observer.disconnect();
-    }
-
-    window.addEventListener("resize", updateHeight);
-    return () => window.removeEventListener("resize", updateHeight);
-  }, [viewMode]);
 
   // ── 테마
   const shellTone = isDark
@@ -407,15 +385,11 @@ export function Combine() {
         </div>
       </header>
 
-      <div className="grid lg:grid-cols-[390px_1fr] gap-6">
+      <div className="relative space-y-6 lg:space-y-0 lg:pl-[414px]">
         <div
-          className="space-y-4 lg:self-start lg:flex lg:flex-col lg:min-h-0 lg:overflow-hidden"
-          style={{
-            height: rightColumnHeight ? `${rightColumnHeight}px` : undefined,
-            maxHeight: rightColumnHeight ? `${rightColumnHeight}px` : undefined,
-          }}
+          className="space-y-4 lg:space-y-0 lg:gap-4 lg:absolute lg:left-0 lg:top-0 lg:bottom-0 lg:w-[390px] lg:flex lg:flex-col lg:min-h-0 lg:overflow-hidden"
         >
-          <Card className="p-4" style={shellTone.panelStrong}>
+          <Card className="p-4 lg:shrink-0" style={shellTone.panelStrong}>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={shellTone.surface}>
@@ -439,7 +413,7 @@ export function Combine() {
           </Card>
 
           <Card className="overflow-hidden lg:flex-1 lg:min-h-0" style={shellTone.panelStrong}>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full h-full lg:flex lg:flex-col lg:min-h-0">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full h-full gap-0 lg:flex lg:flex-col lg:min-h-0">
               <TabsList className="grid w-full grid-cols-2 border-b lg:shrink-0" style={{ background: isDark ? "#22303d" : "#edf1f5", borderColor: isDark ? "#334657" : "#d4dbe4" }}>
                 <TabsTrigger value="fragments" className="data-[state=active]:bg-transparent">
                   <Gem className="w-4 h-4 mr-2" />
@@ -451,7 +425,7 @@ export function Combine() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="fragments" className="mt-0 p-4 h-[620px] overflow-y-scroll lg:h-0 lg:flex-1 lg:min-h-0">
+              <TabsContent value="fragments" className="mt-0 p-4 max-h-[620px] overflow-y-scroll lg:max-h-none lg:flex-1 lg:basis-0 lg:min-h-0">
                 <div className="space-y-2">
                   {sortedFragments.map((fragment) => {
                     const selectedCount = getSelectedCount(selectedFragments, fragment.id);
@@ -528,7 +502,7 @@ export function Combine() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="nfts" className="mt-0 p-4 h-[620px] overflow-y-scroll lg:h-0 lg:flex-1 lg:min-h-0">
+              <TabsContent value="nfts" className="mt-0 p-4 max-h-[620px] overflow-y-scroll lg:max-h-none lg:flex-1 lg:basis-0 lg:min-h-0">
                 <div className="space-y-2">
                   {cardInventory.map((card) => (
                     <Card key={card.id} className="p-3" style={shellTone.surface}>
@@ -570,7 +544,7 @@ export function Combine() {
           </Card>
         </div>
 
-        <div ref={rightColumnRef} className="space-y-6">
+        <div className="space-y-6">
           {viewMode === "openBox" ? (
             <>
               <Card className="p-6 relative overflow-hidden" style={shellTone.panel}>
