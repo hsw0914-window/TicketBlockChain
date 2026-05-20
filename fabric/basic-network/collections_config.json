@@ -2,7 +2,7 @@
   {
     "name": "collectionOrg1",
     "policy": "OR('Org1MSP.member')",
-    "requiredPeerCount": 1,
+    "requiredPeerCount": 0,
     "maxPeerCount": 1,
     "blockToLive": 0,
     "memberOnlyRead": true,
@@ -11,7 +11,7 @@
   {
     "name": "collectionOrg1Org2",
     "policy": "OR('Org1MSP.member', 'Org2MSP.member')",
-    "requiredPeerCount": 1,
+    "requiredPeerCount": 0,
     "maxPeerCount": 2,
     "blockToLive": 0,
     "memberOnlyRead": true,
