@@ -58,7 +58,7 @@ peer lifecycle chaincode approveformyorg \
   --package-id $PACKAGE_ID \
   --sequence ${CC_SEQUENCE} \
   --collections-config $COLLECTIONS_CONFIG \
-  --signature-policy "OR('Org1MSP.member', 'Org2MSP.member')"
+  --signature-policy "OR('Org1MSP.member')"
 
 ## Org2 설치
 echo "Org2 peer0 체인코드 설치"
@@ -85,9 +85,9 @@ peer lifecycle chaincode approveformyorg \
   --package-id $PACKAGE_ID \
   --sequence ${CC_SEQUENCE} \
   --collections-config $COLLECTIONS_CONFIG \
-  --signature-policy "OR('Org1MSP.member', 'Org2MSP.member')"
+  --signature-policy "OR('Org1MSP.member')"
 
-## 커밋 (OR policy — Org1 단독 endorsement로 충족)
+## 커밋 (Org1 단독 endorsement — private data collection이 org1 전용이므로 필수)
 echo "체인코드 커밋"
 peer lifecycle chaincode commit \
   -o orderer.example.com:7050 \
@@ -103,6 +103,6 @@ peer lifecycle chaincode commit \
   --version ${CC_VERSION} \
   --sequence ${CC_SEQUENCE} \
   --collections-config $COLLECTIONS_CONFIG \
-  --signature-policy "OR('Org1MSP.member', 'Org2MSP.member')"
+  --signature-policy "OR('Org1MSP.member')"
 
 echo "체인코드 배포 완료: $CC_NAME"
