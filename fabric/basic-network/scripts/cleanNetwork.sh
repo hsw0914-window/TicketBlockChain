@@ -6,7 +6,7 @@ docker rmi $(docker images dev-* -q) 2>/dev/null
 docker system prune --volumes -f
 
 cd $GOPATH/src/TicketBlockChain/fabric/basic-network/docker
-docker-compose -f docker-compose-test-net.yaml down --volumes --remove-orphans
+COMPOSE_PROJECT_NAME=fabric docker-compose -f docker-compose-test-net.yaml down --volumes --remove-orphans
 
 echo "인증서 및 채널 아티팩트 삭제"
 cd $GOPATH/src/TicketBlockChain/fabric/basic-network
