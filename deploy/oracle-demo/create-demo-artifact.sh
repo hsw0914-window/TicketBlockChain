@@ -10,7 +10,9 @@ rm -rf "${STAGE_DIR}" "${ARTIFACT}"
 mkdir -p "${STAGE_DIR}/Proje" "${STAGE_DIR}/server" "${STAGE_DIR}/deploy/oracle-demo" "${STAGE_DIR}/docs"
 
 : "${VITE_API_URL:=https://juyoung-basechain.duckdns.org}"
+: "${VITE_DEMO_ALLOW_MOCK_SIGNATURE:=true}"
 export VITE_API_URL
+export VITE_DEMO_ALLOW_MOCK_SIGNATURE
 
 echo "[basechain-demo] Building frontend..."
 (cd "${ROOT_DIR}/Proje" && npm run build)

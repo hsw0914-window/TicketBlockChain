@@ -26,6 +26,10 @@ type AppSettingsContextValue = {
 const THEME_STORAGE_KEY = "base-chain-theme";
 const WALLET_STORAGE_KEY = "base-chain-wallet";
 const WALLET_PAUSED_KEY = "base-chain-wallet-paused";
+const API_BASE = (
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:4000")
+).replace(/\/$/, "");
 
 const AppSettingsContext = createContext<AppSettingsContextValue | null>(null);
 
@@ -83,6 +87,31 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     }
   }, [applyWalletState]);
 
+  const syncVerifiedWalletFromServer = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem(WALLET_PAUSED_KEY)) return;
+
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/did/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        wallet_address?: string | null;
+        wallet_verified?: boolean;
+        did_status?: string;
+      };
+      if (data.wallet_address && data.wallet_verified && data.did_status === "verified") {
+        applyWalletState(data.wallet_address, "server-verified");
+      }
+    } catch {
+      // 서버 인증 지갑 자동 복원은 시연 편의 기능이므로 실패 시 조용히 무시한다.
+    }
+  }, [applyWalletState]);
+
   useEffect(() => {
     document.body.dataset.theme = theme;
     localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -105,7 +134,8 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     }
 
     void syncWalletFromProvider();
-  }, [syncWalletFromProvider]);
+    void syncVerifiedWalletFromServer();
+  }, [syncWalletFromProvider, syncVerifiedWalletFromServer]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.ethereum?.on || !window.ethereum?.removeListener) return;
@@ -160,7 +190,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       const token = localStorage.getItem("auth_token");
       if (token) {
         try {
-          const walletRes = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/wallet`, {
+          const walletRes = await fetch(`${API_BASE}/api/auth/wallet`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (walletRes.ok) {

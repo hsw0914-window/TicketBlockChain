@@ -102,7 +102,7 @@ const accentBorder  = "#c6d2df";
 
 export function TicketResale() {
   const { isLoggedIn, user } = useAuth();
-  const { walletConnected, connectWallet, isConnectingWallet } = useAppSettings();
+  const { walletAddress, walletConnected, connectWallet, isConnectingWallet } = useAppSettings();
   const navigate = useNavigate();
 
   // ── DID 인증 상태 ──────────────────────────────────────────
@@ -266,10 +266,15 @@ export function TicketResale() {
     let listingMessage: string | null = null;
     let listingSignature: string | null = null;
     try {
-      const { BrowserProvider } = await import("ethers");
-      const provider = new BrowserProvider(window.ethereum!);
-      const signer   = await provider.getSigner();
-      sellerWalletAddress = await signer.getAddress();
+      if (!window.ethereum && import.meta.env.VITE_DEMO_ALLOW_MOCK_SIGNATURE === "true") {
+        sellerWalletAddress = walletAddress;
+        if (!sellerWalletAddress) throw new Error("서버 인증 지갑을 찾을 수 없습니다.");
+      } else {
+        const { BrowserProvider } = await import("ethers");
+        const provider = new BrowserProvider(window.ethereum!);
+        const signer   = await provider.getSigner();
+        sellerWalletAddress = await signer.getAddress();
+      }
       listingMessage  = `Listing ticket ${selectedTicket.id} seat ${selectedTicket.seatSection} for ${price} KRW at ${Date.now()}`;
       listingSignature = await signListingMessage(listingMessage, sellerWalletAddress);
     } catch (err: unknown) {

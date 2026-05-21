@@ -102,6 +102,16 @@ function normalizeAddress(address) {
   return String(address || '').trim().toLowerCase();
 }
 
+function isDemoMockSignatureAllowed() {
+  return process.env.DEMO_ALLOW_MOCK_SIGNATURE === 'true'
+    && (process.env.FABRIC_MODE || '').trim().toLowerCase() === 'mock'
+    && (process.env.TOSS_MODE || '').trim().toLowerCase() === 'mock';
+}
+
+function isDemoMockSignature(signature, walletAddress) {
+  return String(signature || '').startsWith(`demo-mock-signature:${walletAddress}:`);
+}
+
 async function getBuyerWalletOrThrow(conn, userId) {
   const [[buyerWallet]] = await conn.query(
     'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
@@ -375,16 +385,19 @@ router.post('/listings', requireAuth, async (req, res) => {
       return res.status(400).json({ error: '서명한 지갑이 현재 계정에 연결된 지갑과 일치하지 않습니다' });
     }
 
-    let recoveredAddress = '';
-    try {
-      recoveredAddress = verifyMessage(String(listingMessage), String(listingSignature));
-    } catch {
-      await conn.rollback();
-      return res.status(400).json({ error: 'MetaMask 서명을 검증할 수 없습니다' });
-    }
-    if (normalizeAddress(recoveredAddress) !== normalizeAddress(sellerWalletAddress)) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'MetaMask 서명자와 판매자 지갑이 일치하지 않습니다' });
+    const demoSignature = isDemoMockSignatureAllowed() && isDemoMockSignature(listingSignature, sellerWalletAddress);
+    if (!demoSignature) {
+      let recoveredAddress = '';
+      try {
+        recoveredAddress = verifyMessage(String(listingMessage), String(listingSignature));
+      } catch {
+        await conn.rollback();
+        return res.status(400).json({ error: 'MetaMask 서명을 검증할 수 없습니다' });
+      }
+      if (normalizeAddress(recoveredAddress) !== normalizeAddress(sellerWalletAddress)) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'MetaMask 서명자와 판매자 지갑이 일치하지 않습니다' });
+      }
     }
     if (!String(listingMessage).includes(String(ticketId)) || !String(listingMessage).includes(String(ticket.seatSection))) {
       await conn.rollback();

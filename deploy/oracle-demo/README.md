@@ -24,6 +24,7 @@ Mock boundary:
   - Toss 결제: TOSS_MODE=mock
   - Fabric: FABRIC_MODE=mock
   - NFT 온체인 민팅: ENABLE_ONCHAIN_MINTING=false
+  - MetaMask 없는 판매 등록 시연: DEMO_ALLOW_MOCK_SIGNATURE=true
 ```
 
 ## 왜 이 구조인가
@@ -32,6 +33,7 @@ Mock boundary:
 - 프론트는 정적 파일만 올리므로 Oracle VM 용량을 적게 쓴다.
 - API 서버는 Node 프로세스 하나만 실행한다.
 - 결제/체인/NFT는 mock으로 유지해서 실제 돈, 가스비, 외부 체인 비용이 나가지 않는다.
+- MetaMask가 없는 시연 브라우저에서도 서버에 이미 DID 인증된 지갑이면 티켓 양도 등록 흐름을 보여줄 수 있다.
 - QR 입장과 포인트 적립은 실제 시연 흐름처럼 검증할 수 있다.
 
 ## 시연에서 실제로 동작하는 범위

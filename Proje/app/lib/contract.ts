@@ -44,6 +44,9 @@ export async function signListingMessage(
   message: string,
   walletAddress: string,
 ): Promise<string> {
+  if (!window.ethereum && import.meta.env.VITE_DEMO_ALLOW_MOCK_SIGNATURE === "true") {
+    return `demo-mock-signature:${walletAddress}:${btoa(unescape(encodeURIComponent(message))).slice(0, 64)}`;
+  }
   if (!window.ethereum) throw new Error("MetaMask가 설치되어 있지 않습니다.");
   const provider = new BrowserProvider(window.ethereum);
   const signer = await provider.getSigner();
