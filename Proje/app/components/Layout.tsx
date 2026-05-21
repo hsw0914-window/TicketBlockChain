@@ -217,7 +217,7 @@ export function Layout() {
           boxShadow: headerShadow,
         }}
       >
-        <div className="max-w-[1440px] mx-auto px-5 md:px-6 h-[72px] flex items-center justify-between gap-4">
+        <div className="max-w-[1600px] mx-auto px-5 md:px-6 h-[72px] flex items-center justify-between gap-3">
 
           {/* Logo */}
           <Link to="/" className="flex items-center gap-3 shrink-0 group">
@@ -236,14 +236,14 @@ export function Layout() {
           </Link>
 
           {/* Center Nav */}
-          <nav className="hidden lg:flex items-center gap-1.5">
+          <nav className="hidden lg:flex flex-1 min-w-0 items-center justify-center gap-1">
             {navItems.map((item) => {
               const active = isActive(item.path);
               return (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className="relative px-4 py-2.5 rounded-xl text-[1rem] font-semibold transition-all duration-200 group"
+                  className="relative whitespace-nowrap px-2.5 xl:px-3 py-2.5 rounded-xl text-[0.9rem] xl:text-[0.95rem] font-semibold transition-all duration-200 group"
                   style={{
                     color: active ? (theme === "dark" ? "#e2edf6" : "#223750") : textColor,
                     background: "transparent",
