@@ -678,8 +678,7 @@ export function TicketBooking() {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_360px]">
-        <div className="space-y-6">
+      <div className="space-y-6">
           <section
             className="rounded-[30px] border p-6"
             style={{ background: "#eef3f7", borderColor: "#d5dee7", boxShadow: "0 18px 42px rgba(17,40,73,0.06)" }}
@@ -775,7 +774,10 @@ export function TicketBooking() {
               );
             })}
           </section>
+      </div>
 
+      <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1.65fr)_360px]">
+        <div className="space-y-6">
           {currentStep === 0 && (
             <section className="grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
               <div
