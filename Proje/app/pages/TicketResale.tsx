@@ -21,6 +21,15 @@ function authHeaders() {
 const KBO_TEAMS = ["LG", "두산", "KIA", "삼성", "SSG", "롯데", "NC", "키움", "한화", "KT"];
 const MAX_PRICE_RATIO = 1.1;
 
+function toMoney(value: number | string | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatWon(value: number | string | null | undefined): string {
+  return `${Math.round(toMoney(value)).toLocaleString()}원`;
+}
+
 // ── 타입 ──────────────────────────────────────────────────────
 
 interface Listing {
@@ -157,7 +166,11 @@ export function TicketResale() {
         headers: { Authorization: `Bearer ${localStorage.getItem("auth_token") ?? ""}` },
       });
       const data = await res.json();
-      setListings(Array.isArray(data) ? data : []);
+      setListings(Array.isArray(data) ? data.map((item: Listing) => ({
+        ...item,
+        originalPrice: toMoney(item.originalPrice),
+        listedPrice: toMoney(item.listedPrice),
+      })) : []);
     } catch { /* ignore */ }
     setLoadingList(false);
   }, [sort, selectedTeams]);
@@ -167,8 +180,15 @@ export function TicketResale() {
     try {
       const res  = await fetch(`${API}/my`, { headers: authHeaders() });
       const data = await res.json();
-      setMyListings(data.myListings ?? []);
-      setHistory(data.history ?? []);
+      setMyListings((data.myListings ?? []).map((item: MyListing) => ({
+        ...item,
+        originalPrice: toMoney(item.originalPrice),
+        listedPrice: toMoney(item.listedPrice),
+      })));
+      setHistory((data.history ?? []).map((item: Trade) => ({
+        ...item,
+        listedPrice: toMoney(item.listedPrice),
+      })));
     } catch { /* ignore */ }
   }, [isLoggedIn]);
 
@@ -180,7 +200,10 @@ export function TicketResale() {
     try {
       const res  = await fetch(`${API}/my-tickets`, { headers: authHeaders() });
       const data = await res.json();
-      setMyTickets(Array.isArray(data) ? data : []);
+      setMyTickets(Array.isArray(data) ? data.map((item: MyTicket) => ({
+        ...item,
+        originalPrice: toMoney(item.originalPrice),
+      })) : []);
     } catch { /* ignore */ }
     setLoadingTickets(false);
   };
@@ -255,7 +278,7 @@ export function TicketResale() {
     if (!selectedTicket || !listedPrice) { setPostError("티켓과 가격을 선택해주세요"); return; }
     const price = Number(listedPrice);
     const max   = Math.floor(selectedTicket.originalPrice * MAX_PRICE_RATIO);
-    if (price > max) { setPostError(`원가의 110% (${max.toLocaleString()}원)를 초과할 수 없습니다`); return; }
+    if (price > max) { setPostError(`원가의 110% (${formatWon(max)})를 초과할 수 없습니다`); return; }
     if (price < 1000) { setPostError("1,000원 이상이어야 합니다"); return; }
 
     setPosting(true); setPostError("");
@@ -540,10 +563,10 @@ export function TicketResale() {
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-[1.22rem] font-bold" style={{ color: priceGreen }}>
-                          {l.listedPrice.toLocaleString()}원
+                          {formatWon(l.listedPrice)}
                         </p>
                         <p className="text-[0.72rem]" style={{ color: mutedText }}>
-                          원가 {l.originalPrice.toLocaleString()}원
+                          원가 {formatWon(l.originalPrice)}
                         </p>
                       </div>
                     </div>
@@ -603,7 +626,7 @@ export function TicketResale() {
                         </div>
                         <p className="text-[0.76rem] mb-1.5" style={{ color: mutedText }}>{l.gameDate} · {l.seatSection}</p>
                         <div className="flex items-center justify-between">
-                          <span className="text-[0.92rem] font-bold" style={{ color: priceGreen }}>{l.listedPrice.toLocaleString()}원</span>
+                          <span className="text-[0.92rem] font-bold" style={{ color: priceGreen }}>{formatWon(l.listedPrice)}</span>
                           <button onClick={() => handleCancel(l)} disabled={cancelling === l.id}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[0.74rem] font-semibold"
                             style={{ background: "#fce8e8", color: "#b94040", border: "1px solid #f0c4c4", cursor: "pointer" }}>
@@ -638,7 +661,7 @@ export function TicketResale() {
                           </span>
                         </div>
                         <p className="text-[0.76rem]" style={{ color: mutedText }}>{h.gameDate} · {h.tradedAt ?? "-"}</p>
-                        <p className="text-[0.88rem] font-bold mt-1" style={{ color: neutralText }}>{h.listedPrice.toLocaleString()}원</p>
+                        <p className="text-[0.88rem] font-bold mt-1" style={{ color: neutralText }}>{formatWon(h.listedPrice)}</p>
                       </div>
                     ))}
                   </div>
@@ -670,7 +693,7 @@ export function TicketResale() {
                 ["날짜", selectedListing.gameDate],
                 ["좌석", selectedListing.seatSection],
                 ["판매자", selectedListing.sellerName],
-                ["원가", `${selectedListing.originalPrice.toLocaleString()}원`],
+                ["원가", formatWon(selectedListing.originalPrice)],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between text-[0.85rem]">
                   <span style={{ color: mutedText }}>{k}</span>
@@ -680,7 +703,7 @@ export function TicketResale() {
               <div className="pt-2 border-t" style={{ borderColor: lineColor }}>
                 <div className="flex justify-between text-[0.95rem]">
                   <span style={{ color: mutedText }}>결제 금액</span>
-                  <span style={{ color: priceGreen, fontWeight: 700 }}>{selectedListing.listedPrice.toLocaleString()}원</span>
+                  <span style={{ color: priceGreen, fontWeight: 700 }}>{formatWon(selectedListing.listedPrice)}</span>
                 </div>
                 <div className="flex justify-between text-[0.75rem] mt-1">
                   <span style={{ color: "#9aaab8" }}>수수료</span>
@@ -794,7 +817,7 @@ export function TicketResale() {
                           </div>
                           <div className="text-right">
                             <p className="text-[0.84rem] font-bold" style={{ color: priceGreen }}>
-                              {t.originalPrice.toLocaleString()}원
+                              {formatWon(t.originalPrice)}
                             </p>
                             {t.tokenId !== null ? (
                               <p className="text-[0.68rem]" style={{ color: actionBlue, fontWeight: 600 }}>NFT #{t.tokenId}</p>
@@ -814,7 +837,7 @@ export function TicketResale() {
                       <label className="block text-[0.8rem] font-semibold mb-1.5" style={{ color: mutedText }}>
                         판매 희망가
                         <span className="ml-1 font-normal" style={{ color: actionBlue }}>
-                          (최대 {Math.floor(selectedTicket.originalPrice * MAX_PRICE_RATIO).toLocaleString()}원)
+                          (최대 {formatWon(Math.floor(selectedTicket.originalPrice * MAX_PRICE_RATIO))})
                         </span>
                       </label>
                       <div className="flex items-center gap-2">
@@ -824,7 +847,7 @@ export function TicketResale() {
                         <span className="text-[0.88rem]" style={{ color: mutedText }}>원</span>
                       </div>
                       <p className="text-[0.76rem] mt-1" style={{ color: mutedText }}>
-                        원가: {selectedTicket.originalPrice.toLocaleString()}원
+                        원가: {formatWon(selectedTicket.originalPrice)}
                       </p>
                     </div>
 

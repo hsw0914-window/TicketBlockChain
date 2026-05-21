@@ -329,7 +329,7 @@ export function Attendance() {
               style={{ filter: "drop-shadow(0 0 8px rgba(255,170,0,.8))" }} />
             <h3 className="text-[#e0d9ff]">연속 출석 보상</h3>
             <span className="ml-auto text-xs text-[#a393d1] bg-white/5 px-2 py-1 rounded-lg border border-white/10">
-              현�� {streak}일 연속
+              현재 {streak}일 연속
             </span>
           </div>
 

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import { Layout } from "./components/Layout";
 import { Home } from "./pages/Home";
 import { NotFound } from "./pages/NotFound";
@@ -70,6 +70,7 @@ export const router = createBrowserRouter([
       { path: "mypage/raffle",            Component: withSuspense(Raffle) },
       { path: "raffle",                   Component: withSuspense(Raffle) },
       { path: "ticket-resale",            Component: withSuspense(TicketResale) },
+      { path: "resale",                   element: <Navigate to="/ticket-resale" replace /> },
       { path: "market/buy/success",          Component: withSuspense(TicketResaleSuccess) },
       { path: "market/fragment/buy/success", Component: withSuspense(MarketBuySuccess) },
       { path: "collection",               Component: withSuspense(Collection) },
