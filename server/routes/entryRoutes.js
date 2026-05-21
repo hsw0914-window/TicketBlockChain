@@ -14,6 +14,13 @@ function setPool(pool) { _pool = pool; }
 
 const QR_SECRET = process.env.QR_SECRET;
 const DEFAULT_QR_SLOT_SECONDS = 10;
+const DEFAULT_ENTRY_EARN_RATE = membershipService.TIER_EARN_RATES['베이직'];
+
+function calculateEntryRewardPoint(price, tier) {
+  const normalizedTier = membershipService.normalizeTier(tier);
+  const rate = membershipService.TIER_EARN_RATES[normalizedTier] ?? DEFAULT_ENTRY_EARN_RATE;
+  return Math.max(0, Math.floor(Number(price || 0) * rate));
+}
 
 function getQrSlotSeconds() {
   const value = Number.parseInt(process.env.QR_SLOT_SECONDS || '', 10);
@@ -154,6 +161,7 @@ router.post('/verify', async (req, res) => {
     let boxTxHash = null;
     let memberJoined = false;
     let ownerUserId = null;
+    let earnedPoint = 0;
     try {
       const [[walletRow]] = await _pool.query(
         'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
@@ -182,6 +190,7 @@ router.post('/verify', async (req, res) => {
 
         if (memberJoined) {
           const membershipSummary = await membershipService.getMembershipSummary(_pool, walletRow.user_id);
+          earnedPoint = calculateEntryRewardPoint(ticket.price, membershipSummary.currentTier);
           if (membershipSummary.canTierUp && membershipSummary.nextTier) {
             const [[existingTierNotice]] = await _pool.query(
               `SELECT id FROM notification_events
@@ -199,22 +208,30 @@ router.post('/verify', async (req, res) => {
               });
             }
           }
-          await membershipService.recordPointEvent(_pool, {
-            userId: walletRow.user_id,
-            walletAddress: ticket.wallet_address,
-            eventType: 'ENTRY_REWARD',
-            reason: 'QR 입장 완료',
-            amount: fabricResult.earnedPoint || 0,
-            metadata: { ticketId, gameId: ticket.game_id, gateId: gateId || 'GATE_DEFAULT' },
-          });
-          console.log(`[entry] 멤버십 입장 포인트 적립 완료: user=${walletRow.user_id}, point=${fabricResult.earnedPoint || 0}`);
+          if (earnedPoint > 0) {
+            await membershipService.recordPointEvent(_pool, {
+              userId: walletRow.user_id,
+              walletAddress: ticket.wallet_address,
+              eventType: 'ENTRY_REWARD',
+              reason: 'QR 입장 완료',
+              amount: earnedPoint,
+              metadata: {
+                ticketId,
+                gameId: ticket.game_id,
+                gateId: gateId || 'GATE_DEFAULT',
+                tier: membershipSummary.currentTier,
+                source: 'db_membership',
+                fabricEarnedPoint: Number(fabricResult.earnedPoint ?? 0),
+              },
+            });
+          }
+          console.log(`[entry] 멤버십 입장 포인트 적립 완료: user=${walletRow.user_id}, point=${earnedPoint}`);
         }
       }
     } catch (boxErr) {
       console.error('[entry] 입장 보상 처리 실패 (입장은 유효):', boxErr.message);
     }
 
-    const earnedPoint = memberJoined ? Number(fabricResult.earnedPoint ?? 0) : 0;
     console.log(`[entry] 입장 완료 - 티켓: ${ticketId} | 포인트 적립: ${earnedPoint}P | 등급: ${fabricResult.membershipGrade ?? '-'}`);
 
     return res.json({
