@@ -114,6 +114,15 @@ const DEMO_ADMIN_USER = {
   password: 'admin1234',
 };
 
+const ROOT_ADMIN_USER = {
+  user_id:  'root_user',
+  nickname: '입장관리자',
+  email:    'root@gmail.com',
+  password: 'root1234',
+};
+
+const ADMIN_USER_IDS = [DEMO_ADMIN_USER.user_id, ROOT_ADMIN_USER.user_id];
+
 const SEED_STADIUMS = [
   { id: "jamsil",   name: "잠실야구장",              location: "서울특별시 송파구",    capacity: 25000 },
   { id: "sajik",    name: "사직야구장",              location: "부산광역시 동래구",    capacity: 24000 },
@@ -1161,6 +1170,14 @@ async function initDB() {
   );
   console.log(`✅ QR 입장 관리자 계정 생성: ${DEMO_ADMIN_USER.email} / ${DEMO_ADMIN_USER.password}`);
 
+  const rootAdminPasswordHash = await bcrypt.hash(ROOT_ADMIN_USER.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role)
+     VALUES (?, ?, ?, ?, 'local', 'admin')`,
+    [ROOT_ADMIN_USER.user_id, ROOT_ADMIN_USER.nickname, ROOT_ADMIN_USER.email, rootAdminPasswordHash]
+  );
+  console.log(`✅ QR 입장 관리자 계정 생성: ${ROOT_ADMIN_USER.email} / ${ROOT_ADMIN_USER.password}`);
+
   console.log("✅ DB 초기화 및 시드 데이터 삽입 완료");
   } finally {
     await conn.query(`SELECT RELEASE_LOCK(?)`, [initLockName]).catch(() => {});
@@ -1197,11 +1214,24 @@ async function ensureRuntimeMigrations(conn) {
     [DEMO_ADMIN_USER.user_id, DEMO_ADMIN_USER.nickname, DEMO_ADMIN_USER.email, adminPasswordHash]
   );
 
+  const rootAdminPasswordHash = await bcrypt.hash(ROOT_ADMIN_USER.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role, is_active)
+     VALUES (?, ?, ?, ?, 'local', 'admin', 1)
+     ON DUPLICATE KEY UPDATE
+       nickname = VALUES(nickname),
+       password_hash = VALUES(password_hash),
+       login_type = 'local',
+       role = 'admin',
+       is_active = 1`,
+    [ROOT_ADMIN_USER.user_id, ROOT_ADMIN_USER.nickname, ROOT_ADMIN_USER.email, rootAdminPasswordHash]
+  );
+
   await conn.query(
     `UPDATE users
         SET role = 'user'
-      WHERE role = 'admin' AND user_id <> ?`,
-    [DEMO_ADMIN_USER.user_id]
+      WHERE role = 'admin' AND user_id NOT IN (?)`,
+    [ADMIN_USER_IDS]
   );
 }
 
