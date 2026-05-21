@@ -1,7 +1,14 @@
 const express = require('express');
 const crypto  = require('crypto');
 const { requireAuth } = require('../middleware/auth');
-const { mintFragmentOnChain, burnFragmentOnChain, mintCardOnChain, burnBoxOnChain } = require('../services/nftService');
+const {
+  mintFragmentOnChain,
+  burnFragmentOnChain,
+  getFragmentBalanceOnChain,
+  mintCardOnChain,
+  burnBoxOnChain,
+  isOnChainMintingEnabled,
+} = require('../services/nftService');
 
 const router = express.Router();
 let _pool;
@@ -181,7 +188,7 @@ router.post('/combine', requireAuth, async (req, res) => {
     // ─── 온체인 처리 백그라운드 (DB 커밋 후 즉시 응답, 블록체인은 비동기) ──
     const walletAddress = await getWalletAddress(userId);
     const hasWallet = walletAddress && walletAddress !== `0x${'0'.repeat(40)}`;
-    const onChainEnabled = !!(process.env.MINTER_PRIVATE_KEY && process.env.FRAGMENT_NFT_ADDRESS);
+    const onChainEnabled = isOnChainMintingEnabled(['MINTER_PRIVATE_KEY', 'FRAGMENT_NFT_ADDRESS']);
     const onChainPending = hasWallet && onChainEnabled;
 
     // ─── 트랜잭션 이력 저장 (임시 해시로 먼저 저장) ─────────
@@ -204,6 +211,18 @@ router.post('/combine', requireAuth, async (req, res) => {
     if (onChainPending) {
       Promise.resolve()
         .then(async () => {
+          const requiredCount = 2;
+          const onChainBalance = await getFragmentBalanceOnChain(walletAddress, frag.onchain_id);
+          if (onChainBalance < requiredCount) {
+            const missingCount = requiredCount - onChainBalance;
+            console.warn(
+              `[combine] 온체인 파편 잔액 보정: wallet=${walletAddress}, fragment=${frag.onchain_id}, balance=${onChainBalance}, mint=${missingCount}`,
+            );
+            for (let i = 0; i < missingCount; i += 1) {
+              await mintFragmentOnChain(walletAddress, frag.onchain_id);
+            }
+          }
+
           await burnFragmentOnChain(walletAddress, frag.onchain_id);
           const realTxHash = await mintCardOnChain(walletAddress, recipe.result_card_type_id);
           await _pool.query(
@@ -347,7 +366,7 @@ router.post('/box/open', requireAuth, async (req, res) => {
 
     // ─── 온체인 민팅 백그라운드 → 완료 후 진짜 해시로 업데이트 ──
     const hasWallet = walletAddress && walletAddress !== `0x${'0'.repeat(40)}`;
-    const onChainEnabled = !!(process.env.MINTER_PRIVATE_KEY && process.env.FRAGMENT_NFT_ADDRESS && process.env.BOX_NFT_ADDRESS);
+    const onChainEnabled = isOnChainMintingEnabled(['MINTER_PRIVATE_KEY', 'FRAGMENT_NFT_ADDRESS', 'BOX_NFT_ADDRESS']);
     const onChainPending = hasWallet && onChainEnabled;
     if (onChainPending) {
       Promise.resolve()

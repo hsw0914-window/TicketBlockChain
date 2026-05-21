@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiUrl } from "../lib/api";
 
 export interface QRData {
   available: boolean;
@@ -11,7 +10,7 @@ export interface QRData {
 /**
  * 티켓 QR 훅
  * - 경기 시작 2시간 전부터 QR 활성화 (백엔드에서 판단)
- * - 1분마다 QR 자동 갱신
+ * - 서버가 내려주는 QR 만료 시간에 맞춰 자동 갱신
  * - QR 비활성 시 30초마다 폴링
  */
 export function useTicketQR(
@@ -20,19 +19,24 @@ export function useTicketQR(
   ticketStatus: string, // "ACTIVE" | "USED" | "사용 가능" | "사용 완료" 등
 ) {
   const [qrData, setQrData] = useState<QRData | null>(null);
-  const [countdown, setCountdown] = useState(60);
+  const [countdown, setCountdown] = useState(10);
 
   const isActive = ticketStatus === "ACTIVE" || ticketStatus === "사용 가능";
 
   const fetchQR = useCallback(async () => {
     if (!ticketId || !walletAddress) return;
     try {
-      const res = await fetch(
-        apiUrl(`/api/tickets/${ticketId}/qr?walletAddress=${encodeURIComponent(walletAddress)}`),
+      const res  = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/tickets/${ticketId}/qr?walletAddress=${walletAddress}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("auth_token") ?? ""}`,
+          },
+        },
       );
       const data: QRData = await res.json();
       setQrData(data);
-      if (data.available && data.remainingSeconds) {
+      if (data.available && typeof data.remainingSeconds === "number") {
         setCountdown(data.remainingSeconds);
       }
     } catch (err) {
@@ -57,7 +61,7 @@ export function useTicketQR(
       setCountdown((prev) => {
         if (prev <= 1) {
           fetchRef.current();
-          return 60; // 서버 응답 오기 전 임시값
+          return qrData.remainingSeconds ?? 10; // 서버 응답 오기 전 임시값
         }
         return prev - 1;
       });

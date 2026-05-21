@@ -1,5 +1,6 @@
 require('dotenv').config();
-const mysql = require("mysql2/promise");
+const mysql  = require("mysql2/promise");
+const bcrypt = require("bcryptjs");
 
 const DB_CONFIG = {
   host: process.env.DB_HOST || "localhost",
@@ -10,15 +11,14 @@ const DB_CONFIG = {
 };
 
 const DB_NAME = "ticketblockchain";
-const RESET_DB_ON_START = String(process.env.RESET_DB_ON_START || "false").toLowerCase() === "true";
 
 // ─── 시드 데이터 ──────────────────────────────────────────
 
 const SEED_USERS = [
-  { user_id: "admin_01",  nickname: "BASE CHAIN 운영팀", role: "admin" },
-  { user_id: "user_bh",   nickname: "Baseball Hunter", role: "user" },
-  { user_id: "user_tm",   nickname: "Ticket Mint", role: "user" },
-  { user_id: "viewer",    nickname: "나", role: "user" },
+  { user_id: "admin_01",  nickname: "BASE CHAIN 운영팀" },
+  { user_id: "user_bh",   nickname: "Baseball Hunter" },
+  { user_id: "user_tm",   nickname: "Ticket Mint" },
+  { user_id: "viewer",    nickname: "나" },
 ];
 
 const SEED_POSTS = [
@@ -98,118 +98,179 @@ const SEED_COMMENTS = [
   },
 ];
 
+// ─── 테스트 계정 (서버 재시작마다 동일하게 복구) ──────────
+const TEST_USER = {
+  user_id:       'test_user',
+  nickname:      '테스트유저',
+  email:         'test@basechain.dev',
+  password:      'test1234',
+  wallet_address: '0x15f7cc396e4C66296cE92225830e24f491941Fc2',
+};
+
+const DEMO_ADMIN_USER = {
+  user_id:  'admin_user',
+  nickname: '시연 관리자',
+  email:    'admin@basechain.dev',
+  password: 'admin1234',
+};
+
 const SEED_STADIUMS = [
-  { id: "jamsil",  name: "잠실야구장",              location: "서울특별시 송파구",   capacity: 25000 },
-  { id: "sajik",   name: "사직야구장",              location: "부산광역시 동래구",   capacity: 24000 },
-  { id: "munhak",  name: "인천SSG랜더스필드",        location: "인천광역시 미추홀구", capacity: 23000 },
-  { id: "gochuck", name: "고척스카이돔",             location: "서울특별시 구로구",   capacity: 16744 },
-  { id: "gwangju", name: "광주-기아 챔피언스 필드",  location: "광주광역시 북구",     capacity: 20000 },
-  { id: "daejeon", name: "한화생명 이글스파크",      location: "대전광역시 중구",     capacity: 13000 },
-  { id: "daegu",   name: "대구삼성라이온즈파크",      location: "대구광역시 수성구",   capacity: 24000 },
-  { id: "changwon",name: "창원NC파크",               location: "경상남도 창원시",     capacity: 22000 },
-  { id: "suwon",   name: "수원KT위즈파크",            location: "경기도 수원시",       capacity: 20000 },
-  { id: "pohang",  name: "포항야구장",                location: "경상북도 포항시",     capacity: 12000 },
+  { id: "jamsil",   name: "잠실야구장",              location: "서울특별시 송파구",    capacity: 25000 },
+  { id: "sajik",    name: "사직야구장",              location: "부산광역시 동래구",    capacity: 24000 },
+  { id: "munhak",   name: "인천SSG랜더스필드",       location: "인천광역시 미추홀구",  capacity: 23000 },
+  { id: "gochuck",  name: "고척스카이돔",            location: "서울특별시 구로구",    capacity: 16744 },
+  { id: "gwangju",  name: "광주-기아 챔피언스 필드", location: "광주광역시 북구",      capacity: 20000 },
+  { id: "daejeon",  name: "한화생명 이글스파크",     location: "대전광역시 중구",      capacity: 13000 },
+  { id: "daegu",    name: "삼성 라이온즈파크",       location: "대구광역시 수성구",    capacity: 24000 },
+  { id: "changwon", name: "창원NC파크",              location: "경상남도 창원시 마산", capacity: 22000 },
+  { id: "suwon",    name: "수원KT위즈파크",          location: "경기도 수원시 장안구", capacity: 20000 },
 ];
 
 const SEED_GAMES = [
-  // 2026.05.15 기준 KBO 공식 일정 기반 데모 경기
-  { id: "G001", home_team: "두산", away_team: "롯데", game_date: "2026-05-15", game_time: "16:00:00", stadium_id: "jamsil",   status: "OPEN",     base_price: 13000 },
-  { id: "G002", home_team: "SSG",  away_team: "LG",   game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "munhak",   status: "ALMOST",   base_price: 13000 },
-  { id: "G003", home_team: "삼성", away_team: "KIA",  game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "daegu",    status: "OPEN",     base_price: 13000 },
-  { id: "G004", home_team: "NC",   away_team: "키움", game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "changwon", status: "OPEN",     base_price: 13000 },
-  { id: "G005", home_team: "KT",   away_team: "한화", game_date: "2026-05-15", game_time: "18:30:00", stadium_id: "suwon",    status: "OPEN",     base_price: 13000 },
-  { id: "G006", home_team: "두산", away_team: "롯데", game_date: "2026-05-16", game_time: "17:00:00", stadium_id: "jamsil",   status: "OPEN",     base_price: 13000 },
-  { id: "G007", home_team: "SSG",  away_team: "LG",   game_date: "2026-05-16", game_time: "17:00:00", stadium_id: "munhak",   status: "UPCOMING", base_price: 13000 },
-  { id: "G008", home_team: "KT",   away_team: "한화", game_date: "2026-05-16", game_time: "14:00:00", stadium_id: "suwon",    status: "UPCOMING", base_price: 13000 },
-  { id: "G009", home_team: "두산", away_team: "NC",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "jamsil",   status: "UPCOMING", base_price: 13000 },
-  { id: "G010", home_team: "KIA",  away_team: "LG",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "gwangju",  status: "UPCOMING", base_price: 13000 },
+  // ── 5월 초 (과거 경기, 이미 종료) ──────────────────────────
+  { id: "G001", home_team: "두산", away_team: "LG",   game_date: "2026-05-02", game_time: "18:30:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G002", home_team: "KIA",  away_team: "삼성",  game_date: "2026-05-03", game_time: "14:00:00", stadium_id: "gwangju", status: "SOLDOUT",  base_price: 13000 },
+  { id: "G003", home_team: "롯데", away_team: "NC",   game_date: "2026-05-04", game_time: "14:00:00", stadium_id: "sajik",   status: "SOLDOUT",  base_price: 13000 },
+  { id: "G004", home_team: "한화", away_team: "SSG",  game_date: "2026-05-06", game_time: "18:30:00", stadium_id: "daejeon", status: "SOLDOUT",  base_price: 13000 },
+  { id: "G005", home_team: "키움", away_team: "KT",   game_date: "2026-05-07", game_time: "18:30:00", stadium_id: "gochuck", status: "SOLDOUT",  base_price: 13000 },
+  { id: "G006", home_team: "LG",   away_team: "두산",  game_date: "2026-05-09", game_time: "18:30:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G007", home_team: "삼성", away_team: "롯데",  game_date: "2026-05-10", game_time: "14:00:00", stadium_id: "daegu",   status: "SOLDOUT",  base_price: 13000 },
+  { id: "G008", home_team: "NC",   away_team: "KIA",   game_date: "2026-05-13", game_time: "18:30:00", stadium_id: "changwon",status: "SOLDOUT",  base_price: 13000 },
+  { id: "G009", home_team: "SSG",  away_team: "한화",  game_date: "2026-05-14", game_time: "18:30:00", stadium_id: "munhak",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G010", home_team: "두산", away_team: "KT",   game_date: "2026-05-15", game_time: "14:00:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G011", home_team: "LG",   away_team: "키움",  game_date: "2026-05-16", game_time: "14:00:00", stadium_id: "jamsil",  status: "SOLDOUT",  base_price: 13000 },
+  { id: "G012", home_team: "KIA",  away_team: "NC",   game_date: "2026-05-17", game_time: "14:00:00", stadium_id: "gwangju", status: "ALMOST",   base_price: 13000 },
+  // ── 5월 18~19일 (오늘 / 내일 — QR·환불 테스트용) ──────────
+  { id: "G013", home_team: "두산", away_team: "한화",  game_date: "2026-05-18", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G014", home_team: "LG",   away_team: "삼성",  game_date: "2026-05-18", game_time: "18:30:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G015", home_team: "KIA",  away_team: "SSG",  game_date: "2026-05-18", game_time: "18:30:00", stadium_id: "gwangju", status: "OPEN",     base_price: 13000 },
+  { id: "G016", home_team: "롯데", away_team: "KT",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "sajik",   status: "OPEN",     base_price: 13000 },
+  { id: "G017", home_team: "키움", away_team: "NC",   game_date: "2026-05-19", game_time: "18:30:00", stadium_id: "gochuck", status: "OPEN",     base_price: 13000 },
+  // ── 5월 20일~말 (예매 가능 / UPCOMING) ─────────────────────
+  { id: "G018", home_team: "한화", away_team: "두산",  game_date: "2026-05-20", game_time: "18:30:00", stadium_id: "daejeon", status: "OPEN",     base_price: 13000 },
+  { id: "G019", home_team: "삼성", away_team: "LG",   game_date: "2026-05-21", game_time: "18:30:00", stadium_id: "daegu",   status: "OPEN",     base_price: 13000 },
+  { id: "G020", home_team: "SSG",  away_team: "KIA",   game_date: "2026-05-22", game_time: "18:30:00", stadium_id: "munhak",  status: "OPEN",     base_price: 13000 },
+  { id: "G021", home_team: "두산", away_team: "NC",   game_date: "2026-05-23", game_time: "14:00:00", stadium_id: "jamsil",  status: "OPEN",     base_price: 13000 },
+  { id: "G022", home_team: "KIA",  away_team: "롯데",  game_date: "2026-05-24", game_time: "14:00:00", stadium_id: "gwangju", status: "ALMOST",   base_price: 13000 },
+  { id: "G023", home_team: "LG",   away_team: "한화",  game_date: "2026-05-25", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
+  { id: "G024", home_team: "KT",   away_team: "키움",  game_date: "2026-05-27", game_time: "18:30:00", stadium_id: "suwon",   status: "UPCOMING", base_price: 13000 },
+  { id: "G025", home_team: "NC",   away_team: "SSG",  game_date: "2026-05-28", game_time: "18:30:00", stadium_id: "changwon",status: "UPCOMING", base_price: 13000 },
+  { id: "G026", home_team: "롯데", away_team: "삼성",  game_date: "2026-05-29", game_time: "18:30:00", stadium_id: "sajik",   status: "UPCOMING", base_price: 13000 },
+  { id: "G027", home_team: "두산", away_team: "KIA",  game_date: "2026-05-30", game_time: "14:00:00", stadium_id: "jamsil",  status: "UPCOMING", base_price: 13000 },
+  { id: "G028", home_team: "한화", away_team: "LG",   game_date: "2026-05-31", game_time: "14:00:00", stadium_id: "daejeon", status: "UPCOMING", base_price: 13000 },
 ];
 
-const SEED_TICKET_LISTINGS = [
-  { id: "tl-seed-0000-0000-000000000001", seller_id: "user_bh",  game_date: "2026-05-15", home_team: "두산", away_team: "롯데", seat_section: "1루 내야 지정석", original_price: 13000, listed_price: 14000, status: "active" },
-  { id: "tl-seed-0000-0000-000000000002", seller_id: "user_tm",  game_date: "2026-05-15", home_team: "SSG",  away_team: "LG",   seat_section: "외야 응원석",      original_price: 13000, listed_price: 13000, status: "active" },
-  { id: "tl-seed-0000-0000-000000000003", seller_id: "admin_01", game_date: "2026-05-15", home_team: "삼성", away_team: "KIA",  seat_section: "3루 내야 지정석", original_price: 13000, listed_price: 13500, status: "active" },
-  { id: "tl-seed-0000-0000-000000000004", seller_id: "user_bh",  game_date: "2026-05-16", home_team: "두산", away_team: "롯데", seat_section: "외야 응원석",     original_price: 13000, listed_price: 12000, status: "active" },
-  { id: "tl-seed-0000-0000-000000000005", seller_id: "user_tm",  game_date: "2026-05-16", home_team: "KT",   away_team: "한화", seat_section: "내야 일반석",     original_price: 13000, listed_price: 13000, status: "active" },
-];
+function dateTimeDaysBefore(dateStr, days, timeStr) {
+  const date = new Date(`${dateStr}T00:00:00+09:00`);
+  date.setDate(date.getDate() - days);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d} ${timeStr}`;
+}
 
-async function refreshDemoSchedule(conn) {
-  for (const stadium of SEED_STADIUMS) {
-    await conn.query(
-      `INSERT INTO stadiums (id, name, location, capacity)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE name = VALUES(name), location = VALUES(location), capacity = VALUES(capacity)`,
-      [stadium.id, stadium.name, stadium.location, stadium.capacity],
-    );
-  }
+function bookingOpenAtForGame(game) {
+  if (game.status === 'UPCOMING') return dateTimeDaysBefore(game.game_date, 2, '10:00:00');
+  return '2020-01-01 00:00:00';
+}
 
-  for (const game of SEED_GAMES) {
-    await conn.query(
-      `INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         home_team = VALUES(home_team),
-         away_team = VALUES(away_team),
-         game_date = VALUES(game_date),
-         game_time = VALUES(game_time),
-         stadium_id = VALUES(stadium_id),
-         status = VALUES(status),
-         base_price = VALUES(base_price)`,
-      [game.id, game.home_team, game.away_team, game.game_date, game.game_time, game.stadium_id, game.status, game.base_price],
-    );
-  }
-
-  await conn.query(`
-    UPDATE ticket_listings tl
-    JOIN games g ON g.home_team = tl.home_team AND g.away_team = tl.away_team
-       SET tl.game_date = g.game_date
-     WHERE tl.status = 'active'
-  `);
-
-  const [[listingTable]] = await conn.query(`SHOW TABLES LIKE 'ticket_listings'`);
-  if (listingTable) {
-    for (const listing of SEED_TICKET_LISTINGS) {
-      await conn.query(
-        `UPDATE ticket_listings
-            SET seller_id = ?, game_date = ?, home_team = ?, away_team = ?,
-                seat_section = ?, original_price = ?, listed_price = ?, status = ?
-          WHERE id = ?`,
-        [
-          listing.seller_id,
-          listing.game_date,
-          listing.home_team,
-          listing.away_team,
-          listing.seat_section,
-          listing.original_price,
-          listing.listed_price,
-          listing.status,
-          listing.id,
-        ],
-      );
-    }
-  }
+function raffleOpenAtForGame(game) {
+  if (game.status === 'UPCOMING') return dateTimeDaysBefore(game.game_date, 2, '08:00:00');
+  return '2020-01-01 00:00:00';
 }
 
 // ─── 초기화 함수 ──────────────────────────────────────────
 
+const GOODS_SEED = [
+  ['kt-sign-ball', 1, 1, 'kt-goods', 'KT', 'KT 위즈 사인볼 파편', 'KT 위즈 공인구 사인볼 카드', '/goods/kt-sign-ball.png', 'KT 위즈 선수단의 공식 공인구 사인볼 완성 카드', '위즈 파크의 열기를 담은 공인구 사인볼 조각', 'HOT', '#c8102e', '#ff6b6b', 88, 14, 6, '위즈 파크 현장 직관 팬들 사이에서 빠르게 수요가 붙는 파편입니다.', [15200, 16400, 17800, 18500, 17900, 19200, 20500]],
+  ['nc-sticker', 2, 2, 'nc-goods', 'NC', 'NC 다이노스 스티커 파편', 'NC 다이노스 시즌 스티커 컬렉션 카드', '/goods/nc-sticker.png', 'NC 다이노스 팬만을 위한 시즌 한정 스티커 컬렉션', '창원 NC파크 한정 시즌 스티커 조각', 'RISING', '#0033a0', '#7ec8ff', 74, 14, 6, '창원 원정 팬들이 가장 많이 찾는 시즌 한정 파편입니다.', [11200, 11800, 12300, 12100, 13000, 13400, 14200]],
+  ['ssg-goods', 3, 3, 'ssg-goods', 'SSG', 'SSG 랜더스 개막 굿즈 파편', 'SSG 랜더스 개막 굿즈 카드', '/goods/ssg.png', 'SSG 랜더스 개막 시즌 공식 굿즈 완성 카드', '문학구장 개막 시리즈 기념 굿즈 조각', 'LIVE', '#ce1141', '#ff9d3b', 65, 14, 6, '개막 시즌 문학구장 기념 굿즈 파편으로 꾸준히 거래됩니다.', [8800, 9100, 9400, 9200, 9700, 10100, 10600]],
+  ['kia-sign-ball', 4, 4, 'kia-goods', 'KIA', 'KIA 나성범 사인볼 파편', 'KIA 나성범 친필 사인볼 카드', '/goods/kia-sign-ball.png', '나성범 선수의 친필 사인이 담긴 레전드 카드', '나성범 선수 친필 사인이 담긴 희귀 조각', 'HOT', '#ff5800', '#ffe100', 92, 8, 4, '나성범 선수 친필 사인이 담긴 초희귀 파편입니다.', [22000, 23500, 24800, 26200, 25700, 27400, 29800]],
+  ['doosan-uniform', 5, 5, 'doosan-goods', '두산', '두산 베어스 유니폼 파편', '두산 베어스 선수단 유니폼 카드', '/goods/doosan-uniform.png', '두산 베어스 공식 레플리카 유니폼 완성 카드', '잠실의 전통을 이어가는 베어스 유니폼 조각', 'RISING', '#131230', '#7ec8ff', 79, 12, 6, '잠실 베어스 레플리카 유니폼 파편으로 수집 수요가 높습니다.', [14100, 15200, 16000, 15700, 17100, 17900, 18800]],
+  ['lotte-bat', 6, 6, 'lotte-goods', '롯데', '롯데 자이언츠 야구배트 파편', '롯데 자이언츠 황금배트 카드', '/goods/lotte-bat.png', '롯데 자이언츠 시즌 황금배트 기념 완성 카드', '사직구장의 함성을 담은 황금배트 조각', 'LIVE', '#002d62', '#ff9d3b', 67, 12, 6, '사직구장 응원석의 뜨거운 배트 응원 장면을 담은 파편입니다.', [10500, 11200, 11800, 12400, 12000, 13100, 13800]],
+  ['samsung-fan', 7, 7, 'samsung-goods', '삼성', '삼성 라이온즈 응원 부채 파편', '삼성 라이온즈 여름 응원 부채 카드', '/goods/samsung-fan.png', '삼성 라이온즈 여름 한정 공식 응원 부채 카드', '대구 여름 직관의 필수템, 삼성 응원 부채 조각', 'STEADY', '#074ca1', '#ffe100', 55, 14, 6, '대구 여름 직관의 필수템, 삼성 응원 부채 파편입니다.', [6800, 7100, 7300, 7500, 7200, 7700, 8200]],
+  ['lg-bat', 8, 8, 'lg-goods', 'LG', 'LG 트윈스 야구배트 파편', 'LG 트윈스 레전드 기념배트 카드', '/goods/lg-bat.png', 'LG 트윈스 레전드 선수 기념 미니배트 완성 카드', '잠실의 레전드 트윈스 기념 미니배트 조각', 'RISING', '#c60c30', '#8d7cf6', 81, 10, 5, '잠실 레전드 트윈스의 기념 미니배트 파편입니다.', [16800, 17500, 18200, 19000, 18600, 20100, 21400]],
+  ['kiwoom-uniform', 9, 9, 'kiwoom-goods', '키움', '키움 히어로즈 유니폼 파편', '키움 히어로즈 홈 유니폼 카드', '/goods/kiwoom-uniform.png', '키움 히어로즈 홈 공식 유니폼 완성 카드', '고척돔을 가득 채운 히어로즈 유니폼 조각', 'STEADY', '#570514', '#ff9d3b', 58, 10, 6, '고척돔 히어로즈 홈 유니폼 파편으로 꾸준한 거래를 보입니다.', [7900, 8200, 8500, 8300, 8800, 9200, 9700]],
+  ['hanwha-sticker', 10, 10, 'hanwha-goods', '한화', '한화 이글스 포토 스티커 파편', '한화 이글스 팬 포토 스티커 카드', '/goods/hanwha-sticker.png', '한화 이글스 팬 한정 포토 스티커 컬렉션 카드', '대전 이글스파크 팬 한정 포토 스티커 조각', 'STEADY', '#ff6600', '#ffe100', 51, 12, 5, '대전 이글스파크 팬 전용 포토 스티커 파편입니다.', [5500, 5800, 6000, 6200, 6100, 6500, 7000]],
+];
+
+async function seedGoodsMarketData(conn) {
+  await conn.query(`DELETE FROM price_history`);
+  await conn.query(`DELETE FROM market_listings`);
+  await conn.query(`DELETE FROM market_assets`);
+  await conn.query(`DELETE FROM box_reward_pool`);
+  await conn.query(`DELETE FROM combine_recipes`);
+  await conn.query(`DELETE FROM fragment_types`);
+  await conn.query(`DELETE FROM card_types`);
+
+  for (const item of GOODS_SEED) {
+    const [fragmentId, cardId, onchainId, family, team, fragmentName, cardName, image, cardNote, fragmentNote, tier, color, accent, demandScore, fragmentWeight, goodsWeight, marketDescription, prices] = item;
+    await conn.query(`INSERT INTO card_types (id, team, name, image_url, note) VALUES (?, ?, ?, ?, ?)`, [cardId, team, cardName, image, cardNote]);
+    await conn.query(
+      `INSERT INTO fragment_types (id, onchain_id, family, team, name, result_name, image_url, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [fragmentId, onchainId, family, team, fragmentName, cardName, image, fragmentNote]
+    );
+    await conn.query(`INSERT INTO combine_recipes (fragment_type_id, result_card_type_id, required_count) VALUES (?, ?, 2)`, [fragmentId, cardId]);
+    await conn.query(
+      `INSERT INTO box_reward_pool (type, fragment_type_id, card_type_id, weight, name, image_url, description) VALUES ('fragment', ?, NULL, ?, ?, ?, ?)`,
+      [fragmentId, fragmentWeight, fragmentName, image, `${fragmentName} 1개를 획득했습니다.`]
+    );
+    await conn.query(
+      `INSERT INTO box_reward_pool (type, fragment_type_id, card_type_id, weight, name, image_url, description) VALUES ('goods', NULL, ?, ?, ?, ?, ?)`,
+      [cardId, goodsWeight, cardName, image, `${cardName} 원본 굿즈 NFT를 획득했습니다!`]
+    );
+    await conn.query(
+      `INSERT INTO market_assets (id, fragment_type_id, idol, asset_name, tier, color, accent, demand_score, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [fragmentId, fragmentId, team, fragmentName, tier, color, accent, demandScore, marketDescription]
+    );
+    await conn.query(
+      `INSERT INTO market_listings
+         (id, seller_id, seller_wallet_address, fragment_type_id, price, quantity, listing_message, listing_signature)
+       VALUES (UUID(), 'user_bh', NULL, ?, ?, 1, 'seed market listing', 'seed')`,
+      [fragmentId, prices[prices.length - 1]]
+    );
+    for (const [index, price] of prices.entries()) {
+      const daysAgo = prices.length - 1 - index;
+      const recordedDate = daysAgo === 0 ? 'CURDATE()' : `DATE_SUB(CURDATE(), INTERVAL ${daysAgo} DAY)`;
+      await conn.query(`INSERT INTO price_history (fragment_type_id, price, recorded_date) VALUES (?, ?, ${recordedDate})`, [fragmentId, price]);
+    }
+  }
+}
+
 async function initDB() {
   const conn = await mysql.createConnection(DB_CONFIG);
+  const initLockName = `${DB_NAME}:init`;
+  const [[lockRow]] = await conn.query(`SELECT GET_LOCK(?, 30) AS acquired`, [initLockName]);
+  if (Number(lockRow?.acquired) !== 1) {
+    await conn.end();
+    throw new Error('DB 초기화 락 획득 실패');
+  }
 
+  try {
   await conn.query(
     `CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci`
   );
   await conn.query(`USE \`${DB_NAME}\``);
 
-  const [[usersTable]] = await conn.query(`SHOW TABLES LIKE 'users'`);
-  if (usersTable && !RESET_DB_ON_START) {
-    await refreshDemoSchedule(conn);
-    console.log("ℹ️ 기존 DB 유지 모드: 재시작 시 데이터를 보존합니다.");
-    await conn.end();
+  const resetOnStart = String(process.env.RESET_DB_ON_START || '').trim().toLowerCase() === 'true';
+  const [existingUsersTable] = await conn.query(`SHOW TABLES LIKE 'users'`);
+  if (!resetOnStart && existingUsersTable.length > 0) {
+    await ensureRuntimeMigrations(conn);
+    console.log('ℹ️ 기존 DB 유지 모드: 재시작 시 데이터를 보존합니다.');
     return;
   }
 
-  // ─── 매 재시작마다 초기화: FK 역순으로 DROP ───────────
+  // ─── RESET_DB_ON_START=true 또는 최초 실행 시 초기화: FK 역순으로 DROP ───────────
   await conn.query(`SET FOREIGN_KEY_CHECKS = 0`);
+  // raffle / reservation 테이블
+  await conn.query(`DROP TABLE IF EXISTS game_raffle_entries`);
+  await conn.query(`DROP TABLE IF EXISTS reservations`);
+  await conn.query(`DROP TABLE IF EXISTS draws`);
+  await conn.query(`DROP TABLE IF EXISTS raffle_nfts`);
+  await conn.query(`DROP TABLE IF EXISTS membership_monthly_raffle_claims`);
+  await conn.query(`DROP TABLE IF EXISTS membership_tier_rewards`);
+  await conn.query(`DROP TABLE IF EXISTS notification_events`);
+  await conn.query(`DROP TABLE IF EXISTS point_events`);
   // combine/market 테이블 (FK 역순)
   await conn.query(`DROP TABLE IF EXISTS box_open_logs`);
   await conn.query(`DROP TABLE IF EXISTS combine_logs`);
@@ -227,6 +288,10 @@ async function initDB() {
   await conn.query(`DROP TABLE IF EXISTS combine_recipes`);
   await conn.query(`DROP TABLE IF EXISTS card_types`);
   await conn.query(`DROP TABLE IF EXISTS fragment_types`);
+  // fabric 이벤트 로그 테이블
+  await conn.query(`DROP TABLE IF EXISTS fabric_events`);
+  // refunds 테이블
+  await conn.query(`DROP TABLE IF EXISTS refunds`);
   // ticket resale 테이블
   await conn.query(`DROP TABLE IF EXISTS ticket_trades`);
   await conn.query(`DROP TABLE IF EXISTS ticket_listings`);
@@ -252,9 +317,11 @@ async function initDB() {
       email         VARCHAR(255) UNIQUE DEFAULT NULL,
       password_hash VARCHAR(255) DEFAULT NULL,
       login_type    ENUM('local','google') NOT NULL DEFAULT 'local',
-      role          ENUM('user','admin') NOT NULL DEFAULT 'user',
       google_id     VARCHAR(255) UNIQUE DEFAULT NULL,
       profile_image VARCHAR(255) DEFAULT NULL,
+      role          ENUM('user','admin') NOT NULL DEFAULT 'user',
+      membership_tier ENUM('베이직','브론즈','실버','골드') DEFAULT NULL,
+      membership_joined_at DATETIME DEFAULT NULL,
       is_active     TINYINT(1)   NOT NULL DEFAULT 1,
       created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -354,8 +421,11 @@ async function initDB() {
       game_date  DATE         NOT NULL,
       game_time  TIME,
       stadium_id VARCHAR(50)  NOT NULL,
-      status     ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED') NOT NULL DEFAULT 'OPEN',
+      status     ENUM('OPEN','ALMOST','SOLDOUT','UPCOMING','ENDED','CANCELLED') NOT NULL DEFAULT 'OPEN',
       base_price DECIMAL(10,2) DEFAULT NULL,
+      booking_open_at DATETIME DEFAULT NULL,
+      raffle_open_at DATETIME DEFAULT NULL,
+      raffle_winners_count INT NOT NULL DEFAULT 5,
       FOREIGN KEY (stadium_id) REFERENCES stadiums(id)
     )
   `);
@@ -387,8 +457,175 @@ async function initDB() {
       price          DECIMAL(15,2),
       token_id       INT           DEFAULT NULL,
       ticket_tx_hash VARCHAR(66)   DEFAULT NULL,
-      status         ENUM('confirmed','used','listed','sold') NOT NULL DEFAULT 'confirmed',
+      payment_key    VARCHAR(200)  DEFAULT NULL,
+      point_discount INT           NOT NULL DEFAULT 0,
+      purchase_type  ENUM('PRIMARY','TRANSFERRED') NOT NULL DEFAULT 'PRIMARY',
+      status         ENUM('confirmed','used','listed','sold','refund_processing','refund_rejected','refunded') NOT NULL DEFAULT 'confirmed',
       booked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (game_id) REFERENCES games(id)
+    )
+  `);
+
+  // ─── Fabric 이벤트 로그 테이블 ───────────────────────────
+  await conn.query(`
+    CREATE TABLE fabric_events (
+      id           CHAR(36)     PRIMARY KEY,
+      event_name   VARCHAR(60)  NOT NULL,
+      ticket_id    VARCHAR(36)  DEFAULT NULL,
+      game_id      VARCHAR(50)  DEFAULT NULL,
+      user_did_hash VARCHAR(64) DEFAULT NULL,
+      payload_json JSON         DEFAULT NULL,
+      fabric_tx_id VARCHAR(100) DEFAULT NULL,
+      created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE point_events (
+      id             CHAR(36)     PRIMARY KEY,
+      user_id        VARCHAR(50)  NOT NULL,
+      wallet_address VARCHAR(100) DEFAULT NULL,
+      event_type     VARCHAR(50)  NOT NULL,
+      reason         VARCHAR(120) NOT NULL,
+      amount         INT          NOT NULL DEFAULT 0,
+      metadata_json  JSON         DEFAULT NULL,
+      read_at        DATETIME     DEFAULT NULL,
+      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE notification_events (
+      id             CHAR(36)     PRIMARY KEY,
+      user_id        VARCHAR(50)  NOT NULL,
+      category       VARCHAR(20)  NOT NULL,
+      title          VARCHAR(120) NOT NULL,
+      message        VARCHAR(255) NOT NULL DEFAULT '',
+      amount         INT          DEFAULT NULL,
+      metadata_json  JSON         DEFAULT NULL,
+      read_at        DATETIME     DEFAULT NULL,
+      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_notification_user_category (user_id, category, created_at),
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE membership_tier_rewards (
+      id                CHAR(36)     PRIMARY KEY,
+      user_id           VARCHAR(50)  NOT NULL,
+      tier              ENUM('브론즈','실버','골드') NOT NULL,
+      reward_cards      INT          NOT NULL DEFAULT 0,
+      reward_raffles    INT          NOT NULL DEFAULT 0,
+      card_payload_json JSON         DEFAULT NULL,
+      raffle_nft_ids    JSON         DEFAULT NULL,
+      claimed_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_membership_tier_reward (user_id, tier),
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE membership_monthly_raffle_claims (
+      id             CHAR(36)     PRIMARY KEY,
+      user_id        VARCHAR(50)  NOT NULL,
+      claim_month    CHAR(7)      NOT NULL,
+      tier           ENUM('베이직','브론즈','실버','골드') NOT NULL,
+      claimed_count  INT          NOT NULL DEFAULT 0,
+      raffle_nft_ids JSON         DEFAULT NULL,
+      expires_at     DATETIME     NOT NULL,
+      claimed_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_membership_monthly_claim (user_id, claim_month),
+      FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  // ─── 환불 테이블 ─────────────────────────────────────
+  await conn.query(`
+    CREATE TABLE refunds (
+      refund_id       CHAR(36)      PRIMARY KEY,
+      ticket_id       VARCHAR(36)   NOT NULL,
+      user_id         VARCHAR(50)   NOT NULL,
+      purchase_type   ENUM('PRIMARY','TRANSFERRED') NOT NULL DEFAULT 'PRIMARY',
+      refund_rate     DECIMAL(5,2)  NOT NULL DEFAULT 100.00,
+      original_price  DECIMAL(15,2) NOT NULL,
+      refund_amount   DECIMAL(15,2) NOT NULL,
+      reason          VARCHAR(255)  DEFAULT NULL,
+      status          ENUM('processing','completed','rejected') NOT NULL DEFAULT 'processing',
+      fabric_refund_id VARCHAR(100) DEFAULT NULL,
+      created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at    DATETIME      DEFAULT NULL,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id),
+      FOREIGN KEY (user_id)   REFERENCES users(user_id)
+    )
+  `);
+
+  // ─── 응모권 NFT 테이블 ───────────────────────────────
+  await conn.query(`
+    CREATE TABLE raffle_nfts (
+      id              CHAR(36)     PRIMARY KEY,
+      user_id         VARCHAR(50)  NOT NULL,
+      wallet_address  VARCHAR(100) NOT NULL,
+      user_did_hash   VARCHAR(64)  NOT NULL,
+      game_id         VARCHAR(50)  DEFAULT NULL,
+      status          ENUM('ISSUED','ENTERED','WINNER','LOST','USED','EXPIRED') NOT NULL DEFAULT 'ISSUED',
+      draw_id         CHAR(36)     DEFAULT NULL,
+      fabric_token_id VARCHAR(100) DEFAULT NULL,
+      source          ENUM('TIER_REWARD','MONTHLY_GRANT','POINT_EXCHANGE','ADMIN') NOT NULL DEFAULT 'POINT_EXCHANGE',
+      claimed_month   CHAR(7)      DEFAULT NULL,
+      expires_at      DATETIME     DEFAULT NULL,
+      issued_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )
+  `);
+
+  // ─── 추첨 테이블 ──────────────────────────────────────
+  await conn.query(`
+    CREATE TABLE draws (
+      id              CHAR(36)     PRIMARY KEY,
+      game_id         VARCHAR(50)  NOT NULL,
+      status          ENUM('PENDING','COMPLETED') NOT NULL DEFAULT 'PENDING',
+      winner_count    INT          NOT NULL DEFAULT 10,
+      total_entries   INT          NOT NULL DEFAULT 0,
+      executed_at     DATETIME     DEFAULT NULL,
+      created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (game_id) REFERENCES games(id)
+    )
+  `);
+
+  // ─── 예약 테이블 ──────────────────────────────────────
+  await conn.query(`
+    CREATE TABLE reservations (
+      id                CHAR(36)     PRIMARY KEY,
+      user_id           VARCHAR(50)  NOT NULL,
+      wallet_address    VARCHAR(100) NOT NULL,
+      game_id           VARCHAR(50)  NOT NULL,
+      raffle_nft_id     CHAR(36)     DEFAULT NULL,
+      priority_booking  TINYINT(1)   NOT NULL DEFAULT 0,
+      ticket_id         VARCHAR(36)  DEFAULT NULL,
+      status            ENUM('PENDING','CONFIRMED','CANCELLED','EXPIRED') NOT NULL DEFAULT 'PENDING',
+      fabric_record_id  VARCHAR(100) DEFAULT NULL,
+      reserved_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at        DATETIME     DEFAULT NULL,
+      FOREIGN KEY (user_id)  REFERENCES users(user_id),
+      FOREIGN KEY (game_id)  REFERENCES games(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE game_raffle_entries (
+      id             INT          PRIMARY KEY AUTO_INCREMENT,
+      user_id        VARCHAR(50)  NOT NULL,
+      game_id        VARCHAR(50)  NOT NULL,
+      tickets_used   INT          NOT NULL DEFAULT 1,
+      raffle_nft_ids JSON         DEFAULT NULL,
+      status         ENUM('applied','won','lost','used') NOT NULL DEFAULT 'applied',
+      applied_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      used_at        DATETIME     DEFAULT NULL,
+      UNIQUE KEY uq_game_raffle_user (user_id, game_id),
+      FOREIGN KEY (user_id) REFERENCES users(user_id),
       FOREIGN KEY (game_id) REFERENCES games(id)
     )
   `);
@@ -397,38 +634,38 @@ async function initDB() {
 
   await conn.query(`
     CREATE TABLE ticket_listings (
-      id             CHAR(36)     PRIMARY KEY,
-      seller_id      VARCHAR(50)  NOT NULL,
-      seller_wallet_address VARCHAR(42) DEFAULT NULL,
-      ticket_id      VARCHAR(36)  DEFAULT NULL,
-      nft_token_id   INT          DEFAULT NULL,
-      price_wei      VARCHAR(40)  DEFAULT NULL,
-      list_tx_hash   VARCHAR(66)  DEFAULT NULL,
-      listing_message TEXT        DEFAULT NULL,
-      listing_signature TEXT      DEFAULT NULL,
-      game_date      DATE         NOT NULL,
-      home_team      VARCHAR(20)  NOT NULL,
-      away_team      VARCHAR(20)  NOT NULL,
-      seat_section   VARCHAR(50)  NOT NULL,
-      original_price INT          NOT NULL,
-      listed_price   INT          NOT NULL,
-      status         VARCHAR(20)  NOT NULL DEFAULT 'active',
-      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      id                    CHAR(36)     PRIMARY KEY,
+      seller_id             VARCHAR(50)  NOT NULL,
+      ticket_id             VARCHAR(36)  DEFAULT NULL,
+      nft_token_id          INT          DEFAULT NULL,
+      price_wei             VARCHAR(40)  DEFAULT NULL,
+      list_tx_hash          VARCHAR(66)  DEFAULT NULL,
+      seller_wallet_address VARCHAR(42)  DEFAULT NULL,
+      list_signature        TEXT         DEFAULT NULL,
+      list_message          TEXT         DEFAULT NULL,
+      game_date             DATE         NOT NULL,
+      home_team             VARCHAR(20)  NOT NULL,
+      away_team             VARCHAR(20)  NOT NULL,
+      seat_section          VARCHAR(50)  NOT NULL,
+      original_price        INT          NOT NULL,
+      listed_price          INT          NOT NULL,
+      status                VARCHAR(20)  NOT NULL DEFAULT 'active',
+      created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (seller_id) REFERENCES users(user_id)
     )
   `);
 
   await conn.query(`
     CREATE TABLE ticket_trades (
-      id           CHAR(36)    PRIMARY KEY,
-      listing_id   CHAR(36)    NOT NULL,
-      buyer_id     VARCHAR(50) NOT NULL,
-      seller_id    VARCHAR(50) NOT NULL,
-      price        INT         NOT NULL,
-      platform_fee INT         NOT NULL DEFAULT 0,
-      settlement_amount INT    NOT NULL DEFAULT 0,
-      buy_tx_hash  VARCHAR(66) DEFAULT NULL,
-      traded_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      id                CHAR(36)    PRIMARY KEY,
+      listing_id        CHAR(36)    NOT NULL,
+      buyer_id          VARCHAR(50) NOT NULL,
+      seller_id         VARCHAR(50) NOT NULL,
+      price             INT         NOT NULL,
+      platform_fee      INT         NOT NULL DEFAULT 0,
+      settlement_amount INT         NOT NULL DEFAULT 0,
+      buy_tx_hash       VARCHAR(66) DEFAULT NULL,
+      traded_at         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (listing_id) REFERENCES ticket_listings(id),
       FOREIGN KEY (buyer_id)   REFERENCES users(user_id),
       FOREIGN KEY (seller_id)  REFERENCES users(user_id)
@@ -585,6 +822,8 @@ async function initDB() {
       reserved_by          VARCHAR(50) NULL,
       reserved_until       DATETIME    NULL,
       posted_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      listing_message      TEXT        NULL,
+      listing_signature    VARCHAR(132) NULL,
       FOREIGN KEY (seller_id)        REFERENCES users(user_id),
       FOREIGN KEY (reserved_by)      REFERENCES users(user_id),
       FOREIGN KEY (fragment_type_id) REFERENCES fragment_types(id)
@@ -688,8 +927,8 @@ async function initDB() {
 
   for (const user of SEED_USERS) {
     await conn.query(
-      "INSERT INTO users (user_id, nickname, role) VALUES (?, ?, ?)",
-      [user.user_id, user.nickname, user.role]
+      "INSERT INTO users (user_id, nickname) VALUES (?, ?)",
+      [user.user_id, user.nickname]
     );
   }
 
@@ -721,10 +960,23 @@ async function initDB() {
 
   for (const g of SEED_GAMES) {
     await conn.query(
-      "INSERT INTO games (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price]
+      `INSERT INTO games
+         (id, home_team, away_team, game_date, game_time, stadium_id, status, base_price, booking_open_at, raffle_open_at, raffle_winners_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        g.id, g.home_team, g.away_team, g.game_date, g.game_time, g.stadium_id, g.status, g.base_price,
+        bookingOpenAtForGame(g), raffleOpenAtForGame(g), 5,
+      ]
     );
   }
+  await conn.query(
+    `UPDATE games
+        SET raffle_open_at = DATE_SUB(NOW(), INTERVAL 1 HOUR),
+            booking_open_at = DATE_ADD(NOW(), INTERVAL 2 HOUR),
+            raffle_winners_count = 5,
+            status = 'UPCOMING'
+      WHERE id = 'G023'`
+  );
 
   // ─── combine/market 시드 데이터 ──────────────────────
 
@@ -796,21 +1048,14 @@ async function initDB() {
     ('tigers-towel-2',  'tigers-towel-2',  'KIA',  'KIA 레전드 응원컷 파편',    'STEADY', '#ff9d3b', '#1456a0', 47, '응원 장면이 들어간 시즌형 특별 파편입니다.')
   `);
 
-  await conn.query(
-    `INSERT INTO ticket_listings (id, seller_id, game_date, home_team, away_team, seat_section, original_price, listed_price, status) VALUES
-    ${SEED_TICKET_LISTINGS.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",\n    ")}`,
-    SEED_TICKET_LISTINGS.flatMap((listing) => [
-      listing.id,
-      listing.seller_id,
-      listing.game_date,
-      listing.home_team,
-      listing.away_team,
-      listing.seat_section,
-      listing.original_price,
-      listing.listed_price,
-      listing.status,
-    ]),
-  );
+  await conn.query(`
+    INSERT INTO ticket_listings (id, seller_id, game_date, home_team, away_team, seat_section, original_price, listed_price, status) VALUES
+    ('tl-seed-0000-0000-000000000001', 'user_bh',  '2026-04-15', '삼성', 'LG',  '1루 내야 지정석', 13000, 14000, 'active'),
+    ('tl-seed-0000-0000-000000000002', 'user_tm',  '2026-04-19', 'LG',  'NC',  '외야 응원석',      13000, 13000, 'active'),
+    ('tl-seed-0000-0000-000000000003', 'admin_01', '2026-04-22', '두산', '키움', '3루 내야 지정석', 13000, 13500, 'active'),
+    ('tl-seed-0000-0000-000000000004', 'user_bh',  '2026-04-22', '두산', '키움', '외야 응원석',     13000, 12000, 'active'),
+    ('tl-seed-0000-0000-000000000005', 'user_tm',  '2026-04-15', '키움', '한화', '내야 일반석',     13000, 13000, 'active')
+  `);
 
   await conn.query(`
     INSERT INTO price_history (fragment_type_id, price, recorded_date) VALUES
@@ -872,8 +1117,92 @@ async function initDB() {
     ('tigers-towel-2',   5600, CURDATE())
   `);
 
-  await conn.end();
+  // ─── 테스트 추첨 시드 (서버 재시작마다 복구) ─────────
+  await seedGoodsMarketData(conn);
+
+  await conn.query(`
+    INSERT INTO draws (id, game_id, status, winner_count, total_entries) VALUES
+    ('draw-seed-0000-0001', 'G004', 'PENDING',   5, 0),
+    ('draw-seed-0000-0002', 'G007', 'PENDING',   3, 0),
+    ('draw-seed-0000-0003', 'G009', 'PENDING',  10, 0)
+  `);
+  console.log('✅ 테스트 추첨 3건 생성 완료');
+
+  // ─── 테스트 계정 삽입 ─────────────────────────────────
+  const testPasswordHash = await bcrypt.hash(TEST_USER.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type)
+     VALUES (?, ?, ?, ?, 'local')`,
+    [TEST_USER.user_id, TEST_USER.nickname, TEST_USER.email, testPasswordHash]
+  );
+  await conn.query(
+    `UPDATE users
+        SET membership_tier = '실버',
+            membership_joined_at = NOW()
+      WHERE user_id = ?`,
+    [TEST_USER.user_id]
+  );
+  await conn.query(
+    `INSERT INTO user_wallets (user_id, wallet_address, is_verified, verified_at)
+     VALUES (?, ?, TRUE, NOW())`,
+    [TEST_USER.user_id, TEST_USER.wallet_address]
+  );
+  await conn.query(
+    `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 0)`,
+    [TEST_USER.user_id]
+  );
+  console.log(`✅ 테스트 계정 생성: ${TEST_USER.email} / ${TEST_USER.password}`);
+
+  const adminPasswordHash = await bcrypt.hash(DEMO_ADMIN_USER.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role)
+     VALUES (?, ?, ?, ?, 'local', 'admin')`,
+    [DEMO_ADMIN_USER.user_id, DEMO_ADMIN_USER.nickname, DEMO_ADMIN_USER.email, adminPasswordHash]
+  );
+  console.log(`✅ QR 입장 관리자 계정 생성: ${DEMO_ADMIN_USER.email} / ${DEMO_ADMIN_USER.password}`);
+
   console.log("✅ DB 초기화 및 시드 데이터 삽입 완료");
+  } finally {
+    await conn.query(`SELECT RELEASE_LOCK(?)`, [initLockName]).catch(() => {});
+    await conn.end();
+  }
+}
+
+async function ensureRuntimeMigrations(conn) {
+  const [[roleColumn]] = await conn.query(
+    `SELECT COLUMN_NAME
+       FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'`,
+    [DB_NAME]
+  );
+
+  if (!roleColumn) {
+    await conn.query(
+      `ALTER TABLE users
+         ADD COLUMN role ENUM('user','admin') NOT NULL DEFAULT 'user'
+         AFTER profile_image`
+    );
+  }
+
+  const adminPasswordHash = await bcrypt.hash(DEMO_ADMIN_USER.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role, is_active)
+     VALUES (?, ?, ?, ?, 'local', 'admin', 1)
+     ON DUPLICATE KEY UPDATE
+       nickname = VALUES(nickname),
+       password_hash = VALUES(password_hash),
+       login_type = 'local',
+       role = 'admin',
+       is_active = 1`,
+    [DEMO_ADMIN_USER.user_id, DEMO_ADMIN_USER.nickname, DEMO_ADMIN_USER.email, adminPasswordHash]
+  );
+
+  await conn.query(
+    `UPDATE users
+        SET role = 'user'
+      WHERE role = 'admin' AND user_id <> ?`,
+    [DEMO_ADMIN_USER.user_id]
+  );
 }
 
 module.exports = { initDB, DB_NAME, DB_CONFIG };

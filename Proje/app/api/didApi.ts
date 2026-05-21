@@ -1,4 +1,5 @@
-import { apiUrl } from '../lib/api';
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000').replace(/\/$/, '');
+const BASE = `${API_BASE}/api`;
 
 function authHeader(): Record<string, string> {
   return {
@@ -26,7 +27,7 @@ export type DidStatus = {
 
 // DID 생성 (서명 검증 완료 후 호출)
 export async function createDid(): Promise<{ did: string; message: string; already_exists: boolean }> {
-  const res = await fetch(apiUrl('/api/did/create'), {
+  const res = await fetch(`${BASE}/did/create`, {
     method: 'POST',
     headers: authHeader(),
   });
@@ -37,7 +38,7 @@ export async function createDid(): Promise<{ did: string; message: string; alrea
 
 // 전체 인증 상태 조회
 export async function getDidStatus(): Promise<DidStatus> {
-  const res = await fetch(apiUrl('/api/did/status'), { headers: authHeader() });
+  const res = await fetch(`${BASE}/did/status`, { headers: authHeader() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? '상태 조회 실패');
   return data as DidStatus;

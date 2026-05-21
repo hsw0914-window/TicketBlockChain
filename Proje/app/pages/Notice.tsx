@@ -4,8 +4,6 @@ import { motion, AnimatePresence } from "motion/react";
 import { Bell, Pin, PenLine, Lock, Unlock, Trash2, X, Calendar, Megaphone } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
-import { useAuth } from "../context/AuthContext";
-import { apiUrl, uploadUrl } from "../lib/api";
 
 interface Notice {
   id: number;
@@ -17,22 +15,22 @@ interface Notice {
   image_url?: string;
 }
 
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000").replace(/\/$/, "");
+
 export function Notice() {
   const navigate = useNavigate();
-  const { user, isLoggedIn } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem("isAdminMode") === "true");
   const [notices, setNotices] = useState<Notice[]>([]);
   const [selectedTab, setSelectedTab] = useState<"all" | "notice" | "event">("all");
   const [selectedNotice, setSelectedNotice] = useState<Notice | null>(null);
 
-  const authHeaders = () => {
-    const token = localStorage.getItem("auth_token");
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  };
+  useEffect(() => {
+    localStorage.setItem("isAdminMode", isAdmin.toString());
+  }, [isAdmin]);
 
   const fetchNotices = async () => {
     try {
-      const response = await fetch(apiUrl("/api/notices"));
+      const response = await fetch(`${API_BASE}/api/notices`);
       const data = await response.json();
       const formatted: Notice[] = data.map((n: any) => ({
         id: n.id,
@@ -54,10 +52,7 @@ export function Notice() {
   const handleDelete = async (id: number) => {
     if (window.confirm("정말로 이 공지사항을 삭제하시겠습니까?")) {
       try {
-        const response = await fetch(apiUrl(`/api/notices/${id}`), {
-          method: "DELETE",
-          headers: authHeaders(),
-        });
+        const response = await fetch(`${API_BASE}/api/notices/${id}`, { method: "DELETE" });
         if (response.ok) {
           alert("삭제되었습니다!");
           setNotices(prev => prev.filter(n => n.id !== id));
@@ -70,10 +65,7 @@ export function Notice() {
   const handleDeleteAll = async () => {
     if (window.confirm("⚠️ 경고: 모든 공지사항이 영구적으로 삭제됩니다. 계속하시겠습니까?")) {
       try {
-        const response = await fetch(apiUrl("/api/notices"), {
-          method: "DELETE",
-          headers: authHeaders(),
-        });
+        const response = await fetch(`${API_BASE}/api/notices`, { method: "DELETE" });
         if (response.ok) {
           alert("모든 공지가 삭제되었습니다!");
           setNotices([]);
@@ -111,23 +103,20 @@ export function Notice() {
   return (
     <div className="page-shell space-y-6">
       {/* Header */}
-      <div className="page-header flex items-center justify-between">
+      <div className="page-header flex items-center justify-between rounded-[20px] border bg-white px-6 py-5" style={{ borderColor: "#e2e8f0", boxShadow: "0 8px 24px rgba(17,40,73,0.06)" }}>
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center relative overflow-hidden"
-            style={{ background: "linear-gradient(135deg, #506987, #6f89a3)", boxShadow: "0 8px 18px rgba(48,69,94,0.12)" }}>
-            <Bell className="w-6 h-6 text-white relative z-10" />
-          </div>
           <div>
             <p
-              className="page-eyebrow mb-1 font-bold transition-colors select-none"
+              className="page-eyebrow mb-1 font-bold cursor-pointer transition-colors select-none"
               style={{ color: isAdmin ? "#ef4444" : "#1456a0" }}
+              onClick={() => setIsAdmin(!isAdmin)}
             >
-              {isAdmin ? "관리자 권한 활성" : isLoggedIn ? "일반 사용자" : "비로그인 상태"}{" "}
+              {isAdmin ? "개발자 모드 ON" : "개발자 모드 OFF"}{" "}
               {isAdmin
                 ? <Unlock className="w-3 h-3 inline ml-1" />
                 : <Lock className="w-3 h-3 inline ml-1 opacity-30" />}
             </p>
-            <h1 className="page-title text-xl font-bold" style={{ color: "#16283f" }}>공지사항</h1>
+            <h1 className="page-title font-bold" style={{ color: "#0f172a" }}>공지사항</h1>
           </div>
         </div>
 
@@ -136,7 +125,7 @@ export function Notice() {
             <Button onClick={handleDeleteAll} variant="outline" className="border-red-200 text-red-500 hover:bg-red-50 rounded-xl">
               <Trash2 className="w-4 h-4 mr-2" /> 전체 삭제
             </Button>
-            <Button onClick={() => navigate("/notice/write")} className="bg-[#506987] text-white rounded-xl shadow-md hover:bg-[#3f546d]">
+            <Button onClick={() => navigate("/notice/write")} className="bg-[#1e3a8a] text-white rounded-xl shadow-md hover:bg-[#17306f]">
               <PenLine className="w-4 h-4 mr-2" /> 공지 쓰기
             </Button>
           </div>
@@ -144,13 +133,13 @@ export function Notice() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 p-1.5 rounded-2xl bg-[#edf1f5] border border-[#d2dbe5]">
+      <div className="flex gap-2 rounded-[18px] border bg-white p-1.5" style={{ borderColor: "#e2e8f0", boxShadow: "0 6px 18px rgba(17,40,73,0.04)" }}>
         {(["all", "notice", "event"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setSelectedTab(tab)}
-            className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
-              selectedTab === tab ? "bg-white text-[#1456a0] shadow-sm border border-[#c9d8ef]" : "text-[#7084a0]"
+            className={`flex-1 rounded-[12px] px-4 py-3 font-bold transition-all ${
+              selectedTab === tab ? "bg-[#1e3a8a] text-white shadow-sm" : "text-[#64748b] hover:bg-[#f8fafc]"
             }`}
           >
             {tab === "all" ? "전체" : tab === "notice" ? "공지" : "이벤트"}
@@ -161,7 +150,7 @@ export function Notice() {
       {/* Notice List */}
       <div className="space-y-3">
         {filteredNotices.length === 0 ? (
-          <div className="py-20 text-center text-[#7b8ca4]">등록된 공지사항이 없습니다.</div>
+          <div className="rounded-[18px] border border-dashed bg-white py-20 text-center text-[#64748b]" style={{ borderColor: "#cbd5e1" }}>등록된 공지사항이 없습니다.</div>
         ) : (
           filteredNotices.map((notice, index) => {
             const Icon = getTypeIcon(notice.type);
@@ -169,10 +158,10 @@ export function Notice() {
             return (
               <motion.div key={notice.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
                 <Card
-                  className={`p-5 transition-all cursor-pointer group relative overflow-hidden border-2 ${
-                    notice.isPinned ? "bg-[#fffcf5] border-[#ead4a2]" : "bg-[#f9fbfc] border-[#d7e0ea]"
+                  className={`group relative cursor-pointer overflow-hidden rounded-[18px] border p-5 transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(17,40,73,0.08)] ${
+                    notice.isPinned ? "bg-[#fff7ed] border-[#fed7aa]" : "bg-white border-[#e2e8f0]"
                   }`}
-                  style={{ boxShadow: "0 8px 18px rgba(17,40,73,0.035)" }}
+                  style={{ boxShadow: "0 6px 18px rgba(17,40,73,0.04)" }}
                   onClick={() => setSelectedNotice(notice)}
                 >
                   <div className="flex items-start gap-4 relative z-10">
@@ -183,7 +172,7 @@ export function Notice() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2">
-                          {notice.isPinned && <Pin className="w-4 h-4 text-[#9a6b1b] fill-[#9a6b1b]" />}
+                          {notice.isPinned && <Pin className="w-4 h-4 text-[#ea580c] fill-[#ea580c]" />}
                           <h3 className="font-bold text-[#1c2f4a] truncate">{notice.title}</h3>
                         </div>
                         <span className="px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap"
@@ -216,9 +205,9 @@ export function Notice() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-[#f8fafc] rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative shadow-2xl border border-[#d7e0ea]"
+              className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[20px] border border-[#e2e8f0] bg-white shadow-2xl"
             >
-              <div className="sticky top-0 bg-[#f8fafc]/90 backdrop-blur-md p-6 border-b flex justify-between items-center z-10">
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white/90 p-6 backdrop-blur-md" style={{ borderColor: "#e2e8f0" }}>
                 <div className="flex items-center gap-3">
                   <span className="px-3 py-1 rounded-lg text-sm font-semibold"
                     style={{
@@ -233,15 +222,15 @@ export function Notice() {
                     <span>{selectedNotice.date}</span>
                   </div>
                 </div>
-                <button onClick={() => setSelectedNotice(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                  <X size={20} className="text-gray-400" />
+                <button onClick={() => setSelectedNotice(null)} className="rounded-full p-2 transition-colors hover:bg-[#f8fafc]">
+                  <X size={20} className="text-[#64748b]" />
                 </button>
               </div>
               <div className="p-8">
                 <h2 className="text-2xl font-bold mb-6 text-[#1c2f4a]">{selectedNotice.title}</h2>
                 {selectedNotice.image_url && (
                   <div className="mb-6 w-full rounded-2xl overflow-hidden border border-[#edf1f5] shadow-sm bg-white">
-                    <img src={uploadUrl(selectedNotice.image_url)} alt="공지 이미지" className="w-full h-auto object-contain" />
+                    <img src={`${API_BASE}${selectedNotice.image_url}`} alt="공지 이미지" className="w-full h-auto object-contain" />
                   </div>
                 )}
                 <div className="text-[#3b4f67] leading-relaxed whitespace-pre-line text-base mb-8">
@@ -268,7 +257,7 @@ export function Notice() {
                   )}
                   <button
                     onClick={() => setSelectedNotice(null)}
-                    className={`${isAdmin ? "w-24" : "flex-1"} h-12 rounded-xl bg-[#506987] text-white`}
+                    className={`${isAdmin ? "w-24" : "flex-1"} h-12 rounded-xl bg-[#1e3a8a] text-white`}
                   >
                     닫기
                   </button>

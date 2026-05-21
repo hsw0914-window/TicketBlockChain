@@ -7,7 +7,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { apiUrl } from "../lib/api";
 
 type ThemeMode = "light" | "dark";
 
@@ -161,7 +160,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       const token = localStorage.getItem("auth_token");
       if (token) {
         try {
-          const walletRes = await fetch(apiUrl("/api/auth/wallet"), {
+          const walletRes = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/wallet`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (walletRes.ok) {

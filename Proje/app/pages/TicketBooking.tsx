@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  ExternalLink,
   Info,
   LayoutGrid,
   Loader2,
@@ -17,14 +16,13 @@ import {
   Ticket,
   Wallet,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Button } from "../components/ui/button";
 import {
   buildEventFromApiGame,
   createStoredTickets,
   getTicketEvent,
   loadStoredTickets,
-  saveStoredTickets,
   seatTicketTypes,
   type SeatBlock,
   type SeatGrade,
@@ -33,12 +31,11 @@ import {
   type TicketEvent,
 } from "../data/ticketing";
 import { useAppSettings } from "../context/AppSettingsContext";
-import { sendTicketNFT } from "../lib/contract";
+import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
 import { useBookingAccess, ACCESS_MESSAGES } from "../hooks/useBookingAccess";
-import { apiUrl } from "../lib/api";
 
 function formatPrice(value: number) {
-  return `₩${value.toLocaleString("ko-KR")}`;
+  return `₩${Number(value).toLocaleString("ko-KR")}`;
 }
 
 function parseSeatKey(seatKey: string) {
@@ -49,8 +46,11 @@ function parseSeatKey(seatKey: string) {
 const steps = [
   { id: 0, label: "구역 선택", icon: LayoutGrid },
   { id: 1, label: "좌석 선택", icon: Armchair },
-  { id: 2, label: "가격 확인", icon: Receipt },
+  { id: 2, label: "권종 확인", icon: Receipt },
+  { id: 3, label: "결제", icon: Wallet },
 ] as const;
+
+type TossState = "idle" | "loading" | "ready" | "error" | "paying" | "minting";
 
 const mapBlockBadgePositions: Record<string, CSSProperties> = {
   "jamsil-blue": { left: "18%", top: "47%" },
@@ -140,48 +140,66 @@ const blockFlowMeta: Record<string, { startLabel: string; endLabel: string }> = 
   "incheon-navy": { startLabel: "중앙 왼쪽", endLabel: "중앙 오른쪽" },
 };
 
+const PRIORITY_GRADE_ID = "jamsil-table";
+const PRIORITY_ROW = 5;
+const PRIORITY_SEAT_NUMS = new Set([2, 3, 4, 5, 6]);
+
 export function TicketBooking() {
   const { eventId = "" } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { walletAddress, connectWallet } = useAppSettings();
   const accessStatus = useBookingAccess();
+  const isPriorityMode = searchParams.get("mode") === "priority";
+  const priorityEntryId = searchParams.get("entryId") ?? "";
 
   // 로컬 이벤트 먼저 시도, 없으면 API에서 게임 정보 가져와서 템플릿으로 변환
   const [event, setEvent] = useState<TicketEvent | undefined>(() => getTicketEvent(eventId));
   const [eventLoading, setEventLoading] = useState(!getTicketEvent(eventId));
+  const [bookingOpenAt, setBookingOpenAt] = useState<Date | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
 
   useEffect(() => {
-    if (getTicketEvent(eventId)) return; // 로컬에 있으면 API 불필요
-    fetch(apiUrl(`/api/tickets/games/${eventId}`))
+    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games/${eventId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.data) {
-          setEvent(buildEventFromApiGame(data.data));
+          if (data.data.booking_open_at) setBookingOpenAt(new Date(data.data.booking_open_at));
+          if (!getTicketEvent(eventId)) setEvent(buildEventFromApiGame(data.data));
         }
       })
       .catch((err) => console.error("[TicketBooking] 경기 조회 실패:", err))
       .finally(() => setEventLoading(false));
   }, [eventId]);
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const [currentStep, setCurrentStep] = useState(0);
-  const [refundPolicyAgreed, setRefundPolicyAgreed] = useState(false);
   const [selectedGradeId, setSelectedGradeId] = useState<string | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [selectedSeatKeys, setSelectedSeatKeys] = useState<string[]>([]);
   const [ticketTypesBySeat, setTicketTypesBySeat] = useState<Record<string, SeatTicketTypeId>>({});
   const [storedTickets, setStoredTickets] = useState<StoredTicketRecord[]>(() => loadStoredTickets());
-  const [completedTickets, setCompletedTickets] = useState<StoredTicketRecord[]>([]);
   const [serverTakenSeats, setServerTakenSeats] = useState<Set<string>>(new Set());
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [mintingStatus, setMintingStatus] = useState<"idle" | "connecting" | "signing" | "mining" | "saving">("idle");
-  const [mintingProgress, setMintingProgress] = useState<{
-    current: number;
-    total: number;
-    percent: number;
-    label: string;
-    detail: string;
-  } | null>(null);
-  const [confirmingBackground, setConfirmingBackground] = useState<"pending" | "done" | "failed" | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [paymentWidgets, setPaymentWidgets] = useState<any>(null);
+  const [widgetReady, setWidgetReady] = useState(false);
+  const [widgetError, setWidgetError] = useState<string | null>(null);
+  const [widgetRetryKey, setWidgetRetryKey] = useState(0);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+
+  // ─── 포인트 할인 ─────────────────────────────────────────
+  const [pointBalance, setPointBalance]   = useState<number | null>(null);
+  const [pointInput, setPointInput]       = useState("");
+  const [pointDiscount, setPointDiscount] = useState(0);
+  const [pointApplied, setPointApplied]   = useState(false);
+  const [pointError, setPointError]       = useState<string | null>(null);
+
+  const base      = import.meta.env.VITE_API_URL;
+  const authToken = () => localStorage.getItem("auth_token") || "";
 
   useEffect(() => {
     setStoredTickets(loadStoredTickets());
@@ -190,7 +208,7 @@ export function TicketBooking() {
   // 백엔드에서 예약된 좌석 조회
   useEffect(() => {
     if (!eventId) return;
-    fetch(apiUrl(`/api/tickets/seats/${eventId}`))
+    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/seats/${eventId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success) setServerTakenSeats(new Set(data.data));
@@ -207,6 +225,15 @@ export function TicketBooking() {
       return next;
     });
   }, [selectedSeatKeys]);
+
+  useEffect(() => {
+    if (!isPriorityMode || !event) return;
+    const tableGrade = event.seatGrades.find((grade) => grade.id === PRIORITY_GRADE_ID);
+    if (!tableGrade) return;
+    setSelectedGradeId(PRIORITY_GRADE_ID);
+    setSelectedBlockId(tableGrade.blocks[0]?.id ?? null);
+    setSelectedSeatKeys([]);
+  }, [isPriorityMode, event]);
 
   const selectedGrade = useMemo(
     () => event?.seatGrades.find((grade) => grade.id === selectedGradeId) ?? null,
@@ -261,60 +288,141 @@ export function TicketBooking() {
     });
   }, [selectedBlock, selectedGrade, selectedSeatKeys, ticketTypesBySeat]);
 
+  // 권종/결제 단계 진입 시 포인트 잔액 조회
+  useEffect(() => {
+    if (currentStep < 2 || !walletAddress) return;
+    fetch(`${base}/api/points?walletAddress=${walletAddress}`, {
+      headers: { Authorization: `Bearer ${authToken()}` },
+    })
+      .then((r) => r.json())
+      .then((d) => { if (d.data?.balance !== undefined) setPointBalance(d.data.balance); })
+      .catch(() => {});
+  }, [currentStep, walletAddress, base]);
+
+  const applyPoint = () => {
+    setPointError(null);
+    const amount = parseInt(pointInput.replace(/,/g, ""), 10);
+    if (isNaN(amount) || amount <= 0) { setPointError("올바른 포인트를 입력하세요"); return; }
+    if (amount < 1000) { setPointError("최소 1,000P 이상 사용 가능합니다"); return; }
+    if (pointBalance !== null && amount > pointBalance) {
+      setPointError(`보유 포인트가 부족합니다 (잔액: ${pointBalance.toLocaleString()}P)`); return;
+    }
+    const maxDiscount = ticketTotal + Math.round(ticketTotal * 0.03);
+    if (amount > maxDiscount) { setPointError("총 결제금액을 초과할 수 없습니다"); return; }
+    setPointDiscount(amount);
+    setPointApplied(true);
+  };
+
+  const cancelPoint = () => {
+    setPointDiscount(0);
+    setPointApplied(false);
+    setPointInput("");
+    setPointError(null);
+  };
+
   const ticketTotal = selectedTickets.reduce((sum, ticket) => sum + ticket.price, 0);
   const serviceFee = Math.round(ticketTotal * 0.03); // 3% 서비스 이용료
-  const finalTotal = ticketTotal + serviceFee;
-  const paymentReady = refundPolicyAgreed && selectedTickets.length > 0;
+  const finalTotal = Math.max(0, ticketTotal + serviceFee - pointDiscount);
+  const tossAmount = Math.max(0, Math.round(finalTotal));
+  const paymentReady = selectedTickets.length > 0;
+  const maxSelectableTickets = isPriorityMode ? 1 : (event?.maxTickets ?? 4);
+  const bookingDeadlinePassed = event
+    ? nowMs > new Date(event.dateTime).getTime() + 60 * 60 * 1000
+    : false;
+  const bookingStatusLabel = bookingDeadlinePassed ? "지난 경기" : event?.status ?? "";
+  const bookingStatusColor = bookingDeadlinePassed ? "#64748b" : event?.statusColor ?? "#1456a0";
+  const canPickSeats = Boolean(selectedGrade && selectedBlock) && !bookingDeadlinePassed;
+  const canConfirmTypes = selectedSeatKeys.length > 0 && !bookingDeadlinePassed;
+  const canEnterPayment = paymentReady && !bookingDeadlinePassed;
+  const tossState: TossState =
+    currentStep !== 3
+      ? "idle"
+      : paymentLoading
+      ? "paying"
+      : widgetError
+      ? "error"
+      : widgetReady
+      ? "ready"
+      : "loading";
 
-  if (!event) {
-    if (eventLoading) {
-      return (
-        <div className="page-shell">
-          <div className="rounded-[28px] border p-8 text-center" style={{ background: "#f4f7fa", borderColor: "#d7e0e8", color: "#304257" }}>
-            경기 정보를 불러오는 중...
-          </div>
-        </div>
-      );
+  const summaryCta = (() => {
+    if (currentStep === 0) {
+      return {
+        label: bookingDeadlinePassed ? "예매 마감" : canPickSeats ? "좌석 선택으로" : "구역을 선택하세요",
+        disabled: !canPickSeats,
+        onClick: () => updateStep(1),
+      };
     }
-    return (
-      <div className="page-shell">
-        <div
-          className="rounded-[28px] border p-8"
-          style={{ background: "#f4f7fa", borderColor: "#d7e0e8", color: "#304257" }}
-        >
-          예매할 경기를 찾지 못했습니다.
-        </div>
-      </div>
-    );
-  }
+    if (currentStep === 1) {
+      return {
+        label: bookingDeadlinePassed ? "예매 마감" : canConfirmTypes ? "권종 확인으로" : "좌석을 선택하세요",
+        disabled: !canConfirmTypes,
+        onClick: () => updateStep(2),
+      };
+    }
+    if (currentStep === 2) {
+      return {
+        label: canEnterPayment ? "결제로 이동" : bookingDeadlinePassed ? "예매 마감" : "좌석을 선택하세요",
+        disabled: !canEnterPayment,
+        onClick: () => updateStep(3),
+      };
+    }
+    return {
+      label:
+        tossState === "paying"
+          ? "승인 중..."
+          : tossState === "error"
+          ? "다시 시도"
+          : tossState !== "ready"
+          ? "결제 수단 로딩 중..."
+          : `${formatPrice(finalTotal)} 결제하기`,
+      disabled: (tossState !== "ready" && tossState !== "error") || bookingDeadlinePassed,
+      onClick: () => {
+        if (tossState === "error") setWidgetRetryKey((key) => key + 1);
+        else void handleCompleteBooking();
+      },
+    };
+  })();
 
   const updateStep = (nextStep: number) => {
     setCurrentStep(Math.max(0, Math.min(nextStep, steps.length - 1)));
   };
 
   const handleSelectGrade = (grade: SeatGrade) => {
+    if (bookingDeadlinePassed) return;
+    if (isPriorityMode && grade.id !== PRIORITY_GRADE_ID) return;
     setSelectedGradeId(grade.id);
     setSelectedBlockId(grade.blocks[0]?.id ?? null);
     setSelectedSeatKeys([]);
   };
 
   const handleSelectBlock = (block: SeatBlock) => {
+    if (bookingDeadlinePassed) return;
     setSelectedBlockId(block.id);
     setSelectedSeatKeys([]);
   };
 
   const toggleSeat = (seatKey: string) => {
+    if (bookingDeadlinePassed) return;
     if (!selectedBlock) return;
 
     const compoundKey = `${selectedBlock.label}:${seatKey}`;
     if (takenSeatKeys.has(compoundKey)) return;
+    if (isPriorityMode) {
+      const { row, seatNumber } = parseSeatKey(seatKey);
+      if (!(row === PRIORITY_ROW && PRIORITY_SEAT_NUMS.has(seatNumber))) return;
+    }
 
     setSelectedSeatKeys((previous) => {
       if (previous.includes(seatKey)) {
         return previous.filter((item) => item !== seatKey);
       }
 
-      if (previous.length >= event.maxTickets) {
+      if (isPriorityMode) {
+        return [seatKey];
+      }
+
+      if (previous.length >= maxSelectableTickets) {
         return previous;
       }
 
@@ -327,171 +435,113 @@ export function TicketBooking() {
     });
   };
 
+  // ─── Toss 위젯 초기화 (결제 단계 진입 시 한 번만 렌더링) ───────
+  useEffect(() => {
+    if (currentStep !== 3 || !paymentReady || tossAmount <= 0) return;
+    let cancelled = false;
+    setWidgetReady(false);
+    setPaymentWidgets(null);
+    setWidgetError(null);
+
+    (async () => {
+      try {
+        const paymentWidgetElement = document.querySelector("#toss-payment-widget");
+        const agreementWidgetElement = document.querySelector("#toss-agreement-widget");
+        if (paymentWidgetElement) paymentWidgetElement.innerHTML = "";
+        if (agreementWidgetElement) agreementWidgetElement.innerHTML = "";
+
+        const clientKey = (import.meta.env.VITE_TOSS_CLIENT_KEY as string | undefined)?.trim();
+        if (!clientKey) {
+          throw new Error("VITE_TOSS_CLIENT_KEY가 설정되어 있지 않습니다.");
+        }
+        const tossPayments = await loadTossPayments(clientKey);
+        if (cancelled) return;
+        const widgets = tossPayments.widgets({ customerKey: ANONYMOUS });
+        await widgets.setAmount({ value: tossAmount, currency: "KRW" });
+        if (cancelled) return;
+        await widgets.renderPaymentMethods({ selector: "#toss-payment-widget", variantKey: "DEFAULT" });
+        await widgets.renderAgreement({ selector: "#toss-agreement-widget", variantKey: "AGREEMENT" });
+        if (!cancelled) {
+          setPaymentWidgets(widgets);
+          setWidgetReady(true);
+        }
+      } catch (err) {
+        console.error("[TossPayment] 위젯 초기화 실패:", err);
+        if (!cancelled) {
+          setWidgetError(err instanceof Error ? err.message : "결제 위젯 초기화에 실패했습니다.");
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, paymentReady, widgetRetryKey]);
+
+  // 권종/포인트 변경 시 렌더링된 위젯의 금액만 갱신
+  useEffect(() => {
+    if (!paymentWidgets || !widgetReady || tossAmount <= 0) return;
+    paymentWidgets
+      .setAmount({ value: tossAmount, currency: "KRW" })
+      .then(() => setWidgetError(null))
+      .catch((err: unknown) => {
+        console.error("[TossPayment] 위젯 금액 변경 실패:", err);
+        setWidgetError(err instanceof Error ? err.message : "결제 금액 변경 중 위젯 오류가 발생했습니다.");
+      });
+  }, [paymentWidgets, widgetReady, tossAmount]);
+
   const handleCompleteBooking = async () => {
-    if (!selectedGrade || !selectedBlock || !paymentReady) return;
-
+    if (!selectedGrade || !selectedBlock || !paymentReady || !paymentWidgets) return;
+    setPaymentLoading(true);
     try {
-      setTxHash(null);
-      setCompletedTickets([]);
-      setConfirmingBackground(null);
-      setMintingStatus("connecting");
-      const totalTickets = selectedTickets.length;
-      const updateMintProgress = (
-        current: number,
-        percent: number,
-        label: string,
-        detail: string,
-      ) => {
-        setMintingProgress({
-          current,
-          total: totalTickets,
-          percent: Math.max(0, Math.min(100, Math.round(percent))),
-          label,
-          detail,
-        });
-      };
-
-      updateMintProgress(0, 3, "지갑 연결 확인", "MetaMask 계정과 네트워크를 확인하고 있습니다.");
-
-      // 1. 지갑 주소 확보
-      let address = walletAddress;
-      if (!address) {
+      // 지갑 주소 확보 (MetaMask — NFT 민팅 대상 주소)
+      if (!walletAddress) {
         const ok = await connectWallet();
         if (!ok) throw new Error("지갑 연결이 필요합니다.");
       }
-      const accounts = window.ethereum
-        ? ((await window.ethereum.request({ method: "eth_accounts" })) as string[])
-        : [];
-      address = accounts[0] ?? address;
+      const accounts = (await window.ethereum!.request({ method: "eth_accounts" })) as string[];
+      const address = accounts[0];
       if (!address) throw new Error("지갑 주소를 가져올 수 없습니다.");
 
-      const authToken = localStorage.getItem("auth_token");
-      const purchaseIds: string[] = [];
+      // 주문 정보 저장 (성공 페이지에서 서버 컨펌 시 사용)
+      const orderId = crypto.randomUUID();
+      sessionStorage.setItem(
+        `toss_order_${orderId}`,
+        JSON.stringify({
+          walletAddress: address,
+          gameId:        event.id,
+          eventName:     event.name,
+          stadium:       event.stadium,
+          grade:         selectedGrade.name,
+          block:         selectedBlock.label,
+          gate:          selectedBlock.gate,
+          seats: selectedTickets.map((t) => ({
+            row:            t.row,
+            seatNumber:     t.seatNumber,
+            price:          t.price,
+            ticketTypeLabel: t.ticketType.label,
+          })),
+          pointDiscount,
+          finalTotal,
+          bookingMode: isPriorityMode ? "priority" : "normal",
+          priorityEntryId,
+        }),
+      );
 
-      for (let i = 0; i < selectedTickets.length; i++) {
-        const ticket = selectedTickets[i];
-        const current = i + 1;
-        const basePercent = (i / totalTickets) * 100;
-        const unit = 100 / totalTickets;
-
-        setMintingStatus("signing");
-        updateMintProgress(
-          current,
-          basePercent + unit * 0.15,
-          "MetaMask 컨펌 대기",
-          `${current}/${totalTickets}번째 티켓 거래를 승인해 주세요. 창이 닫히면 다음 티켓 승인으로 넘어갑니다.`,
-        );
-
-        const sent = await sendTicketNFT({
-          gameId: String(event.id),
-          stadium: event.stadium,
-          grade: selectedGrade.name,
-          blockLabel: selectedBlock.label,
-          row: ticket.row,
-          seatNumber: ticket.seatNumber,
-          priceKrw: ticket.price,
-        });
-        if (i === 0) setTxHash(sent.txHash);
-
-        setMintingStatus("mining");
-        updateMintProgress(
-          current,
-          basePercent + unit * 0.58,
-          "블록체인 기록 중",
-          `${current}/${totalTickets}번째 티켓이 Hoodi 네트워크에 기록되는 중입니다. MetaMask 활동 탭에서도 확인할 수 있습니다.`,
-        );
-        const tokenId = await sent.waitForConfirm();
-
-        setMintingStatus("saving");
-        updateMintProgress(
-          current,
-          basePercent + unit * 0.86,
-          "티켓 저장 중",
-          `${current}/${totalTickets}번째 티켓의 NFT 거래 해시와 좌석 정보를 서버에 저장하고 있습니다.`,
-        );
-
-        const res = await fetch(apiUrl("/api/tickets/purchase"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-          },
-          body: JSON.stringify({
-            walletAddress: address,
-            gameId: event.id,
-            stadium: event.stadium,
-            grade: selectedGrade.name,
-            block: selectedBlock.label,
-            row: ticket.row,
-            seatNumber: ticket.seatNumber,
-            price: ticket.price,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          throw new Error(data.message || data.error || "티켓 예매 저장에 실패했습니다.");
-        }
-
-        const ticketDbId = String(data.data?.id ?? "");
-        purchaseIds[i] = ticketDbId;
-
-        if (tokenId != null && ticketDbId) {
-          await fetch(apiUrl(`/api/tickets/${ticketDbId}/token`), {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tokenId, txHash: sent.txHash }),
-          });
-        }
-
-        updateMintProgress(
-          current,
-          basePercent + unit,
-          "티켓 저장 완료",
-          `${current}/${totalTickets}번째 티켓 처리가 완료되었습니다.`,
-        );
-      }
-
-      const created = createStoredTickets({
-        event,
-        grade: selectedGrade,
-        block: selectedBlock,
-        seats: selectedTickets.map((ticket) => ({
-          row: ticket.row,
-          seatNumber: ticket.seatNumber,
-          ticketTypeId: ticket.ticketType.id,
-        })),
-      }).map((ticket, index) => ({
-        ...ticket,
-        id: purchaseIds[index] || ticket.id,
-      }));
-
-      const nextStoredTickets = [...storedTickets, ...created];
-      saveStoredTickets(nextStoredTickets);
-      setStoredTickets(nextStoredTickets);
-      setCompletedTickets(created);
-      setMintingProgress({
-        current: totalTickets,
-        total: totalTickets,
-        percent: 100,
-        label: "예매 완료",
-        detail: "모든 티켓이 블록체인과 서버에 저장되었습니다.",
+      await paymentWidgets.requestPayment({
+        orderId,
+        orderName:
+          selectedTickets.length > 1
+            ? `${event.name} 외 ${selectedTickets.length - 1}매`
+            : event.name,
+        successUrl: `${window.location.origin}/tickets/booking/success`,
+        failUrl:    `${window.location.origin}/tickets/booking/fail`,
       });
-      setServerTakenSeats((previous) => {
-        const next = new Set(previous);
-        selectedTickets.forEach((ticket) => {
-          next.add(`${selectedBlock.label}:${ticket.row}-${ticket.seatNumber}`);
-        });
-        return next;
-      });
-      setConfirmingBackground("done");
+      // requestPayment는 브라우저를 토스 결제 페이지로 리다이렉트함
     } catch (err: unknown) {
-      console.error("예매 실패:", err);
-      const msg = err instanceof Error ? err.message : "예매 중 오류가 발생했습니다.";
+      const msg = err instanceof Error ? err.message : "결제 요청 중 오류가 발생했습니다.";
       alert(msg);
-      setConfirmingBackground("failed");
     } finally {
-      setMintingStatus("idle");
-      setMintingProgress(null);
+      setPaymentLoading(false);
     }
   };
 
@@ -507,6 +557,62 @@ export function TicketBooking() {
     return (
       <div className="page-shell flex items-center justify-center min-h-[40vh]">
         <p className="text-[0.95rem]" style={{ color: "#8a9ab0" }}>인증 상태 확인 중...</p>
+      </div>
+    );
+  }
+
+  if (eventLoading) {
+    return (
+      <div className="page-shell flex items-center justify-center min-h-[40vh]">
+        <p className="text-[0.95rem]" style={{ color: "#8a9ab0" }}>경기 정보를 불러오는 중...</p>
+      </div>
+    );
+  }
+
+  if (!event) {
+    return (
+      <div className="page-shell flex items-center justify-center min-h-[40vh]">
+        <p className="text-[0.95rem]" style={{ color: "#8a9ab0" }}>예매할 경기를 찾지 못했습니다.</p>
+      </div>
+    );
+  }
+
+  if (bookingOpenAt && bookingOpenAt.getTime() > nowMs && !isPriorityMode) {
+    const diff = Math.max(0, bookingOpenAt.getTime() - nowMs);
+    const totalMin = Math.floor(diff / 60000);
+    const days = Math.floor(totalMin / 1440);
+    const hours = Math.floor(totalMin / 60) % 24;
+    const mins = totalMin % 60;
+    const openLabel = bookingOpenAt.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })
+      + " "
+      + bookingOpenAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+    return (
+      <div className="page-shell flex items-center justify-center min-h-[55vh]">
+        <div className="w-full max-w-md rounded-[28px] border px-8 py-10 text-center" style={{ background: "#fff", borderColor: "#d7e0e8", boxShadow: "0 20px 48px rgba(17,40,73,0.08)" }}>
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full" style={{ background: "#eef4ff" }}>
+            <Clock3 className="h-8 w-8" style={{ color: "#1456a0" }} />
+          </div>
+          <h2 className="mb-2 text-[1.25rem] font-black" style={{ color: "#14253f" }}>예매 오픈 전입니다</h2>
+          <p className="mb-6 text-[0.9rem]" style={{ color: "#55657d" }}>
+            일반 예매 오픈: <strong style={{ color: "#1456a0" }}>{openLabel}</strong>
+          </p>
+          <div className="mb-6 grid grid-cols-3 gap-3">
+            {[
+              { label: "일", value: days },
+              { label: "시간", value: hours },
+              { label: "분", value: mins },
+            ].map((item) => (
+              <div key={item.label} className="rounded-[16px] px-4 py-4" style={{ background: "#eef4ff", border: "1px solid #bfdbfe" }}>
+                <p className="text-[1.6rem] font-black leading-none" style={{ color: "#1456a0" }}>{String(item.value).padStart(2, "0")}</p>
+                <p className="mt-1 text-[0.72rem] font-semibold" style={{ color: "#6d8aaa" }}>{item.label}</p>
+              </div>
+            ))}
+          </div>
+          <Button className="rounded-[14px] bg-[#1456a0] px-6 text-white" onClick={() => navigate("/tickets")}>
+            경기 목록으로 돌아가기
+          </Button>
+        </div>
       </div>
     );
   }
@@ -581,9 +687,9 @@ export function TicketBooking() {
             <div className="flex flex-wrap items-start justify-between gap-5">
               <div className="space-y-3">
                 <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[0.76rem] font-semibold"
-                  style={{ borderColor: `${event.statusColor}55`, background: `${event.statusColor}14`, color: event.statusColor }}>
+                  style={{ borderColor: `${bookingStatusColor}55`, background: `${bookingStatusColor}14`, color: bookingStatusColor }}>
                   <Clock3 className="h-3.5 w-3.5" />
-                  {event.status}
+                  {bookingStatusLabel}
                 </div>
                 <div>
                   <h2 className="text-[1.55rem] font-bold tracking-[-0.04em]" style={{ color: "#122239" }}>
@@ -609,19 +715,21 @@ export function TicketBooking() {
               <div className="rounded-[24px] border px-5 py-4 text-right"
                 style={{ background: "rgba(255,255,255,0.72)", borderColor: "#d6e0e8" }}>
                 <p className="text-[0.78rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "#7f90a5" }}>
-                  예매 규칙
+                  {bookingDeadlinePassed ? "예매 상태" : "예매 규칙"}
                 </p>
                 <p className="mt-2 text-[0.95rem] font-semibold" style={{ color: "#162840" }}>
-                  회차당 최대 {event.maxTickets}매
+                  {bookingDeadlinePassed ? "예매가 마감된 경기입니다" : `회차당 최대 ${maxSelectableTickets}매`}
                 </p>
                 <p className="mt-1 text-[0.86rem]" style={{ color: "#5e7088" }}>
-                  공식 재판매 마켓만 연동되고 좌석 선택 후 5분 안에 결제를 완료해야 합니다.
+                  {bookingDeadlinePassed
+                    ? "경기 시작 1시간 이후에는 좌석 선택과 결제를 진행할 수 없습니다."
+                    : "공식 재판매 마켓만 연동되고 좌석 선택 후 5분 안에 결제를 완료해야 합니다."}
                 </p>
               </div>
             </div>
           </section>
 
-          <section className="grid gap-3 md:grid-cols-3">
+          <section className="grid gap-3 md:grid-cols-4">
             {steps.map((step) => {
               const Icon = step.icon;
               const active = currentStep === step.id;
@@ -633,8 +741,9 @@ export function TicketBooking() {
                   type="button"
                   onClick={() => {
                     if (step.id === 0) updateStep(step.id);
-                    if (step.id === 1 && selectedGrade && selectedBlock) updateStep(step.id);
+                    if (step.id === 1 && canPickSeats) updateStep(step.id);
                     if (step.id === 2 && selectedSeatKeys.length > 0) updateStep(step.id);
+                    if (step.id === 3 && canEnterPayment) updateStep(step.id);
                   }}
                   className="rounded-[22px] border px-4 py-4 text-left transition"
                   style={{
@@ -985,8 +1094,7 @@ export function TicketBooking() {
                   </div>
                 )}
 
-                <div className="mt-6 flex justify-between">
-                  <div />
+                <div className="mt-6 flex justify-end">
                   <Button
                     className="rounded-2xl px-5 text-white"
                     style={{ background: selectedGrade && selectedBlock ? "#1456a0" : "#97afcc" }}
@@ -1015,7 +1123,7 @@ export function TicketBooking() {
                     {selectedGrade.name} · {selectedBlock.label}블록 좌석번호 선택
                   </h3>
                   <p className="mt-2 text-[0.93rem]" style={{ color: "#5c6f87" }}>
-                    선택 좌석은 최대 {event.maxTickets}매까지 가능하며, 예매 완료 시 좌석번호가 NFT 티켓에 저장됩니다.
+                    선택 좌석은 최대 {maxSelectableTickets}매까지 가능하며, 예매 완료 시 좌석번호가 NFT 티켓에 저장됩니다.
                   </p>
                 </div>
 
@@ -1044,6 +1152,12 @@ export function TicketBooking() {
                   <span className="h-3 w-3 rounded-full bg-[#b7c3cf]" />
                   판매 완료
                 </span>
+                {isPriorityMode && (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full" style={{ background: "#fef3c7", border: "1px solid #fde68a" }} />
+                    우선 예매 외 좌석
+                  </span>
+                )}
               </div>
 
               <div className="mt-6 overflow-x-auto rounded-[24px] border bg-white p-4" style={{ borderColor: "#dbe3ea" }}>
@@ -1070,6 +1184,8 @@ export function TicketBooking() {
                             const seatKey = `${row}-${seatNumber}`;
                             const compoundKey = `${selectedBlock.label}:${seatKey}`;
                             const sold = takenSeatKeys.has(compoundKey);
+                            const priorityRestricted = isPriorityMode && !(row === PRIORITY_ROW && PRIORITY_SEAT_NUMS.has(seatNumber));
+                            const disabled = sold || priorityRestricted;
                             const selected = selectedSeatKeys.includes(seatKey);
 
                             return (
@@ -1077,13 +1193,13 @@ export function TicketBooking() {
                                 key={seatKey}
                                 type="button"
                                 onClick={() => toggleSeat(seatKey)}
-                                disabled={sold}
+                                disabled={disabled}
                                 className="h-8 rounded-md text-[0.72rem] font-semibold transition"
                                 style={{
-                                  background: sold ? "#b8c3ce" : selected ? "#1456a0" : "#eef3f7",
-                                  color: sold ? "#f7fafc" : selected ? "#ffffff" : "#4e6178",
-                                  border: sold ? "1px solid #b8c3ce" : selected ? "1px solid #1456a0" : "1px solid #d7dfe7",
-                                  opacity: sold ? 0.9 : 1,
+                                  background: sold ? "#b8c3ce" : priorityRestricted ? "#fef3c7" : selected ? "#1456a0" : "#eef3f7",
+                                  color: sold ? "#f7fafc" : priorityRestricted ? "#b45309" : selected ? "#ffffff" : "#4e6178",
+                                  border: sold ? "1px solid #b8c3ce" : priorityRestricted ? "1px solid #fde68a" : selected ? "1px solid #1456a0" : "1px solid #d7dfe7",
+                                  opacity: sold ? 0.9 : priorityRestricted ? 0.65 : 1,
                                 }}
                               >
                                 {seatNumber}
@@ -1106,15 +1222,15 @@ export function TicketBooking() {
                   <ChevronLeft className="h-4 w-4" />
                   구역 다시 선택
                 </Button>
-                <Button
-                  className="rounded-2xl px-5 text-white"
-                  style={{ background: selectedSeatKeys.length > 0 ? "#1456a0" : "#97afcc" }}
-                  disabled={selectedSeatKeys.length === 0}
-                  onClick={() => updateStep(2)}
-                >
-                  가격 확인하기
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+	                <Button
+	                  className="rounded-2xl px-5 text-white"
+	                  style={{ background: selectedSeatKeys.length > 0 ? "#1456a0" : "#97afcc" }}
+	                  disabled={selectedSeatKeys.length === 0}
+	                  onClick={() => updateStep(2)}
+	                >
+	                  권종 확인하기
+	                  <ChevronRight className="h-4 w-4" />
+	                </Button>
               </div>
             </section>
           )}
@@ -1192,19 +1308,6 @@ export function TicketBooking() {
                 ))}
               </div>
 
-              <label className="mt-5 flex items-start gap-3 rounded-[20px] border px-4 py-4"
-                style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
-                <input
-                  type="checkbox"
-                  checked={refundPolicyAgreed}
-                  onChange={(event) => setRefundPolicyAgreed(event.target.checked)}
-                  className="mt-1 h-4 w-4 rounded border-[#cfd8e2]"
-                />
-                <span className="text-[0.92rem] leading-6" style={{ color: "#42556d" }}>
-                  결제 후 티켓 NFT는 즉시 발급되며, 경기 시작 4시간 전까지는 공식 재판매 또는 취소 정책에 따라 처리됩니다.
-                </span>
-              </label>
-
               <div className="mt-6 flex justify-between">
                 <Button
                   variant="outline"
@@ -1214,57 +1317,121 @@ export function TicketBooking() {
                   <ChevronLeft className="h-4 w-4" />
                   좌석 다시 보기
                 </Button>
-                <Button
-                  className="rounded-2xl px-5 text-white"
-                  style={{ background: paymentReady && mintingStatus === "idle" ? "#1456a0" : "#97afcc" }}
-                  disabled={!paymentReady || mintingStatus !== "idle"}
-                  onClick={() => void handleCompleteBooking()}
-                >
-                  {mintingStatus === "connecting" && <><Loader2 className="h-4 w-4 animate-spin" />지갑 연결 중...</>}
-                  {mintingStatus === "signing" && mintingProgress && (
-                    <><Loader2 className="h-4 w-4 animate-spin" />MetaMask 컨펌 대기 ({mintingProgress.current}/{mintingProgress.total})...</>
-                  )}
-                  {mintingStatus === "signing" && !mintingProgress && <><Loader2 className="h-4 w-4 animate-spin" />MetaMask 컨펌 대기...</>}
-                  {mintingStatus === "mining" && mintingProgress && (
-                    <><Loader2 className="h-4 w-4 animate-spin" />블록체인 기록 중 ({mintingProgress.current}/{mintingProgress.total})...</>
-                  )}
-                  {mintingStatus === "mining" && !mintingProgress && <><Loader2 className="h-4 w-4 animate-spin" />블록체인 기록 중...</>}
-                  {mintingStatus === "saving" && mintingProgress && (
-                    <><Loader2 className="h-4 w-4 animate-spin" />티켓 저장 중 ({mintingProgress.current}/{mintingProgress.total})...</>
-                  )}
-                  {mintingStatus === "saving" && !mintingProgress && <><Loader2 className="h-4 w-4 animate-spin" />티켓 저장 중...</>}
-                  {mintingStatus === "idle"       && <>예매 완료<CheckCircle2 className="h-4 w-4" /></>}
-                </Button>
-              </div>
+                {bookingDeadlinePassed && (
+                  <div className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-[0.84rem] font-semibold mb-2"
+                    style={{ background: "#fff3f3", color: "#b94040", border: "1px solid #f0c4c4" }}>
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    예매 마감 (경기 시작 1시간 이후 예매 불가)
+                  </div>
+                )}
+	                <Button
+	                  className="rounded-2xl px-5 text-white"
+	                  style={{ background: canEnterPayment ? "#1456a0" : "#97afcc" }}
+	                  disabled={!canEnterPayment}
+	                  onClick={() => updateStep(3)}
+	                >
+	                  {bookingDeadlinePassed ? <>예매 마감</> : <>결제로 이동<ChevronRight className="h-4 w-4" /></>}
+	                </Button>
+	              </div>
+	            </section>
+	          )}
 
-              {/* 진행 바 */}
-              {mintingProgress && (
-                <div className="mt-4 rounded-2xl border p-4" style={{ background: "#f0f5fb", borderColor: "#d0dcea" }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[0.78rem] font-semibold" style={{ color: "#3a5f8a" }}>
-                      {mintingProgress.label} {mintingProgress.current > 0 ? `${mintingProgress.current} / ${mintingProgress.total}` : ""}
-                    </span>
-                    <span className="text-[0.78rem] font-semibold" style={{ color: "#1456a0" }}>
-                      {mintingProgress.percent}%
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ background: "#d0dcea" }}>
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${mintingProgress.percent}%`,
-                        background: "linear-gradient(90deg, #1456a0, #1e7fd0)",
-                      }}
-                    />
-                  </div>
-                  <p className="mt-2 text-[0.72rem]" style={{ color: "#8a9ab0" }}>
-                    {mintingProgress.detail}
-                  </p>
-                </div>
-              )}
-            </section>
-          )}
-        </div>
+	          {currentStep === 3 && selectedGrade && selectedBlock && (
+	            <section
+	              className="rounded-[30px] border p-6"
+	              style={{ background: "#f7f9fb", borderColor: "#d8e0e8" }}
+	            >
+	              <div className="flex flex-wrap items-start justify-between gap-4">
+	                <div>
+	                  <p className="text-[0.78rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "#8a9ab0" }}>
+	                    Payment
+	                  </p>
+	                  <h3 className="mt-2 text-[1.15rem] font-bold tracking-[-0.04em]" style={{ color: "#14253f" }}>
+	                    결제 수단을 선택하고 예매를 완료하세요
+	                  </h3>
+	                  <p className="mt-2 text-[0.93rem]" style={{ color: "#5d6f86" }}>
+	                    Toss 테스트 위젯으로 진행되며, 현재 환경에서는 실제 결제가 발생하지 않습니다.
+	                  </p>
+	                </div>
+	                <Button
+	                  variant="outline"
+	                  className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
+	                  onClick={() => updateStep(2)}
+	                >
+	                  <ChevronLeft className="h-4 w-4" />
+	                  권종 다시 보기
+	                </Button>
+	              </div>
+
+	              <div
+	                className="mt-5 flex items-center gap-2 rounded-[14px] border px-4 py-3 text-[0.88rem] font-bold"
+	                style={{ background: "#FFF7ED", borderColor: "#FED7AA", color: "#EA580C" }}
+	              >
+	                <Info className="h-4 w-4 shrink-0" />
+	                테스트 환경입니다. 실제 결제되지 않습니다.
+	              </div>
+
+	              <div className="mt-5 rounded-[24px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
+	                <div id="toss-payment-widget" />
+	                <div id="toss-agreement-widget" className="mt-4" />
+
+	                {tossState === "error" ? (
+	                  <div className="flex flex-col items-center justify-center gap-3 py-8 text-center" style={{ color: "#b94040" }}>
+	                    <AlertCircle className="h-6 w-6" />
+	                    <span className="text-[0.94rem] font-bold">결제 수단을 불러오지 못했습니다.</span>
+	                    <span className="max-w-lg text-[0.8rem] leading-6" style={{ color: "#8a5860" }}>
+	                      {widgetError ?? "문제가 계속되면 새로고침 후 다시 시도해 주세요."}
+	                    </span>
+	                    <button
+	                      type="button"
+	                      className="mt-1 rounded-xl border px-4 py-2 text-[0.82rem] font-bold"
+	                      style={{ borderColor: "#f0c4c4", color: "#b94040", background: "#fff7f7" }}
+	                      onClick={() => setWidgetRetryKey((key) => key + 1)}
+	                    >
+	                      다시 시도
+	                    </button>
+	                  </div>
+	                ) : tossState === "loading" || tossState === "idle" ? (
+	                  <div className="flex flex-col items-center justify-center gap-3 py-9 text-center" style={{ color: "#64748B" }}>
+	                    <Loader2 className="h-6 w-6 animate-spin" />
+	                    <span className="text-[0.94rem] font-bold">결제 수단을 불러오는 중입니다...</span>
+	                    <div className="flex flex-wrap justify-center gap-2 text-[0.78rem] font-semibold">
+	                      {["Toss SDK 로드", "위젯 초기화", "결제수단 렌더"].map((item) => (
+	                        <span key={item} className="rounded-full border px-3 py-1.5" style={{ borderColor: "#E2E8F0", background: "#F8FAFC" }}>
+	                          {item}
+	                        </span>
+	                      ))}
+	                    </div>
+	                  </div>
+	                ) : tossState === "paying" ? (
+	                  <div className="flex flex-col items-center justify-center gap-3 py-8 text-center" style={{ color: "#1E3A8A" }}>
+	                    <Loader2 className="h-6 w-6 animate-spin" />
+	                    <span className="text-[0.94rem] font-bold">결제 승인 중입니다. 창을 닫지 마세요.</span>
+	                  </div>
+	                ) : null}
+	              </div>
+
+	              <Button
+	                className="mt-5 min-h-12 w-full rounded-[14px] text-white"
+	                style={{ background: tossState === "ready" && !bookingDeadlinePassed ? "#1456a0" : "#97afcc" }}
+	                disabled={tossState !== "ready" || bookingDeadlinePassed}
+	                onClick={() => void handleCompleteBooking()}
+	              >
+	                {tossState === "paying" ? (
+	                  <><Loader2 className="h-4 w-4 animate-spin" />승인 중...</>
+	                ) : tossState === "error" ? (
+	                  <>결제 위젯 오류</>
+	                ) : tossState !== "ready" ? (
+	                  <><Loader2 className="h-4 w-4 animate-spin" />결제 준비 중...</>
+	                ) : bookingDeadlinePassed ? (
+	                  <>예매 마감</>
+	                ) : (
+	                  <>토스페이로 결제하기 {formatPrice(finalTotal)}<CheckCircle2 className="h-4 w-4" /></>
+	                )}
+	              </Button>
+	            </section>
+	          )}
+	        </div>
 
         <aside
           className="h-fit rounded-[30px] border p-6 xl:sticky xl:top-24"
@@ -1313,6 +1480,62 @@ export function TicketBooking() {
             </div>
           </div>
 
+          {/* 포인트 할인 */}
+          <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[0.78rem] font-semibold uppercase tracking-[0.2em]" style={{ color: "#8a9ab0" }}>
+                포인트 할인
+              </p>
+              {pointBalance !== null && (
+                <span className="text-[0.78rem] font-semibold" style={{ color: "#1456a0" }}>
+                  보유 {pointBalance.toLocaleString()}P
+                </span>
+              )}
+            </div>
+            {pointApplied ? (
+              <div className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                style={{ background: "#f0fbf5", border: "1px solid #c6ebd8" }}>
+                <span className="text-sm font-semibold" style={{ color: "#059669" }}>
+                  -{pointDiscount.toLocaleString()}P 적용됨
+                </span>
+                <button onClick={cancelPoint}
+                  className="text-xs font-semibold px-2.5 py-1 rounded-lg"
+                  style={{ background: "#fee2e2", color: "#dc2626" }}>
+                  취소
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min={1000}
+                    step={100}
+                    value={pointInput}
+                    onChange={(e) => { setPointInput(e.target.value); setPointError(null); }}
+                    placeholder="사용할 포인트 (최소 1,000P)"
+                    className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: pointError ? "#f87171" : "#d0d8e4", color: "#14253f" }}
+                  />
+                  <button
+                    onClick={applyPoint}
+                    disabled={!pointInput || !walletAddress}
+                    className="rounded-xl px-4 py-2 text-sm font-bold text-white"
+                    style={{ background: pointInput && walletAddress ? "#1456a0" : "#94a3b8" }}
+                  >
+                    적용
+                  </button>
+                </div>
+                {pointError && (
+                  <p className="text-xs" style={{ color: "#ef4444" }}>{pointError}</p>
+                )}
+                <p className="text-xs" style={{ color: "#9ca3af" }}>
+                  1P = 1원 · 최소 1,000P 이상 · 총 결제금액 이하
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
             <p className="text-[0.78rem] font-semibold uppercase tracking-[0.2em]" style={{ color: "#8a9ab0" }}>
               결제 금액
@@ -1326,6 +1549,12 @@ export function TicketBooking() {
                 <span>예매 수수료</span>
                 <strong style={{ color: "#162840" }}>{formatPrice(serviceFee)}</strong>
               </div>
+              {pointDiscount > 0 && (
+                <div className="flex items-center justify-between">
+                  <span style={{ color: "#059669" }}>포인트 할인</span>
+                  <strong style={{ color: "#059669" }}>-{formatPrice(pointDiscount)}</strong>
+                </div>
+              )}
               <div className="border-t pt-3 flex items-center justify-between" style={{ borderColor: "#e3e9ef" }}>
                 <span className="font-semibold" style={{ color: "#162840" }}>총 결제금액</span>
                 <strong className="text-[1.12rem]" style={{ color: "#1456a0" }}>
@@ -1336,21 +1565,36 @@ export function TicketBooking() {
           </div>
 
           {/* 지갑 연결 상태 */}
-          <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-[0.86rem] font-semibold" style={{ color: "#1456a0" }}>
-                <Wallet className="h-4 w-4" />
+	          <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
+	            <div className="flex items-center justify-between gap-2">
+	              <div className="flex items-center gap-2 text-[0.86rem] font-semibold" style={{ color: "#1456a0" }}>
+	                <Wallet className="h-4 w-4" />
                 지갑
               </div>
               <span className="text-[0.82rem] font-semibold" style={{ color: walletAddress ? "#2dba73" : "#e5824a" }}>
                 {walletAddress
                   ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
                   : "미연결 — 예매 시 자동 연결"}
-              </span>
-            </div>
-          </div>
+	              </span>
+	            </div>
+	          </div>
 
-          <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
+	          <Button
+	            className="mt-4 min-h-12 w-full rounded-[14px] text-white"
+	            disabled={summaryCta.disabled}
+	            aria-disabled={summaryCta.disabled}
+	            onClick={summaryCta.onClick}
+	            style={{
+	              background: summaryCta.disabled ? "#CBD5E1" : "#1456a0",
+	              boxShadow: summaryCta.disabled ? "none" : "0 12px 24px rgba(20,86,160,0.18)",
+	            }}
+	          >
+	            {currentStep === 3 && tossState === "paying" && <Loader2 className="h-4 w-4 animate-spin" />}
+	            {summaryCta.label}
+	            {!summaryCta.disabled && currentStep < 3 && <ChevronRight className="h-4 w-4" />}
+	          </Button>
+	
+	          <div className="mt-4 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dbe3ea" }}>
             <div className="flex items-center gap-2 text-[0.86rem] font-semibold" style={{ color: "#1456a0" }}>
               <AlertCircle className="h-4 w-4" />
               예매 팁
@@ -1361,127 +1605,33 @@ export function TicketBooking() {
               <p>• 예매 후에는 내 입장권에서 QR과 좌석번호를 다시 확인할 수 있습니다.</p>
             </div>
           </div>
-        </aside>
-      </div>
+	        </aside>
+	      </div>
 
-      {completedTickets.length > 0 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(17,27,39,0.45)] p-4">
-          <div
-            className="w-full max-w-[560px] rounded-[30px] border p-7"
-            style={{ background: "#f8fafc", borderColor: "#d9e1e8", boxShadow: "0 26px 60px rgba(17,40,73,0.18)" }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full"
-                style={{ background: "#e2f3ea", color: "#2d8b57" }}>
-                <CheckCircle2 className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-[0.8rem] font-semibold uppercase tracking-[0.22em]" style={{ color: "#8a9ab0" }}>
-                  Booking Complete
-                </p>
-                <h3 className="mt-1 text-[1.2rem] font-bold tracking-[-0.04em]" style={{ color: "#162840" }}>
-                  예매가 완료되었습니다
-                </h3>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-[22px] border p-4" style={{ background: "#ffffff", borderColor: "#dde5ec" }}>
-              <div className="space-y-3 text-[0.93rem]" style={{ color: "#4f6279" }}>
-                {completedTickets.map((ticket) => (
-                  <div key={ticket.id} className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold" style={{ color: "#162840" }}>
-                        {ticket.seat}
-                      </p>
-                      <p className="mt-1 text-[0.86rem]">{ticket.ticketTypeLabel} · {ticket.gate}</p>
-                    </div>
-                    <div className="text-right font-semibold" style={{ color: "#1456a0" }}>
-                      {formatPrice(ticket.price)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 굿즈 박스 지급 안내 */}
-            <div
-              className="mt-4 rounded-[22px] border p-4"
-              style={{ background: "linear-gradient(135deg, #f5eeff, #fce8ff)", borderColor: "#d4aaee" }}
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">🎁</span>
-                <div>
-                  <p className="text-[0.88rem] font-bold" style={{ color: "#7700bb" }}>
-                    굿즈 박스가 지급되었습니다!
-                  </p>
-                  <p className="mt-1 text-[0.8rem]" style={{ color: "#9b6dbf" }}>
-                    박스를 개봉하면 NFT 굿즈 또는 파편을 획득할 수 있어요.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* 블록체인 확정 상태 */}
-            {confirmingBackground === "pending" && (
-              <div className="mt-4 flex items-center gap-3 rounded-[16px] border px-4 py-3"
-                style={{ background: "#fefbe8", borderColor: "#f0d060", color: "#7a6000" }}>
-                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                <span className="text-[0.82rem] font-medium">블록체인 확정 중... (백그라운드 처리)</span>
-              </div>
-            )}
-            {confirmingBackground === "done" && (
-              <div className="mt-4 flex items-center gap-3 rounded-[16px] border px-4 py-3"
-                style={{ background: "#eaf3f0", borderColor: "#b0d9c8", color: "#1d7a55" }}>
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span className="text-[0.82rem] font-medium">티켓 저장 완료 — 선택 좌석이 판매 완료로 반영되었습니다</span>
-              </div>
-            )}
-            {confirmingBackground === "failed" && (
-              <div className="mt-4 flex items-center gap-3 rounded-[16px] border px-4 py-3"
-                style={{ background: "#fef2f2", borderColor: "#fca5a5", color: "#b91c1c" }}>
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span className="text-[0.82rem] font-medium">블록체인 확정 실패 — 고객센터에 문의해 주세요</span>
-              </div>
-            )}
-
-            {txHash && (
-              <a
-                href={`https://explorer.hoodi.ethpandaops.io/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 flex items-center gap-2 rounded-[16px] border px-4 py-3 text-[0.82rem] font-medium transition hover:opacity-80"
-                style={{ background: "#eaf3f0", borderColor: "#b0d9c8", color: "#1d7a55" }}
-              >
-                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Tx: {txHash}</span>
-              </a>
-            )}
-
-            <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <Button
-                variant="outline"
-                className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-                onClick={() => navigate("/tickets")}
-              >
-                경기 목록으로
-              </Button>
-              <Button
-                className="rounded-2xl bg-[#1456a0] text-white"
-                onClick={() => navigate("/my-tickets")}
-              >
-                내 입장권 보기
-              </Button>
-              <Button
-                className="rounded-2xl text-white"
-                style={{ background: "linear-gradient(135deg, #7700bb, #ff10f0)" }}
-                onClick={() => navigate("/combine")}
-              >
-                🎁 박스 받기
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+	      <div
+	        className="fixed inset-x-0 bottom-0 z-40 border-t bg-white/95 px-4 py-3 shadow-[0_-12px_28px_rgba(17,40,73,0.10)] backdrop-blur xl:hidden"
+	        style={{ borderColor: "#E2E8F0", paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}
+	      >
+	        <div className="mx-auto flex max-w-3xl items-center gap-3">
+	          <div className="min-w-0 flex-1">
+	            <p className="truncate text-[0.82rem] font-bold" style={{ color: "#64748B" }}>
+	              {selectedTickets.length > 0 ? `${selectedTickets.length}석 선택` : selectedBlock ? `${selectedGrade?.name} ${selectedBlock.label}블록` : "아직 선택 전"}
+	            </p>
+	            <p className="text-[1rem] font-black" style={{ color: "#1456a0" }}>
+	              {formatPrice(finalTotal)}
+	            </p>
+	          </div>
+	          <Button
+	            className="min-h-11 rounded-[12px] px-4 text-white"
+	            disabled={summaryCta.disabled}
+	            onClick={summaryCta.onClick}
+	            style={{ background: summaryCta.disabled ? "#CBD5E1" : "#1456a0" }}
+	          >
+	            {summaryCta.label}
+	          </Button>
+	        </div>
+	      </div>
+	
+	    </div>
+	  );
+	}

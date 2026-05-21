@@ -1,4 +1,5 @@
-import { apiUrl } from '../lib/api';
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000').replace(/\/$/, '');
+const BASE = `${API_BASE}/api`;
 
 function authHeader(): Record<string, string> {
   return {
@@ -17,7 +18,7 @@ export type WalletInfo = {
 
 // 서버에 지갑 주소 등록
 export async function connectWalletToServer(address: string): Promise<void> {
-  const res = await fetch(apiUrl('/api/wallet/connect'), {
+  const res = await fetch(`${BASE}/wallet/connect`, {
     method: 'POST',
     headers: authHeader(),
     body: JSON.stringify({ address }),
@@ -28,7 +29,7 @@ export async function connectWalletToServer(address: string): Promise<void> {
 
 // 서명용 nonce 발급
 export async function getChallenge(): Promise<{ nonce: string }> {
-  const res = await fetch(apiUrl('/api/wallet/challenge'), { headers: authHeader() });
+  const res = await fetch(`${BASE}/wallet/challenge`, { headers: authHeader() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? 'challenge 발급 실패');
   return data as { nonce: string };
@@ -36,7 +37,7 @@ export async function getChallenge(): Promise<{ nonce: string }> {
 
 // MetaMask 서명 검증
 export async function verifySignature(signature: string): Promise<void> {
-  const res = await fetch(apiUrl('/api/wallet/verify'), {
+  const res = await fetch(`${BASE}/wallet/verify`, {
     method: 'POST',
     headers: authHeader(),
     body: JSON.stringify({ signature }),
@@ -47,7 +48,7 @@ export async function verifySignature(signature: string): Promise<void> {
 
 // 현재 지갑 상태 조회
 export async function getWalletInfo(): Promise<WalletInfo> {
-  const res = await fetch(apiUrl('/api/wallet/info'), { headers: authHeader() });
+  const res = await fetch(`${BASE}/wallet/info`, { headers: authHeader() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? '지갑 정보 조회 실패');
   return data as WalletInfo;

@@ -3,26 +3,26 @@ import {
   CheckCircle2,
   Copy,
   Wallet,
-  Ticket,
-  ShoppingBag,
   Fingerprint,
   LogIn,
   Loader2,
   FileText,
   MessageCircle,
   Bookmark,
+  ChevronRight,
   Store,
   Settings2,
   ExternalLink,
   History,
 } from "lucide-react";
+import { GiBaseballBat, GiBaseballGlove } from "react-icons/gi";
+import { FaBaseballBall, FaTrophy } from "react-icons/fa";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import { connectWalletToServer, getChallenge, verifySignature } from "../api/walletApi";
 import { createDid, getDidStatus, type DidStatus } from "../api/didApi";
-import { apiUrl } from "../lib/api";
 
 type Preferences = {
   ticketAlerts: boolean;
@@ -79,6 +79,16 @@ export function MyPage() {
   const { isLoggedIn, user } = useAuth();
   const [preferences] = useState<Preferences>(loadPreferences);
 
+  // 멤버십 티어
+  const [memberTier, setMemberTier] = useState<string>("...");
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const token = localStorage.getItem("auth_token") ?? "";
+    fetch(`${import.meta.env.VITE_API_URL}/api/auth/membership`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.json()).then(d => { if (d.success) setMemberTier(d.joined ? d.currentTier : "미가입"); }).catch(() => {});
+  }, [isLoggedIn]);
+
   // DID 상태
   const [didStatus, setDidStatus] = useState<DidStatus | null>(null);
   const [isDIDLoading, setIsDIDLoading] = useState(false);
@@ -92,7 +102,7 @@ export function MyPage() {
   useEffect(() => {
     if (!isLoggedIn) return;
     setTxLoading(true);
-    fetch(apiUrl("/api/tx-history"), {
+    fetch(`${import.meta.env.VITE_API_URL}/api/tx-history`, {
       headers: { Authorization: `Bearer ${localStorage.getItem("auth_token") ?? ""}` },
     })
       .then(r => r.json())
@@ -205,7 +215,7 @@ export function MyPage() {
     <div className="page-shell space-y-8">
       <div className="page-header">
         <div>
-          <p className="page-eyebrow mb-3" style={{ color: "#526183" }}>My Page</p>
+          <p className="page-eyebrow mb-3" style={{ color: "#1456a0" }}>My Page</p>
           <h1 className="page-title mb-3" style={{ color: "#1f3248" }}>내 설정</h1>
           
         </div>
@@ -235,21 +245,14 @@ export function MyPage() {
                     {user?.email}
                   </span>
                 )}
-                {isDidVerified && (
-                  <span className="rounded-full border px-2.5 py-1 flex items-center gap-1" style={{ background: "#e8f1ec", borderColor: "#c2d8c9", color: "#3d6b4f" }}>
-                    <CheckCircle2 className="w-3 h-3" />
-                    DID 인증 완료
-                  </span>
-                )}
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             {[
-              { icon: Ticket, label: "입장권 알림", value: preferences.ticketAlerts ? "켜짐" : "꺼짐" },
-              { icon: ShoppingBag, label: "거래 보호", value: preferences.requireTradeSignature ? "서명 확인" : "기본" },
               { icon: Wallet, label: "지갑 상태", value: walletConnected ? "연결됨" : "미연결" },
+              { icon: Fingerprint, label: "DID 인증", value: isDidVerified ? "인증" : "미인증" },
             ].map((item) => {
               const Icon = item.icon;
               return (
@@ -272,10 +275,9 @@ export function MyPage() {
         style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" }}
       >
         <div className="mb-6 flex items-center gap-3">
-          <Settings2 className="h-5 w-5" style={{ color: "#526183" }} />
           <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>내 활동 내역</h2>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           {[
             { icon: FileText,      label: "내 글",   count: "0", bg: "#eff6ff", text: "#3b82f6", border: "#dbeafe" },
             { icon: MessageCircle, label: "내 댓글", count: "0", bg: "#f0fdf4", text: "#22c55e", border: "#dcfce7" },
@@ -287,13 +289,62 @@ export function MyPage() {
               className="rounded-[24px] border h-[140px] transition-all hover:brightness-95 group flex flex-col items-center justify-center gap-2"
               style={{ background: item.bg, borderColor: item.border }}
             >
-              <item.icon className="h-10 w-10 transition-transform group-hover:scale-110" style={{ color: item.text }} />
               <div className="text-center">
                 <p className="text-[1rem] font-bold" style={{ color: item.text, opacity: 0.9 }}>{item.label}</p>
                 <p className="text-[1.8rem] font-black" style={{ color: item.text }}>{item.count}</p>
               </div>
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => navigate("/mypage/membership")}
+            className="group relative col-span-2 overflow-hidden rounded-[24px] border h-[140px] transition-all hover:brightness-95 md:col-span-1"
+            style={{
+              background: "linear-gradient(145deg, #f8fbff 0%, #eefcf7 100%)",
+              borderColor: { 미가입: "#9ca3af", 베이직: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8",
+              borderWidth: 2,
+            }}
+          >
+            <div className="flex h-full flex-col items-center justify-center gap-1.5">
+              <div
+                className="relative flex h-12 w-12 items-center justify-center"
+                style={{
+                  clipPath: "polygon(50% 3%, 92% 25%, 92% 75%, 50% 97%, 8% 75%, 8% 25%)",
+                  background: `linear-gradient(145deg, ${{ 미가입: "#9ca3af", 베이직: "#9ca3af", 브론즈: "#d97706", 실버: "#94a3b8", 골드: "#f59e0b" }[memberTier] ?? "#94a3b8"}, ${{ 미가입: "#6b7280", 베이직: "#6b7280", 브론즈: "#b45309", 실버: "#475569", 골드: "#d97706" }[memberTier] ?? "#475569"})`,
+                }}
+              >
+                <div
+                  className="flex h-9 w-9 items-center justify-center rounded-full border-2"
+                  style={{
+                    background: "linear-gradient(145deg, #f8fafc, #cbd5e1)",
+                    borderColor: "#f8fafc",
+                    color: { 미가입: "#6b7280", 베이직: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b",
+                  }}
+                >
+                  {memberTier === "골드" ? (
+                    <FaTrophy className="h-5 w-5" />
+                  ) : memberTier === "브론즈" ? (
+                    <div className="relative h-6 w-6">
+                      <GiBaseballBat className="absolute left-0 top-0 h-6 w-6 -rotate-[32deg]" />
+                      <FaBaseballBall className="absolute bottom-0 right-0 h-3 w-3" />
+                    </div>
+                  ) : memberTier === "베이직" || memberTier === "미가입" ? (
+                    <FaBaseballBall className="h-5 w-5" />
+                  ) : (
+                    <GiBaseballGlove className="h-6 w-6" />
+                  )}
+                </div>
+              </div>
+              <div className="text-center">
+                <p className="text-[1rem] font-bold leading-tight" style={{ color: "#3f4e68" }}>멤버십</p>
+                <p className="text-[1.35rem] font-black leading-tight" style={{ color: { 미가입: "#6b7280", 베이직: "#6b7280", 브론즈: "#b45309", 실버: "#64748b", 골드: "#d97706" }[memberTier] ?? "#64748b" }}>{memberTier}</p>
+              </div>
+              <span className="mt-1 inline-flex items-center gap-1 text-[0.76rem] font-extrabold" style={{ color: "#475569" }}>
+                정보 보기
+                <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </span>
+            </div>
+          </button>
         </div>
       </section>
 
@@ -304,7 +355,6 @@ export function MyPage() {
             style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" }}
           >
             <div className="mb-5 flex items-center gap-3">
-              <Wallet className="h-5 w-5" style={{ color: "#526183" }} />
               <div>
                 <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>지갑 연결</h2>
                 <p className="page-muted mt-1" style={{ color: "#6d7d90" }}>메타마스크를 연결해서 NFT 티켓과 팬 자산 거래를 인증합니다.</p>
@@ -373,11 +423,11 @@ export function MyPage() {
 
           {/* ─── DID 인증 섹션 ─────────────────────────────── */}
           <section
+            id="did"
             className="rounded-[24px] border px-6 py-6"
             style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17, 40, 73, 0.05)" }}
           >
             <div className="mb-5 flex items-center gap-3">
-              <Fingerprint className="h-5 w-5" style={{ color: "#526183" }} />
               <div>
                 <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>DID 인증</h2>
                 <p className="page-muted mt-1" style={{ color: "#6d7d90" }}>MetaMask 서명으로 지갑 소유권을 검증하고 분산 신원을 등록합니다.</p>
@@ -468,7 +518,6 @@ export function MyPage() {
             style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17,40,73,0.05)" }}
           >
             <div className="mb-5 flex items-center gap-3">
-              <History className="h-5 w-5" style={{ color: "#526183" }} />
               <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>온체인 트랜잭션 이력</h2>
             </div>
             {txLoading ? (

@@ -1,12 +1,46 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Trophy, Eye, EyeOff, ChevronLeft } from "lucide-react";
-import { GoogleLogin } from "@react-oauth/google";
+import { useGoogleLogin } from "@react-oauth/google";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
-import { apiUrl } from "../lib/api";
 
 type View = "login" | "findId" | "findPassword";
+const API_ORIGIN = (
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  (typeof window !== "undefined" ? window.location.origin : "")
+).replace(/\/$/, "");
+const SAFE_API_ORIGIN =
+  typeof window !== "undefined" &&
+  window.location.hostname !== "localhost" &&
+  window.location.hostname !== "127.0.0.1" &&
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(API_ORIGIN)
+    ? window.location.origin
+    : API_ORIGIN;
+const API_BASE = `${SAFE_API_ORIGIN}/api`;
+
+async function readLoginJson<T>(res: Response, fallbackMessage: string): Promise<T> {
+  const contentType = res.headers.get("content-type") ?? "";
+  const text = await res.text();
+
+  if (!contentType.includes("application/json")) {
+    throw new Error(fallbackMessage);
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error("서버 응답을 읽는 중 문제가 발생했습니다.");
+  }
+}
+
+function getErrorMessage(data: unknown, fallbackMessage: string): string {
+  if (data && typeof data === "object" && "error" in data) {
+    const message = (data as { error?: unknown }).error;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallbackMessage;
+}
 
 export function Login() {
   const navigate = useNavigate();
@@ -55,20 +89,36 @@ export function Login() {
     }
   }
 
+  const handleGoogleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      setError(null);
+      setIsGoogleLoading(true);
+      try {
+        await googleLogin(tokenResponse.access_token);
+        navigate("/", { replace: true });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "구글 로그인 실패");
+      } finally {
+        setIsGoogleLoading(false);
+      }
+    },
+    onError: () => setError("구글 로그인이 취소되었거나 실패했습니다."),
+  });
+
   async function handleFindId() {
     if (!findIdNickname.trim()) { setFindIdError("닉네임을 입력해주세요."); return; }
     setIsFindIdLoading(true); setFindIdError(null); setFindIdResult(null);
     try {
-      const res = await fetch(apiUrl("/api/auth/find-id"), {
+      const res = await fetch(`${API_BASE}/auth/find-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nickname: findIdNickname }),
       });
-      const data = await res.json();
-      if (!res.ok) { setFindIdError(data.error); return; }
+      const data = await readLoginJson<{ maskedEmail?: string; error?: string }>(res, "아이디 찾기 요청에 실패했습니다.");
+      if (!res.ok) { setFindIdError(getErrorMessage(data, "아이디 찾기 요청에 실패했습니다.")); return; }
       setFindIdResult(data.maskedEmail);
-    } catch {
-      setFindIdError("서버 오류가 발생했습니다.");
+    } catch (err) {
+      setFindIdError(err instanceof Error ? err.message : "서버 오류가 발생했습니다.");
     } finally {
       setIsFindIdLoading(false);
     }
@@ -78,16 +128,16 @@ export function Login() {
     if (!findPwEmail.trim()) { setFindPwError("이메일을 입력해주세요."); return; }
     setIsFindPwLoading(true); setFindPwError(null); setFindPwResult(null);
     try {
-      const res = await fetch(apiUrl("/api/auth/find-password"), {
+      const res = await fetch(`${API_BASE}/auth/find-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: findPwEmail }),
       });
-      const data = await res.json();
-      if (!res.ok) { setFindPwError(data.error); return; }
+      const data = await readLoginJson<{ tempPassword?: string; error?: string }>(res, "비밀번호 찾기 요청에 실패했습니다.");
+      if (!res.ok) { setFindPwError(getErrorMessage(data, "비밀번호 찾기 요청에 실패했습니다.")); return; }
       setFindPwResult(data.tempPassword);
-    } catch {
-      setFindPwError("서버 오류가 발생했습니다.");
+    } catch (err) {
+      setFindPwError(err instanceof Error ? err.message : "서버 오류가 발생했습니다.");
     } finally {
       setIsFindPwLoading(false);
     }
@@ -193,33 +243,21 @@ export function Login() {
                   <span className="text-[0.82rem]" style={{ color: "#8a9aac" }}>또는</span>
                   <div className="flex-1 h-px" style={{ background: "#d6dfe8" }} />
                 </div>
-                <div className="flex justify-center">
-                  <GoogleLogin
-                    text="signin_with"
-                    shape="pill"
-                    theme="outline"
-                    size="large"
-                    width="360"
-                    onSuccess={async (credentialResponse) => {
-                      if (!credentialResponse.credential) {
-                        setError("구글 자격 증명을 받지 못했습니다.");
-                        return;
-                      }
-
-                      setError(null);
-                      setIsGoogleLoading(true);
-                      try {
-                        await googleLogin(credentialResponse.credential);
-                        navigate("/", { replace: true });
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : "구글 로그인 실패");
-                      } finally {
-                        setIsGoogleLoading(false);
-                      }
-                    }}
-                    onError={() => setError("구글 로그인이 취소되었거나 실패했습니다.")}
-                  />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleGoogleLogin()}
+                  disabled={isGoogleLoading}
+                  className="w-full h-12 rounded-[14px] border flex items-center justify-center gap-3 text-[0.95rem] font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
+                  style={{ background: "#f8fafc", borderColor: "#d0d8e2", color: "#44556c" }}
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  </svg>
+                  {isGoogleLoading ? "로그인 중..." : "Google로 로그인"}
+                </button>
               </div>
 
               {/* 아이디/비밀번호 찾기 링크 */}

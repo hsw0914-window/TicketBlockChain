@@ -1,14 +1,51 @@
 const express = require("express");
 const crypto  = require("crypto");
 const { purchaseTicket } = require("../services/ticketService");
-const { mintBoxOnChain } = require("../services/nftService");
+const { mintTicketOnChain, isOnChainMintingEnabled } = require("../services/nftService");
+const fabricService = require("../services/fabricBridge");
+const { confirmPayment, cancelPayment } = require("../services/tossPayService");
 const { requireAuth } = require("../middleware/auth");
+const { isWithinGamePlus1h } = require("../utils/gameTime");
+const membershipService = require("../services/membershipService");
+const notificationService = require("../services/notificationService");
 
 const router = express.Router();
 let _pool;
 
 function setPool(pool) {
   _pool = pool;
+}
+
+const PRIORITY_BLOCKS = new Set(['T1', 'T2']);
+const PRIORITY_ROW = 5;
+const PRIORITY_SEATS = new Set([2, 3, 4, 5, 6]);
+
+function isPrioritySeat(block, seat) {
+  return PRIORITY_BLOCKS.has(String(block || '').toUpperCase())
+    && Number(seat.row) === PRIORITY_ROW
+    && PRIORITY_SEATS.has(Number(seat.seatNumber));
+}
+
+function parseJsonArray(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function isMockTossPayment(paymentKey) {
+  return String(paymentKey || '').startsWith('tgen_') || (process.env.TOSS_MODE || '').trim().toLowerCase() === 'mock';
+}
+
+function createMockTicketMintResult(ticketId) {
+  return {
+    tokenId: Math.floor(100000000 + Math.random() * 900000000),
+    txHash: `0x${crypto.createHash('sha256').update(`${ticketId}:${Date.now()}:${Math.random()}`).digest('hex')}`,
+  };
 }
 
 async function requireVerifiedDidForWallet(req, res, next) {
@@ -54,7 +91,13 @@ async function requireVerifiedDidForWallet(req, res, next) {
 
 // ─── QR 유틸 ──────────────────────────────────────────────
 
-const QR_SECRET = process.env.QR_SECRET || "base-chain-qr-secret-2026";
+const QR_SECRET = process.env.QR_SECRET;
+const DEFAULT_QR_SLOT_SECONDS = 10;
+
+function getQrSlotSeconds() {
+  const value = Number.parseInt(process.env.QR_SLOT_SECONDS || "", 10);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_QR_SLOT_SECONDS;
+}
 
 // 테스트용: DEBUG_TIME_OFFSET_HOURS 만큼 현재 시간을 앞당김
 function getNowMs() {
@@ -63,7 +106,7 @@ function getNowMs() {
 }
 
 function getCurrentSlot(nowMs) {
-  return Math.floor(nowMs / 1000 / 60); // 1분 슬롯
+  return Math.floor(nowMs / 1000 / getQrSlotSeconds());
 }
 
 function generateQRToken(ticketId, slot) {
@@ -80,12 +123,21 @@ router.get("/games", async (req, res) => {
     const [games] = await _pool.query(`
       SELECT g.id, g.home_team, g.away_team,
         DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
-        g.game_time, g.stadium_id, g.status, g.base_price,
+        TIME_FORMAT(g.game_time, '%H:%i:%s') AS game_time,
+        g.stadium_id, g.base_price,
+        DATE_FORMAT(g.booking_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS booking_open_at,
+        DATE_FORMAT(g.raffle_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS raffle_open_at,
+        g.raffle_winners_count,
         s.name AS stadium_name, s.location,
-        ELT(WEEKDAY(g.game_date)+1, '월','화','수','목','금','토','일') AS day_of_week
+        ELT(WEEKDAY(g.game_date)+1, '월','화','수','목','금','토','일') AS day_of_week,
+        CASE
+          WHEN TIMESTAMP(g.game_date, g.game_time) < NOW() THEN 'ENDED'
+          WHEN g.booking_open_at IS NOT NULL AND g.booking_open_at > NOW() THEN 'UPCOMING'
+          ELSE g.status
+        END AS status
       FROM games g
       JOIN stadiums s ON g.stadium_id = s.id
-      ORDER BY g.game_date ASC
+      ORDER BY g.game_date ASC, g.game_time ASC
     `);
     res.json({ success: true, data: games });
   } catch (err) {
@@ -102,8 +154,16 @@ router.get("/games/:id", async (req, res) => {
       `SELECT g.id, g.home_team, g.away_team,
          DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
          TIME_FORMAT(g.game_time, '%H:%i:%s') AS game_time,
-         g.stadium_id, g.status, g.base_price,
-         s.name AS stadium_name, s.location, s.capacity
+         g.stadium_id, g.base_price,
+         DATE_FORMAT(g.booking_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS booking_open_at,
+         DATE_FORMAT(g.raffle_open_at, '%Y-%m-%dT%H:%i:%s+09:00') AS raffle_open_at,
+         g.raffle_winners_count,
+         s.name AS stadium_name, s.location, s.capacity,
+         CASE
+           WHEN TIMESTAMP(g.game_date, g.game_time) < NOW() THEN 'ENDED'
+           WHEN g.booking_open_at IS NOT NULL AND g.booking_open_at > NOW() THEN 'UPCOMING'
+           ELSE g.status
+         END AS status
        FROM games g
        JOIN stadiums s ON g.stadium_id = s.id
        WHERE g.id = ?`,
@@ -126,7 +186,7 @@ router.get("/seats/:gameId", async (req, res) => {
   try {
     const { gameId } = req.params;
     const [rows] = await _pool.query(
-      "SELECT block, row_num, seat_number FROM tickets WHERE game_id = ? AND status = 'confirmed'",
+      "SELECT block, row_num, seat_number FROM tickets WHERE game_id = ? AND status IN ('confirmed', 'listed')",
       [gameId],
     );
     const bookedSeats = rows.map((t) => `${t.block}:${t.row_num}-${t.seat_number}`);
@@ -161,39 +221,43 @@ router.post("/purchase", requireAuth, requireVerifiedDidForWallet, async (req, r
     // 티켓 구매 성공 시 → 지갑 주소로 user_id 조회 후 시즌 박스 1개 지급
     let ticketTokenId = null;
     let ticketTxHash  = null;
-    let boxTxHash     = null;
 
+    // Fabric 티켓 등록 + 예약 레코드 생성 (실패해도 구매 자체는 성공 처리)
     try {
-      const [[walletRow]] = await _pool.query(
-        'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
-        [verifiedWalletAddress]
+      const [[gameRow]] = await _pool.query(
+        "SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date FROM games WHERE id = ?",
+        [gameId]
       );
-      if (walletRow) {
-        // DB 박스 지급
-        await _pool.query(
-          `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 1)
-           ON DUPLICATE KEY UPDATE season_count = season_count + 1`,
-          [walletRow.user_id]
-        );
+      const { v4: uuidv4 } = require('uuid');
+      await fabricService.registerTicket({
+        ticketId:     result.id,
+        tokenId:      ticketTokenId || '0',
+        gameId:       String(gameId),
+        seatId:       `${block}-${row}-${seatNumber}`,
+        walletAddress: verifiedWalletAddress,
+        price:        Number(price),
+        purchaseType: 'PRIMARY',
+        gameDate:     gameRow?.game_date || '',
+      });
 
-        // 티켓 NFT는 프론트(MetaMask)에서 이미 민팅 완료 → 서버 측 이중 민팅 생략
-        // BoxNFT만 서버 지갑으로 민팅
-        const boxOnChainEnabled = !!(process.env.MINTER_PRIVATE_KEY && process.env.BOX_NFT_ADDRESS);
-        if (boxOnChainEnabled) {
-          try {
-            boxTxHash = await mintBoxOnChain(verifiedWalletAddress);
-          } catch (mintErr) {
-            console.error('[ticket] 박스 온체인 민팅 실패 (DB는 정상):', mintErr.message);
-          }
-        }
-      }
-    } catch (boxErr) {
-      console.error('[ticket box reward]', boxErr);
+      // Fabric 예약 레코드 (1차 구매 = 일반 예약)
+      const userDidHash    = fabricService.hashDid(walletAddress);
+      const reservationId  = uuidv4();
+      await fabricService.createReservation({
+        reservationId,
+        userDidHash,
+        gameId:      String(gameId),
+        raffleNftId: '',
+        isPriority:  false,
+      });
+      await fabricService.confirmReservation({ reservationId, ticketId: result.id });
+    } catch (fabErr) {
+      console.error('[ticket] Fabric registerTicket/reservation 실패 (무시):', fabErr.message);
     }
 
     res.json({
       success: true,
-      data: { ...result, ticketTokenId, ticketTxHash, boxTxHash },
+      data: { ...result, ticketTokenId, ticketTxHash },
     });
   } catch (err) {
     console.error(err);
@@ -202,7 +266,7 @@ router.post("/purchase", requireAuth, requireVerifiedDidForWallet, async (req, r
 });
 
 // ─── QR 발급 ──────────────────────────────────────────────
-router.get("/:ticketId/qr", async (req, res) => {
+router.get("/:ticketId/qr", requireAuth, async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { walletAddress } = req.query;
@@ -211,13 +275,22 @@ router.get("/:ticketId/qr", async (req, res) => {
       return res.status(400).json({ available: false, message: "지갑 주소가 필요합니다" });
     }
 
+    const normalizedWallet = String(walletAddress).trim().toLowerCase();
+    const [[walletRow]] = await _pool.query(
+      "SELECT wallet_address FROM user_wallets WHERE user_id = ?",
+      [req.user.user_id],
+    );
+    if (!walletRow?.wallet_address || String(walletRow.wallet_address).toLowerCase() !== normalizedWallet) {
+      return res.status(403).json({ available: false, message: "내 입장권의 QR만 조회할 수 있습니다" });
+    }
+
     // 티켓 + 경기 정보 조회
     const [rows] = await _pool.query(
       `SELECT t.*, g.game_date, g.game_time
        FROM tickets t
        LEFT JOIN games g ON t.game_id = g.id
        WHERE t.id = ? AND t.wallet_address = ?`,
-      [ticketId, walletAddress],
+      [ticketId, normalizedWallet],
     );
 
     if (rows.length === 0) {
@@ -256,11 +329,12 @@ router.get("/:ticketId/qr", async (req, res) => {
     const msUntilGame    = gameDateTime.getTime() - nowMs;
     const hoursUntilGame = msUntilGame / (1000 * 60 * 60);
 
-    // 경기 시작 2시간 전부터만 QR 활성화
-    if (hoursUntilGame > 2) {
+    // 경기 시작 N시간 전부터 QR 활성화 (QR_HOURS_BEFORE 환경변수로 제어, 기본 2시간)
+    const qrHoursBefore = Number(process.env.QR_HOURS_BEFORE ?? 2);
+    if (hoursUntilGame > qrHoursBefore) {
       return res.json({
         available: false,
-        message:   "경기 시작 2시간 전부터 QR 조회 가능",
+        message:   `경기 시작 ${qrHoursBefore}시간 전부터 QR 조회 가능`,
       });
     }
 
@@ -269,10 +343,10 @@ router.get("/:ticketId/qr", async (req, res) => {
       return res.json({ available: false, message: "경기가 종료되었습니다" });
     }
 
-    // QR 토큰 생성 (1분 슬롯 기반)
+    // QR 토큰 생성 (기본 10초 슬롯 기반, QR_SLOT_SECONDS로 조절 가능)
     const slot             = getCurrentSlot(nowMs);
     const qrToken          = generateQRToken(ticketId, slot);
-    const slotEndMs        = (slot + 1) * 60 * 1000;
+    const slotEndMs        = (slot + 1) * getQrSlotSeconds() * 1000;
     const remainingSeconds = Math.max(1, Math.ceil((slotEndMs - nowMs) / 1000));
 
     res.json({
@@ -288,20 +362,293 @@ router.get("/:ticketId/qr", async (req, res) => {
   }
 });
 
-// tokenId 업데이트 (MetaMask 민팅 완료 후 호출)
-router.patch("/:id/token", async (req, res) => {
-  const { tokenId, txHash } = req.body;
-  const { id } = req.params;
-  if (tokenId == null) return res.status(400).json({ success: false, message: "tokenId가 필요합니다" });
-  try {
-    await _pool.query(
-      "UPDATE tickets SET token_id = ?, ticket_tx_hash = ? WHERE id = ?",
-      [tokenId, txHash ?? null, id]
+// ─── 토스페이 결제 확인 + 티켓 발급 ──────────────────────────
+router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (req, res) => {
+  const {
+    paymentKey, orderId, amount,
+    walletAddress, gameId, stadium, grade, block, seats,
+    pointDiscount,
+    bookingMode, priorityEntryId,
+  } = req.body;
+
+  if (!paymentKey || !orderId || !amount) {
+    return res.status(400).json({ success: false, message: "paymentKey, orderId, amount는 필수입니다" });
+  }
+  if (!walletAddress || !gameId || !grade || !block || !Array.isArray(seats) || seats.length === 0) {
+    return res.status(400).json({ success: false, message: "티켓 정보가 누락되었습니다" });
+  }
+
+  const verifiedWalletAddress = req.verifiedWalletAddress || String(walletAddress).toLowerCase();
+  const isPriorityMode = bookingMode === 'priority';
+  let priorityEntry = null;
+  let priorityRaffleNftId = '';
+
+  // 1-a. 예매 마감 체크 (경기 시작 후 1시간까지)
+  const [[gameDeadlineRow]] = await _pool.query(
+    `SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date,
+            TIME_FORMAT(game_time, '%H:%i:%s') AS game_time,
+            booking_open_at
+       FROM games
+      WHERE id = ?`,
+    [gameId]
+  );
+  if (!gameDeadlineRow) {
+    return res.status(404).json({ success: false, message: '경기 정보를 찾을 수 없습니다' });
+  }
+  if (!isWithinGamePlus1h(gameDeadlineRow.game_date, gameDeadlineRow.game_time)) {
+    return res.status(400).json({ success: false, message: '예매 마감 시간이 지났습니다 (경기 시작 1시간 이후 예매 불가)' });
+  }
+
+  if (!isPriorityMode && gameDeadlineRow.booking_open_at && new Date(gameDeadlineRow.booking_open_at).getTime() > Date.now()) {
+    return res.status(400).json({ success: false, message: '아직 일반 예매 오픈 전입니다' });
+  }
+
+  if (isPriorityMode) {
+    if (seats.length !== 1) {
+      return res.status(400).json({ success: false, message: '우선 예매는 1인 1좌석만 선택할 수 있습니다' });
+    }
+    if (!priorityEntryId) {
+      return res.status(400).json({ success: false, message: '우선 예매 응모 당첨 정보가 필요합니다' });
+    }
+    if (!seats.every((seat) => isPrioritySeat(block, seat))) {
+      return res.status(400).json({ success: false, message: '우선 예매는 T1/T2 5열 2~6번 좌석만 선택할 수 있습니다' });
+    }
+
+    const [[entry]] = await _pool.query(
+      `SELECT *
+         FROM game_raffle_entries
+        WHERE id = ? AND user_id = ? AND game_id = ? AND status = 'won'
+        LIMIT 1`,
+      [priorityEntryId, req.user.user_id, gameId],
     );
-    res.json({ success: true });
+    if (!entry) {
+      return res.status(403).json({ success: false, message: '우선 예매 당첨 내역을 찾을 수 없습니다' });
+    }
+    priorityEntry = entry;
+
+    const raffleNftIds = parseJsonArray(entry.raffle_nft_ids);
+    if (raffleNftIds.length > 0) {
+      const placeholders = raffleNftIds.map(() => '?').join(',');
+      const [[winnerNft]] = await _pool.query(
+        `SELECT id FROM raffle_nfts
+          WHERE id IN (${placeholders}) AND user_id = ? AND game_id = ? AND status = 'WINNER'
+          LIMIT 1`,
+        [...raffleNftIds, req.user.user_id, gameId],
+      );
+      priorityRaffleNftId = winnerNft?.id || raffleNftIds[0];
+    }
+  }
+
+  // 1-b. pointDiscount 서버 검증 (결제 호출 전)
+  const pd = Number(pointDiscount || 0);
+  if (pd < 0) {
+    return res.status(400).json({ success: false, message: '포인트 할인 금액은 0 이상이어야 합니다' });
+  }
+  if (pd > 0) {
+    const memberJoined = await membershipService.isMembershipActive(_pool, req.user.user_id);
+    if (!memberJoined) {
+      return res.status(400).json({ success: false, message: '멤버십 가입 후 포인트를 사용할 수 있습니다' });
+    }
+    // 좌석 총액과 결제 금액이 맞는지 확인 (서비스 수수료 3% 포함)
+    const totalSeatPrice = seats.reduce((sum, s) => sum + Number(s.price), 0);
+    const serviceFee = Math.round(totalSeatPrice * 0.03);
+    if (Number(amount) !== totalSeatPrice + serviceFee - pd) {
+      return res.status(400).json({ success: false, message: '결제 금액이 올바르지 않습니다' });
+    }
+    // Fabric에서 실제 보유 포인트 잔액 조회
+    const userDidHash = fabricService.hashDid(verifiedWalletAddress);
+    let pointBalance = 0;
+    try {
+      const result = await fabricService.getPointBalance({ userDidHash });
+      pointBalance = result.balance ?? 0;
+    } catch (_) {}
+    if (pointBalance < pd) {
+      return res.status(400).json({
+        success: false,
+        message: `포인트 잔액 부족 (보유: ${pointBalance}P, 요청: ${pd}P)`,
+      });
+    }
+  }
+
+  // 1-b. 토스페이 결제 승인
+  const tossResult = await confirmPayment({ paymentKey, orderId, amount });
+  if (!tossResult.success) {
+    return res.status(400).json({ success: false, message: `결제 승인 실패: ${tossResult.message}` });
+  }
+
+  const [[gameRow]] = await _pool.query(
+    `SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date, home_team, away_team FROM games WHERE id = ?`,
+    [gameId]
+  );
+
+  const ticketResults = [];
+
+  try {
+    // Phase 1: 모든 좌석 DB 저장 (순서대로, 빠름)
+    const ticketRows = [];
+    for (const seat of seats) {
+      const { row, seatNumber, price } = seat;
+      const ticketResult = await purchaseTicket(_pool, {
+        walletAddress: verifiedWalletAddress,
+        gameId, stadium, grade, block, row, seatNumber, price,
+      });
+      await _pool.query(
+        "UPDATE tickets SET payment_key = ?, point_discount = ? WHERE id = ?",
+        [paymentKey, ticketRows.length === 0 ? pd : 0, ticketResult.id]
+      );
+      ticketRows.push({ ticketId: ticketResult.id, row, seatNumber, price });
+    }
+
+    // Phase 2: NFT 발급 처리
+    // Toss 예매 완료 흐름에서는 사용자의 MetaMask 트랜잭션 승인을 요청하지 않는다.
+    // Toss 테스트 결제(tgen_)나 TOSS_MODE=mock에서는 실제 온체인 tx.wait()를 기다리지 않고
+    // 로컬 mock token/txHash를 발급해 성공 화면 전환을 빠르게 한다.
+    let mintedResults;
+    try {
+      mintedResults = [];
+      const useMockMint = isMockTossPayment(paymentKey) ||
+        !isOnChainMintingEnabled(['MINTER_PRIVATE_KEY', 'TICKET_NFT_ADDRESS']);
+      for (const { ticketId, row, seatNumber, price } of ticketRows) {
+        const mintResult = useMockMint
+          ? createMockTicketMintResult(ticketId)
+          : await mintTicketOnChain(verifiedWalletAddress, {
+              gameId:        String(gameId),
+              gameDate:      gameRow?.game_date || '',
+              homeTeam:      gameRow?.home_team || '',
+              awayTeam:      gameRow?.away_team || '',
+              seatSection:   `${block}-${row}-${seatNumber}`,
+              originalPrice: Number(price),
+            });
+        await _pool.query(
+          "UPDATE tickets SET token_id = ?, ticket_tx_hash = ? WHERE id = ?",
+          [mintResult.tokenId, mintResult.txHash, ticketId]
+        );
+        mintedResults.push({ ticketId, tokenId: mintResult.tokenId, txHash: mintResult.txHash });
+      }
+    } catch (mintErr) {
+      console.error('[toss] NFT 민팅 실패:', mintErr.message);
+      await cancelPayment({ paymentKey, cancelReason: 'NFT 발급 실패로 인한 자동 환불', cancelAmount: amount }).catch(() => {});
+      const placeholders = ticketRows.map(() => '?').join(',');
+      await _pool.query(
+        `UPDATE tickets SET status = 'cancelled' WHERE id IN (${placeholders})`,
+        ticketRows.map(r => r.ticketId)
+      ).catch(() => {});
+      return res.status(500).json({ success: false, message: 'NFT 발급 실패로 자동 환불되었습니다' });
+    }
+
+    ticketResults.push(...mintedResults);
+
+    // Phase 3: Fabric 등록 병렬 처리 (nonce 없음 — 동시 실행 안전, 실패해도 무시)
+    const { v4: uuidv4 } = require('uuid');
+    await Promise.allSettled(
+      mintedResults.map(({ ticketId, tokenId }, i) => {
+        const { row, seatNumber, price } = ticketRows[i];
+        return fabricService.registerTicket({
+          ticketId,
+          tokenId:       String(tokenId || '0'),
+          gameId:        String(gameId),
+          seatId:        `${block}-${row}-${seatNumber}`,
+          walletAddress: verifiedWalletAddress,
+          price:         Number(price),
+          purchaseType:  'PRIMARY',
+          gameDate:      gameRow?.game_date || '',
+        }).then(async () => {
+          const userDidHash = fabricService.hashDid ? fabricService.hashDid(verifiedWalletAddress) : '';
+          if (userDidHash) {
+            const reservationId = uuidv4();
+            await fabricService.createReservation({
+              reservationId,
+              userDidHash,
+              gameId: String(gameId),
+              raffleNftId: priorityRaffleNftId || '',
+              isPriority: isPriorityMode,
+            });
+            await fabricService.confirmReservation({ reservationId, ticketId });
+          }
+        }).catch(fabErr => {
+          console.error('[toss] Fabric 등록 실패 (무시):', fabErr.message);
+        });
+      })
+    );
+
+    const seatList = ticketRows.map(t => `${block}블록 ${t.row}열 ${t.seatNumber}번`).join(', ');
+    console.log(`[toss] 예매 완료: ${gameRow?.home_team} vs ${gameRow?.away_team} | ${seats.length}석 (${seatList}) | ${amount}원 | 지갑: ${verifiedWalletAddress.slice(0, 10)}...`);
+
+    // 포인트 차감
+    if (pointDiscount > 0 && ticketResults.length > 0) {
+      try {
+        const userDidHash = fabricService.hashDid(verifiedWalletAddress);
+        await fabricService.usePointForTicket({
+          userDidHash,
+          ticketId: ticketResults[0].ticketId,
+          pointAmount: Number(pointDiscount),
+        });
+        await membershipService.recordPointEvent(_pool, {
+          userId: req.user.user_id,
+          walletAddress: verifiedWalletAddress,
+          eventType: 'POINT_USE_TICKET',
+          reason: '티켓 예매 포인트 할인',
+          amount: -Math.abs(Number(pointDiscount)),
+          metadata: { ticketId: ticketResults[0].ticketId, gameId, seats: seats.length },
+        });
+        console.log(`[toss] 포인트 차감 완료: ${pointDiscount}P (티켓 ${ticketResults[0].ticketId})`);
+      } catch (pointErr) {
+        console.error('[toss] 포인트 차감 실패 (무시):', pointErr.message);
+      }
+    }
+
+    if (isPriorityMode && priorityEntry && ticketResults.length > 0) {
+      try {
+        if (priorityRaffleNftId) {
+          await fabricService.useRaffleNFT({
+            raffleNftId: priorityRaffleNftId,
+            userDidHash: fabricService.hashDid(verifiedWalletAddress),
+            ticketId: ticketResults[0].ticketId,
+          });
+        }
+        await _pool.query(
+          `UPDATE game_raffle_entries SET status = 'used', used_at = NOW() WHERE id = ?`,
+          [priorityEntry.id],
+        );
+        const raffleNftIds = parseJsonArray(priorityEntry.raffle_nft_ids);
+        if (raffleNftIds.length > 0) {
+          const placeholders = raffleNftIds.map(() => '?').join(',');
+          await _pool.query(
+            `UPDATE raffle_nfts SET status = 'USED', updated_at = NOW()
+              WHERE id IN (${placeholders}) AND user_id = ?`,
+            [...raffleNftIds, req.user.user_id],
+          );
+        }
+        console.log(`[toss] 우선 예매 응모권 사용 완료: entry=${priorityEntry.id}, ticket=${ticketResults[0].ticketId}`);
+        await notificationService.recordNotification(_pool, {
+          userId: req.user.user_id,
+          category: 'RAFFLE',
+          title: '우선 예매권 사용 완료',
+          message: `${gameRow?.home_team} vs ${gameRow?.away_team} 우선 예매가 완료되었습니다.`,
+          metadata: { entryId: priorityEntry.id, ticketId: ticketResults[0].ticketId, gameId, raffleNftId: priorityRaffleNftId },
+        });
+      } catch (priorityErr) {
+        console.error('[toss] 우선 예매 응모권 사용 처리 실패 (무시):', priorityErr.message);
+      }
+    }
+
+    await notificationService.recordNotification(_pool, {
+      userId: req.user.user_id,
+      category: 'TRADE',
+      title: isPriorityMode ? '우선 예매 완료' : '티켓 예매 완료',
+      message: `${gameRow?.home_team} vs ${gameRow?.away_team} ${seats.length}석 예매가 완료되었습니다.`,
+      amount: Number(amount),
+      metadata: { gameId, paymentKey, ticketIds: ticketResults.map((ticket) => ticket.ticketId), seats: ticketRows },
+    });
+
+    res.json({ success: true, data: { tickets: ticketResults, paymentKey } });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "tokenId 업데이트 실패" });
+    console.error('[toss/confirm]', err);
+    if (ticketResults.length === 0) {
+      await cancelPayment({ paymentKey, cancelReason: '티켓 저장 실패로 인한 자동 환불', cancelAmount: amount }).catch(() => {});
+    }
+    res.status(500).json({ success: false, message: err.message || '티켓 발급 실패' });
   }
 });
 

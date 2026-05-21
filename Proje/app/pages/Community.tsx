@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { CiCirclePlus } from "react-icons/ci";
 import {
@@ -25,8 +26,6 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { apiUrl } from "../lib/api";
-import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 
 type CommunityCategory = "all" | "ticket" | "fragment" | "baseball" | "strategy";
@@ -192,7 +191,8 @@ const emptyDraft: EditorDraft = {
 
 
 
-const API = apiUrl('/api');
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000').replace(/\/$/, '');
+const API = `${API_BASE}/api`;
 
 function emptyState(): CommunityState {
   return {
@@ -239,9 +239,9 @@ function badgeList(user: CommunityUser) {
 }
 
 export function Community() {
-  const { walletConnected } = useAppSettings();
-  const { isLoggedIn: authLoggedIn } = useAuth();
-  const isLoggedIn = walletConnected || authLoggedIn;
+  const navigate = useNavigate();
+  const { user: authUser, isLoggedIn: authLoggedIn } = useAuth();
+  const isLoggedIn = authLoggedIn;
   const detailSectionRef = useRef<HTMLElement | null>(null);
   const [community, setCommunity] = useState<CommunityState>(emptyState);
   const [draft, setDraft] = useState<EditorDraft>(() => loadDraft());
@@ -270,6 +270,13 @@ export function Community() {
   const [postPage, setPostPage] = useState(1);
 
   const deferredQuery = useDeferredValue(query);
+  const authHeaders = (json = true): HeadersInit => {
+    const token = localStorage.getItem("auth_token") ?? "";
+    return {
+      ...(json ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  };
 
   // 마운트 시 서버에서 데이터 로드
   useEffect(() => {
@@ -298,6 +305,27 @@ export function Community() {
           verifiedTicket: false,
           verifiedNft: false,
         }));
+        if (authUser && !users.some((user) => user.id === authUser.user_id)) {
+          users.push({
+            id: authUser.user_id,
+            nickname: authUser.nickname,
+            handle: authUser.user_id,
+            avatar: authUser.nickname.slice(0, 1).toUpperCase(),
+            bio: "",
+            role: "user",
+            joinedAt: "",
+            level: 1,
+            trustScore: 100,
+            followers: 0,
+            followingUserIds: [],
+            followedTags: [],
+            blockedUserIds: [],
+            mutedTags: [],
+            verifiedWallet: false,
+            verifiedTicket: false,
+            verifiedNft: false,
+          });
+        }
 
         const posts: CommunityPost[] = postsRaw.map((p: {
           post_id: number; user_id: string; title: string; excerpt: string;
@@ -332,12 +360,12 @@ export function Community() {
           parentId: c.parent_id,
         }));
 
-        setCommunity((prev) => ({ ...prev, users, posts, comments }));
+        setCommunity((prev) => ({ ...prev, users, posts, comments, currentUserId: authUser?.user_id ?? null }));
       })
       .catch(() => {
         console.error("서버에 연결할 수 없습니다. 서버를 먼저 실행해주세요.");
       });
-  }, []);
+  }, [authUser]);
 
   useEffect(() => {
     localStorage.setItem(COMMUNITY_DRAFT_KEY, JSON.stringify(draft));
@@ -543,6 +571,7 @@ const jumpToPostDetail = () => {
   const requireAuth = (mode: "read" | "write" | "comment" = "read") => {
     if (!isLoggedIn) {
       pushFlash("로그인한 사용자만 이 기능을 사용할 수 있어요.", "warning");
+      navigate("/login");
       return false;
     }
 
@@ -568,6 +597,7 @@ const jumpToPostDetail = () => {
   };
 
   const openEditEditor = (post: CommunityPost) => {
+    if (!requireAuth("write")) return;
     if (!currentUser) return;
     if (post.authorId !== currentUser.id && !isModerator) {
       pushFlash("본인 글 또는 운영 권한이 있어야 수정할 수 있어요.", "warning");
@@ -600,7 +630,7 @@ const jumpToPostDetail = () => {
       if (editorMode === "edit" && editingPostId != null) {
         const res = await fetch(`${API}/posts/${editingPostId}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(),
           body: JSON.stringify({
             title,
             excerpt: summarize(content),
@@ -623,9 +653,8 @@ const jumpToPostDetail = () => {
       } else {
         const res = await fetch(`${API}/posts`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(),
           body: JSON.stringify({
-            user_id: currentUser!.id,
             title,
             excerpt: summarize(content),
             content,
@@ -679,8 +708,7 @@ const jumpToPostDetail = () => {
     try {
       const res = await fetch(`${API}/posts/${postId}/like`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser!.id }),
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error("좋아요 실패");
       setCommunity((previous) => ({
@@ -734,6 +762,7 @@ const jumpToPostDetail = () => {
   };
 
   const sharePost = async (post: CommunityPost) => {
+    if (!requireAuth()) return;
     try {
       await navigator.clipboard.writeText(`${window.location.origin}/community?post=${post.id}`);
       pushFlash("게시글 링크를 복사했어요.", "success");
@@ -743,6 +772,7 @@ const jumpToPostDetail = () => {
   };
 
   const deletePost = (postId: number) => {
+    if (!requireAuth("write")) return;
     if (!currentUser) return;
     const target = community.posts.find((post) => post.id === postId);
     if (!target) return;
@@ -841,8 +871,8 @@ const jumpToPostDetail = () => {
     try {
       const res = await fetch(`${API}/posts/${selectedPost.id}/comments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser!.id, content, parent_id: null }),
+        headers: authHeaders(),
+        body: JSON.stringify({ content, parent_id: null }),
       });
       if (!res.ok) throw new Error("댓글 등록 실패");
       const c = await res.json();
@@ -880,8 +910,8 @@ const jumpToPostDetail = () => {
     try {
       const res = await fetch(`${API}/posts/${selectedPost.id}/comments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser!.id, content, parent_id: parentCommentId }),
+        headers: authHeaders(),
+        body: JSON.stringify({ content, parent_id: parentCommentId }),
       });
       if (!res.ok) throw new Error("답글 등록 실패");
       const c = await res.json();
@@ -941,6 +971,7 @@ const jumpToPostDetail = () => {
   };
 
   const startEditingComment = (comment: CommunityComment) => {
+    if (!requireAuth("comment")) return;
     if (!currentUser) return;
     if (comment.authorId !== currentUser.id && !isModerator) {
       pushFlash("본인 댓글 또는 운영 권한이 있어야 수정할 수 있어요.", "warning");
@@ -952,6 +983,7 @@ const jumpToPostDetail = () => {
   };
 
   const saveEditedComment = (commentId: number) => {
+    if (!requireAuth("comment")) return;
     if (!currentUser) return;
     if (editingCommentInput.trim().length < 2) {
       pushFlash("댓글 내용을 조금 더 입력해 주세요.", "warning");
@@ -976,6 +1008,7 @@ const jumpToPostDetail = () => {
   };
 
   const deleteComment = async (commentId: number) => {
+    if (!requireAuth("comment")) return;
     if (!currentUser) return;
     const target = community.comments.find((comment) => comment.id === commentId);
     if (!target) return;
@@ -985,7 +1018,10 @@ const jumpToPostDetail = () => {
     }
 
     try {
-      const res = await fetch(`${API}/comments/${commentId}`, { method: "DELETE" });
+      const res = await fetch(`${API}/comments/${commentId}`, {
+        method: "DELETE",
+        headers: authHeaders(false),
+      });
       if (!res.ok) throw new Error("삭제 실패");
       setCommunity((previous) => ({
         ...previous,
@@ -1004,10 +1040,7 @@ const jumpToPostDetail = () => {
     : 0;
 
 return (
-    <div
-      className="page-shell space-y-12"
-      style={{ width: "min(1560px, calc(100% - 4rem))" }}
-    >
+    <div className="page-shell space-y-12">
       {flashMessage && (
         <div
           className="rounded-xl px-4 py-3 text-[0.92rem] font-medium"
@@ -1038,16 +1071,16 @@ return (
 
       <div className="space-y-5">
         <section
-          className="overflow-hidden rounded-[6px] border"
+          className="overflow-hidden rounded-[20px] border"
           style={{
-            background: "#f8fafc",
-            borderColor: "#cfd7e3",
-            boxShadow: "0 10px 28px rgba(18, 26, 44, 0.07)",
+            background: "#ffffff",
+            borderColor: "#e2e8f0",
+            boxShadow: "0 8px 24px rgba(17, 40, 73, 0.06)",
           }}
         >
           <div
             className="flex flex-wrap items-center justify-between gap-4 px-6 py-3"
-            style={{ background: "#4f5d84", color: "#ffffff" }}
+            style={{ background: "#1e3a8a", color: "#ffffff" }}
           >
             <div className="flex items-center gap-3">
               <span className="text-[0.8rem] font-bold tracking-[0.2em] uppercase text-white/80">
@@ -1057,7 +1090,7 @@ return (
             </div>
           </div>
 
-          <div className="border-b px-6 py-6" style={{ borderColor: "#d8dee8", background: "#f6f8fb" }}>
+          <div className="border-b px-6 py-6" style={{ borderColor: "#e2e8f0", background: "#f8fafc" }}>
             <div className="flex flex-wrap items-start justify-between gap-6">
               <div className="space-y-3">
                 <div>
@@ -1069,13 +1102,13 @@ return (
 
               <div className="flex w-full max-w-[520px] flex-col gap-3">
                 <div className="relative">
-                  <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: "#66728d" }} />
+                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: "#64748b" }} />
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="통합 검색"
-                    className="h-12 w-full rounded-[4px] border bg-white pl-11 pr-4 text-[0.94rem] outline-none"
-                    style={{ borderColor: "#c8d1dd", color: "#20304e", background: "#fcfdfe" }}
+                    className="h-12 w-full rounded-[12px] border bg-white pl-11 pr-4 text-[0.94rem] outline-none"
+                    style={{ borderColor: "#cbd5e1", color: "#0f172a", background: "#ffffff" }}
                   />
                 </div>
               </div>
@@ -1245,7 +1278,10 @@ return (
                         borderColor: "#c7cfdf",
                         color: "#44526c",
                       }}
-                      onClick={() => setHighlightedCommentId(postComments[0]?.id ?? null)}
+                      onClick={() => {
+                        if (!requireAuth("comment")) return;
+                        setHighlightedCommentId(postComments[0]?.id ?? null);
+                      }}
                     >
                       <MessageSquareText className="h-4 w-4" />
                       댓글 보기
@@ -1370,8 +1406,16 @@ return (
 
                   <div className="px-6 py-5" style={{ borderBottom: "1px solid #e7ebf3" }}>
                     {!isLoggedIn && (
-                      <div className="mb-3 rounded-[6px] px-4 py-3 text-[0.85rem] text-center" style={{ background: "#f0f3f8", border: "1px solid #dbe2ef", color: "#60708f" }}>
-                        로그인 후 댓글을 작성할 수 있어요.
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-[6px] px-4 py-3 text-[0.85rem]" style={{ background: "#f0f3f8", border: "1px solid #dbe2ef", color: "#60708f" }}>
+                        <span>로그인 후 댓글을 작성할 수 있어요.</span>
+                        <button
+                          type="button"
+                          onClick={() => navigate("/login")}
+                          className="rounded-[4px] px-3 py-2 text-[0.78rem] font-bold"
+                          style={{ background: "#526183", color: "#ffffff" }}
+                        >
+                          로그인하기
+                        </button>
                       </div>
                     )}
                     {isLoggedIn && (

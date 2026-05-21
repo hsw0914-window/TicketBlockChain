@@ -1,11 +1,10 @@
 import { Link, useNavigate } from "react-router";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion, useInView } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useTicketQR } from "../hooks/useTicketQR";
 import { useBookingAccess, ACCESS_MESSAGES, type AccessStatus } from "../hooks/useBookingAccess";
-import { apiUrl } from "../lib/api";
 import {
   Ticket, ShoppingBag, Sparkles,
   ArrowRight, MapPin, Calendar, Tag, ChevronRight, ChevronLeft,
@@ -27,19 +26,38 @@ function gameStatusLabel(status: string) {
   if (status === "OPEN")    return "예매중";
   if (status === "ALMOST")  return "매진임박";
   if (status === "SOLDOUT") return "매진";
+  if (status === "ENDED")   return "지난 경기";
   return "오픈예정";
 }
 function gameStatusColor(status: string) {
   if (status === "OPEN")    return "#2dba73";
   if (status === "ALMOST")  return "#ff9d3b";
   if (status === "SOLDOUT") return "#ff4040";
+  if (status === "ENDED")   return "#94a3b8";
   return "#7ec8ff";
 }
 function gameTag(status: string) {
   if (status === "OPEN")    return "OPEN";
   if (status === "ALMOST")  return "HOT";
   if (status === "SOLDOUT") return "SOLD";
+  if (status === "ENDED")   return "CLOSED";
   return "SOON";
+}
+
+function getGameStartMs(game: Pick<GameData, "game_date" | "game_time">) {
+  const date = String(game.game_date ?? "").slice(0, 10);
+  const time = String(game.game_time ?? "18:30:00").slice(0, 8);
+  if (!date) return NaN;
+  return new Date(`${date}T${time || "18:30:00"}+09:00`).getTime();
+}
+
+function isBookingClosed(game: GameData, now = Date.now()) {
+  const gameStartMs = getGameStartMs(game);
+  return game.status === "ENDED" || (!Number.isNaN(gameStartMs) && now > gameStartMs + 60 * 60 * 1000);
+}
+
+function getDisplayStatus(game: GameData, now = Date.now()) {
+  return isBookingClosed(game, now) ? "ENDED" : game.status;
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -71,14 +89,27 @@ function NftTicketCard() {
   const [ticket, setTicket] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!walletAddress) { setLoading(false); return; }
-    fetch(apiUrl(`/api/my-tickets/nearest/${encodeURIComponent(walletAddress)}`))
+  const fetchNearest = useCallback(() => {
+    const token = localStorage.getItem("auth_token");
+    if (!token) { setLoading(false); return; }
+    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/nearest`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((r) => r.json())
       .then((d) => { if (d.success) setTicket(d.data); })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [walletAddress]);
+  }, []);
+
+  // 초기 로드
+  useEffect(() => { fetchNearest(); }, [fetchNearest]);
+
+  // 티켓이 있을 때 10초마다 폴링 (QR 스캔 후 사용완료 자동 반영)
+  useEffect(() => {
+    if (!ticket) return;
+    const id = setInterval(fetchNearest, 10_000);
+    return () => clearInterval(id);
+  }, [!!ticket, fetchNearest]);
 
   const { qrData, formattedCountdown } = useTicketQR(
     ticket?.ticketId ?? null,
@@ -182,7 +213,7 @@ function NftTicketCard() {
                 {qrData?.available && qrData.qrToken ? (
                   <div className="flex items-center gap-4">
                     <div className="rounded-xl overflow-hidden bg-white p-1.5 shrink-0">
-                      <QRCodeSVG value={qrData.qrToken} size={56} />
+                      <QRCodeSVG value={JSON.stringify({ ticketId: ticket?.ticketId, qrToken: qrData.qrToken })} size={56} />
                     </div>
                     <div>
                       <p className="text-xs text-[#a393d1] mb-0.5">현장 입장 QR</p>
@@ -262,8 +293,7 @@ export function Home() {
 
   // 시스템 시간 기준 오늘 이후 가장 빠른 경기
   const heroGame = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return allGames.find(g => g.game_date >= today) ?? allGames[0] ?? null;
+    return allGames.find((game) => !isBookingClosed(game)) ?? allGames[allGames.length - 1] ?? null;
   }, [allGames]);
 
   const gamesByDate = useMemo(() => {
@@ -291,23 +321,23 @@ export function Home() {
   }
 
   useEffect(() => {
-    fetch(apiUrl("/api/tickets/games"))
+    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games`)
       .then((r) => r.json())
       .then((res: { success: boolean; data: GameData[] }) => {
         const data = res.data ?? [];
         const sorted = [...data].sort((a, b) => a.game_date.localeCompare(b.game_date));
         const available = sorted
-          .filter((g) => g.status === "OPEN" || g.status === "ALMOST")
+          .filter((g) => !isBookingClosed(g) && (g.status === "OPEN" || g.status === "ALMOST"))
           .slice(0, 4);
         setAvailableGames(available);
         setAllGames(sorted);
-        // 초기 선택: 가장 빠른 날짜
+        // 초기 선택: 오늘 이후 가장 빠른 경기, 없으면 마지막 경기
         if (sorted.length > 0) {
-          const earliest = sorted[0];
-          const d = new Date(earliest.game_date);
+          const initialGame = sorted.find((game) => !isBookingClosed(game)) ?? sorted[sorted.length - 1];
+          const d = new Date(initialGame.game_date);
           setCalYear(d.getFullYear());
           setCalMonth(d.getMonth());
-          setSelectedDate(earliest.game_date);
+          setSelectedDate(initialGame.game_date);
         }
         setCalReady(true);
       })
@@ -415,6 +445,9 @@ export function Home() {
                   style={{ background: "rgba(20,86,160,0.10)", border: "1px solid rgba(126,200,255,0.18)", backdropFilter: "blur(10px)" }}>
                   <p className="page-eyebrow text-[#c6d5ea] mb-3">다음 주요 경기</p>
                   {heroGame ? (
+                    (() => {
+                      const displayStatus = getDisplayStatus(heroGame);
+                      return (
                     <>
                       <h2 className="section-title text-[1.65rem] text-white mb-3">
                         {heroGame.home_team} vs {heroGame.away_team}
@@ -431,12 +464,14 @@ export function Home() {
                         <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
                           <Tag className="w-4 h-4 text-[#ffce67] shrink-0" />
                           from ₩{heroGame.base_price.toLocaleString()} &nbsp;·&nbsp;
-                          <span style={{ color: gameStatusColor(heroGame.status) }}>
-                            {gameStatusLabel(heroGame.status)}
+                          <span style={{ color: gameStatusColor(displayStatus) }}>
+                            {gameStatusLabel(displayStatus)}
                           </span>
                         </div>
                       </div>
                     </>
+                      );
+                    })()
                   ) : (
                     <p className="text-[#a393d1] text-sm">경기 정보를 불러오는 중...</p>
                   )}
@@ -525,9 +560,11 @@ export function Home() {
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {availableGames.map((ev, i) => {
-              const color = gameStatusColor(ev.status);
-              const label = gameStatusLabel(ev.status);
-              const tag   = gameTag(ev.status);
+              const displayStatus = getDisplayStatus(ev);
+              const closed = displayStatus === "ENDED";
+              const color = gameStatusColor(displayStatus);
+              const label = gameStatusLabel(displayStatus);
+              const tag   = gameTag(displayStatus);
               const img   = STADIUM_IMAGES[i % STADIUM_IMAGES.length];
               return (
               <FadeIn key={ev.id} delay={i * 0.1}>
@@ -573,14 +610,17 @@ export function Home() {
                       </div>
                     </div>
                     <button
-                      onClick={() => handleBooking(ev.id)}
+                      disabled={closed}
+                      onClick={() => { if (!closed) handleBooking(ev.id); }}
                       className="w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all duration-200"
                       style={{
-                        background: hoveredEvent === ev.id ? `linear-gradient(135deg, #ff10f0, #bd00e8)` : "rgba(255,16,240,0.1)",
-                        border: "1px solid rgba(255,16,240,0.3)",
-                        boxShadow: hoveredEvent === ev.id ? "0 0 16px rgba(255,16,240,0.4)" : "none",
+                        background: closed ? "rgba(148,163,184,0.16)" : hoveredEvent === ev.id ? `linear-gradient(135deg, #ff10f0, #bd00e8)` : "rgba(255,16,240,0.1)",
+                        border: closed ? "1px solid rgba(148,163,184,0.35)" : "1px solid rgba(255,16,240,0.3)",
+                        color: closed ? "#cbd5e1" : "#ffffff",
+                        boxShadow: !closed && hoveredEvent === ev.id ? "0 0 16px rgba(255,16,240,0.4)" : "none",
+                        cursor: closed ? "default" : "pointer",
                       }}>
-                      예매하기
+                      {closed ? "예매 마감" : "예매하기"}
                     </button>
                   </div>
                 </div>
@@ -696,7 +736,8 @@ export function Home() {
 
                         {/* 경기 뱃지 */}
                         {games.map(g => {
-                          const c = gameStatusColor(g.status);
+                          const displayStatus = getDisplayStatus(g);
+                          const c = gameStatusColor(displayStatus);
                           return (
                             <div key={g.id} className="mt-0.5 px-1 py-px rounded text-[8px] font-semibold leading-tight truncate"
                               style={{ background: `${c}18`, border: `1px solid ${c}55`, color: c }}>
@@ -717,6 +758,7 @@ export function Home() {
                     { status: "ALMOST",  label: "매진임박" },
                     { status: "SOLDOUT", label: "매진" },
                     { status: "UPCOMING",label: "오픈예정" },
+                    { status: "ENDED",   label: "지난 경기" },
                   ].map(({ status, label }) => (
                     <div key={status} className="flex items-center gap-1.5">
                       <div className="w-2 h-2 rounded-full" style={{ background: gameStatusColor(status) }} />
@@ -734,8 +776,10 @@ export function Home() {
                       {selectedDate} 경기 정보
                     </p>
                     {gamesByDate[selectedDate].map(ev => {
-                      const color = gameStatusColor(ev.status);
-                      const label = gameStatusLabel(ev.status);
+                      const displayStatus = getDisplayStatus(ev);
+                      const closed = displayStatus === "ENDED";
+                      const color = gameStatusColor(displayStatus);
+                      const label = gameStatusLabel(displayStatus);
                       return (
                         <div key={ev.id} className="relative rounded-2xl overflow-hidden transition-all"
                           style={{ background: "rgba(15,8,35,0.80)", border: `1px solid ${color}44`, backdropFilter: "blur(12px)" }}>
@@ -764,16 +808,17 @@ export function Home() {
                               </div>
                             </div>
                             <button
-                              onClick={() => { if (ev.status !== "UPCOMING" && ev.status !== "SOLDOUT") handleBooking(ev.id); }}
+                              disabled={closed || ev.status === "UPCOMING" || ev.status === "SOLDOUT"}
+                              onClick={() => { if (!closed && ev.status !== "UPCOMING" && ev.status !== "SOLDOUT") handleBooking(ev.id); }}
                               className="w-full py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
                               style={{
-                                background: ev.status === "UPCOMING" ? "rgba(255,170,0,0.15)" : ev.status === "SOLDOUT" ? "rgba(100,100,100,0.2)" : "linear-gradient(135deg, #ff10f0, #bd00e8)",
-                                border: ev.status === "UPCOMING" ? "1px solid rgba(255,170,0,0.4)" : ev.status === "SOLDOUT" ? "1px solid rgba(100,100,100,0.4)" : "none",
-                                color: ev.status === "UPCOMING" ? "#ffaa00" : ev.status === "SOLDOUT" ? "#888" : "white",
-                                boxShadow: ev.status !== "UPCOMING" && ev.status !== "SOLDOUT" ? "0 0 12px rgba(255,16,240,0.4)" : "none",
-                                cursor: ev.status === "UPCOMING" || ev.status === "SOLDOUT" ? "default" : "pointer",
+                                background: closed ? "rgba(148,163,184,0.16)" : ev.status === "UPCOMING" ? "rgba(255,170,0,0.15)" : ev.status === "SOLDOUT" ? "rgba(100,100,100,0.2)" : "linear-gradient(135deg, #ff10f0, #bd00e8)",
+                                border: closed ? "1px solid rgba(148,163,184,0.35)" : ev.status === "UPCOMING" ? "1px solid rgba(255,170,0,0.4)" : ev.status === "SOLDOUT" ? "1px solid rgba(100,100,100,0.4)" : "none",
+                                color: closed ? "#cbd5e1" : ev.status === "UPCOMING" ? "#ffaa00" : ev.status === "SOLDOUT" ? "#888" : "white",
+                                boxShadow: !closed && ev.status !== "UPCOMING" && ev.status !== "SOLDOUT" ? "0 0 12px rgba(255,16,240,0.4)" : "none",
+                                cursor: closed || ev.status === "UPCOMING" || ev.status === "SOLDOUT" ? "default" : "pointer",
                               }}>
-                              {ev.status === "UPCOMING" ? "오픈예정" : ev.status === "SOLDOUT" ? "매진" : "예매하기"}
+                              {closed ? "예매 마감" : ev.status === "UPCOMING" ? "오픈예정" : ev.status === "SOLDOUT" ? "매진" : "예매하기"}
                             </button>
                           </div>
                         </div>

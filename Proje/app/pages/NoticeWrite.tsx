@@ -2,17 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PenLine, ImagePlus, Pin, ChevronLeft, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { useAuth } from "../context/AuthContext";
-import { apiUrl, uploadUrl } from "../lib/api";
 
 type NoticeType = "공지" | "이벤트" | "업데이트";
+
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000").replace(/\/$/, "");
 
 export function NoticeWrite() {
   const navigate = useNavigate();
   const { id } = useParams<{ id?: string }>();
   const isEdit = Boolean(id);
-  const { user, isLoading } = useAuth();
-  const isAdmin = user?.role === "admin";
 
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -23,18 +21,10 @@ export function NoticeWrite() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (isLoading) return;
-    if (!isAdmin) {
-      alert("관리자만 공지사항을 작성하거나 수정할 수 있습니다.");
-      navigate("/notice");
-    }
-  }, [isAdmin, isLoading, navigate]);
-
   // 수정 모드일 때 기존 데이터 로드
   useEffect(() => {
-    if (!isAdmin || !isEdit || !id) return;
-    fetch(apiUrl("/api/notices"))
+    if (!isEdit || !id) return;
+    fetch(`${API_BASE}/api/notices`)
       .then((res) => res.json())
       .then((data: any[]) => {
         const notice = data.find((n) => String(n.id) === id);
@@ -46,7 +36,7 @@ export function NoticeWrite() {
         setExistingImageUrl(notice.image_url || null);
       })
       .catch((err) => console.error("공지 로드 실패:", err));
-  }, [id, isEdit, isAdmin]);
+  }, [id, isEdit]);
 
   const handleSubmit = async () => {
     if (!title.trim() || !content.trim()) {
@@ -67,16 +57,11 @@ export function NoticeWrite() {
       }
 
       const url = isEdit
-        ? apiUrl(`/api/notices/${id}`)
-        : apiUrl("/api/notices");
+        ? `${API_BASE}/api/notices/${id}`
+        : `${API_BASE}/api/notices`;
       const method = isEdit ? "PUT" : "POST";
-      const token = localStorage.getItem("auth_token");
 
-      const res = await fetch(url, {
-        method,
-        body: formData,
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      const res = await fetch(url, { method, body: formData });
       if (res.ok) {
         alert(isEdit ? "수정되었습니다." : "공지가 등록되었습니다.");
         navigate("/notice");
@@ -215,7 +200,7 @@ export function NoticeWrite() {
           {(imageFile || existingImageUrl) && (
             <div className="mt-3 rounded-[16px] overflow-hidden border border-[#d7e0ea] max-w-sm">
               <img
-                src={imageFile ? URL.createObjectURL(imageFile) : uploadUrl(existingImageUrl)}
+                src={imageFile ? URL.createObjectURL(imageFile) : `${API_BASE}${existingImageUrl}`}
                 alt="미리보기"
                 className="w-full h-auto object-contain"
               />

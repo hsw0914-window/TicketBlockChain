@@ -1,6 +1,11 @@
 const express = require('express');
 const crypto  = require('crypto');
+const { getAddress, verifyMessage } = require('ethers');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
+const fabricService = require('../services/fabricBridge');
+const { confirmPayment, cancelPayment } = require('../services/tossPayService');
+const membershipService = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 let _pool;
@@ -9,12 +14,28 @@ function setPool(pool) {
   _pool = pool;
 }
 
+// ─── 헬퍼 ────────────────────────────────────────────────
+
+function normalizeAddress(address) {
+  try { return getAddress(String(address)).toLowerCase(); } catch { return String(address).toLowerCase(); }
+}
+
 // ─── 설정 ────────────────────────────────────────────────
 
 const PLATFORM_FEE_RATE         = 0.09;
 const MARKET_NATIVE_SYMBOL      = process.env.MARKET_NATIVE_SYMBOL      ?? 'HOODI';
 const MARKET_NATIVE_PRICE_KRW   = Number(process.env.MARKET_NATIVE_PRICE_KRW ?? 3700000);
 const MARKET_RESERVATION_SECONDS = Number(process.env.MARKET_RESERVATION_SECONDS ?? 120);
+const MARKET_SALE_REWARD_RATE = 0.001;
+const MARKET_SALE_DAILY_REWARD_LIMIT = 2;
+
+async function ensureMarketPaymentColumns(conn) {
+  const [columns] = await conn.query(`SHOW COLUMNS FROM purchase_history`);
+  const existing = new Set(columns.map((c) => c.Field));
+  if (!existing.has('toss_payment_key')) {
+    await conn.query(`ALTER TABLE purchase_history ADD COLUMN toss_payment_key VARCHAR(200) DEFAULT NULL AFTER tx_hash`);
+  }
+}
 
 // ─── 유틸 ────────────────────────────────────────────────
 
@@ -444,15 +465,72 @@ router.post('/buy', requireAuth, async (req, res) => {
 
     await conn.commit();
 
+    // 판매자 포인트 적립 (거래금액 0.1%, 하루 2건 한도)
+    let earnedPoint = 0;
+    try {
+      const [[{ cnt }]] = await _pool.query(
+        `SELECT COUNT(*) AS cnt
+           FROM point_events
+          WHERE user_id = ?
+            AND event_type = 'MARKET_SALE_REWARD'
+            AND DATE(created_at) = CURDATE()`,
+        [listing.seller_id],
+      );
+      const memberJoined = await membershipService.isMembershipActive(_pool, listing.seller_id);
+      if (memberJoined && Number(cnt) < MARKET_SALE_DAILY_REWARD_LIMIT) {
+        const result = await fabricService.earnPointFromTrade({
+          userDidHash: fabricService.hashDid(sellerWalletAddress),
+          amount: listing.price,
+          rate:   MARKET_SALE_REWARD_RATE,
+        });
+        earnedPoint = result.earnedPoint;
+        await membershipService.recordPointEvent(_pool, {
+          userId: listing.seller_id,
+          walletAddress: sellerWalletAddress,
+          eventType: 'MARKET_SALE_REWARD',
+          reason: '팬 자산 판매 완료',
+          amount: earnedPoint,
+          metadata: {
+            listingId,
+            fragmentTypeId: listing.fragment_type_id,
+            price: listing.price,
+            rate: MARKET_SALE_REWARD_RATE,
+            dailyLimit: MARKET_SALE_DAILY_REWARD_LIMIT,
+          },
+        });
+        console.log(`[market] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.price}원 × 0.1%)`);
+      }
+    } catch (pointErr) {
+      console.error('[market] 포인트 적립 실패:', pointErr.message);
+    }
+
     const [[assetRow]] = await _pool.query(
       'SELECT id, idol, asset_name FROM market_assets WHERE fragment_type_id = ? LIMIT 1',
       [listing.fragment_type_id]
     );
     const assetId = assetRow?.id ?? fragmentId ?? listing.fragment_type_id;
+    await notificationService.recordNotification(_pool, {
+      userId,
+      category: 'TRADE',
+      title: '팬 자산 구매 완료',
+      message: `${assetRow?.asset_name ?? '굿즈 파편'} 구매가 완료되었습니다.`,
+      amount: Number(listing.price),
+      metadata: { listingId, fragmentTypeId: listing.fragment_type_id, sellerId: listing.seller_id, purchaseHistoryId },
+    });
+    await notificationService.recordNotification(_pool, {
+      userId: listing.seller_id,
+      category: 'TRADE',
+      title: '팬 자산 판매 완료',
+      message: `${assetRow?.asset_name ?? '굿즈 파편'} 판매가 완료되었습니다.`,
+      amount: Number(listing.price),
+      metadata: { listingId, fragmentTypeId: listing.fragment_type_id, buyerId: userId, purchaseHistoryId },
+    });
     const updatedFragment = await buildFragmentMarket(assetId, userId);
 
+    console.log(`[market] 파편 거래 완료: ${assetRow?.asset_name ?? listing.fragment_type_id} | ${listing.price}원 | 구매자: ${userId} | 판매자: ${listing.seller_id}`);
+
     res.json({
-      receipt: { fragmentId: assetId, sellerName: listing.seller_name, price: listing.price },
+      receipt: { fragmentId: assetId, sellerName: listing.seller_name, price: listing.price, earnedPoint },
       purchaseRecord: {
         id: purchaseHistoryId,
         fragmentId: assetId,
@@ -487,7 +565,7 @@ router.post('/buy', requireAuth, async (req, res) => {
 
 router.post('/listings', requireAuth, async (req, res) => {
   const userId = req.user.user_id;
-  const { fragmentId, price, quantity } = req.body;
+  const { fragmentId, price, quantity, listingMessage, listingSignature } = req.body;
 
   if (!fragmentId || !price || !quantity)
     return res.status(400).json({ error: 'fragmentId, price, quantity 필요' });
@@ -495,8 +573,24 @@ router.post('/listings', requireAuth, async (req, res) => {
     return res.status(400).json({ error: '판매 가격은 1,000원 이상이어야 합니다' });
   if (!Number.isInteger(quantity) || quantity <= 0)
     return res.status(400).json({ error: '판매 수량은 1개 이상의 정수여야 합니다' });
+  if (!listingMessage || !listingSignature)
+    return res.status(400).json({ error: 'MetaMask 서명이 필요합니다' });
 
   const sellerWalletAddress = await getWalletAddress(userId);
+  if (!sellerWalletAddress)
+    return res.status(400).json({ error: '등록된 지갑 주소가 없습니다' });
+
+  // MetaMask 서명 검증
+  let recoveredAddress = '';
+  try {
+    recoveredAddress = verifyMessage(String(listingMessage), String(listingSignature));
+  } catch {
+    return res.status(400).json({ error: 'MetaMask 서명을 검증할 수 없습니다' });
+  }
+  if (normalizeAddress(recoveredAddress) !== normalizeAddress(sellerWalletAddress))
+    return res.status(400).json({ error: 'MetaMask 서명자와 판매자 지갑이 일치하지 않습니다' });
+  if (!String(listingMessage).includes(String(fragmentId)))
+    return res.status(400).json({ error: '서명 메시지와 파편 정보가 일치하지 않습니다' });
   const conn = await _pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -543,9 +637,9 @@ router.post('/listings', requireAuth, async (req, res) => {
     );
 
     await conn.query(
-      `INSERT INTO market_listings (id, seller_id, seller_wallet_address, fragment_type_id, price, quantity)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [listingId, userId, sellerWalletAddress, fragmentTypeId, price, quantity]
+      `INSERT INTO market_listings (id, seller_id, seller_wallet_address, fragment_type_id, price, quantity, listing_message, listing_signature)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [listingId, userId, sellerWalletAddress, fragmentTypeId, price, quantity, listingMessage, listingSignature]
     );
 
     for (const token of tokenRows) {
@@ -566,6 +660,8 @@ router.post('/listings', requireAuth, async (req, res) => {
     );
 
     await conn.commit();
+
+    console.log(`[market] 파편 매물 등록: fragmentId ${fragmentId} | ${price}원 × ${quantity}개 | 판매자: ${userId} | 지갑: ${sellerWalletAddress?.slice(0, 10)}...`);
 
     const updatedFragment = await buildFragmentMarket(fragmentId, userId);
     res.json({ listingId, sellerHandle: userId, sellerWalletAddress, txHash: listingTxHash, updatedFragment });
@@ -761,6 +857,270 @@ router.get('/sales', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[market/sales]', err);
     res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// ─── POST /api/market/toss-confirm ──────────────────────
+
+router.post('/toss-confirm', requireAuth, async (req, res) => {
+  const userId = req.user.user_id;
+  const { paymentKey, orderId, amount, listingId } = req.body;
+
+  if (!paymentKey || !orderId || !amount || !listingId)
+    return res.status(400).json({ error: '필수 항목 누락 (paymentKey, orderId, amount, listingId)' });
+
+  const buyerWalletAddress = await getWalletAddress(userId);
+  const conn = await _pool.getConnection();
+  try {
+    await ensureMarketPaymentColumns(conn);
+    await conn.beginTransaction();
+
+    const [[existingPurchase]] = await conn.query(
+      `SELECT ph.*, u.nickname AS seller_name, ma.id AS asset_id, ma.idol, ma.asset_name
+       FROM purchase_history ph
+       LEFT JOIN users u ON u.user_id = ph.seller_id
+       LEFT JOIN market_assets ma ON ma.fragment_type_id = ph.fragment_type_id
+       WHERE ph.toss_payment_key = ? AND ph.buyer_id = ?
+       LIMIT 1`,
+      [paymentKey, userId]
+    );
+    if (existingPurchase) {
+      await conn.commit();
+      return res.json({
+        success: true,
+        alreadyProcessed: true,
+        receipt: {
+          fragmentId:       existingPurchase.asset_id ?? existingPurchase.fragment_type_id,
+          idol:             existingPurchase.idol ?? '',
+          fragmentName:     existingPurchase.asset_name ?? '',
+          sellerName:       existingPurchase.seller_name ?? '',
+          price:            existingPurchase.price,
+          platformFee:      existingPurchase.platform_fee,
+          settlementAmount: existingPurchase.settlement_amount,
+          earnedPoint:      0,
+          tokenId:          existingPurchase.token_id,
+          txHash:           existingPurchase.tx_hash,
+        },
+      });
+    }
+
+    const [[listing]] = await conn.query(
+      `SELECT ml.*, u.nickname AS seller_name
+       FROM market_listings ml
+       JOIN users u ON u.user_id = ml.seller_id
+       WHERE ml.id = ? AND ml.is_active = TRUE
+       FOR UPDATE`,
+      [listingId]
+    );
+
+    if (!listing) {
+      await conn.rollback();
+      return res.status(404).json({ error: '이미 판매 완료되었거나 존재하지 않는 매물입니다' });
+    }
+    if (listing.seller_id === userId) {
+      await conn.rollback();
+      return res.status(400).json({ error: '본인 매물은 구매할 수 없습니다' });
+    }
+    if (Number(amount) !== Number(listing.price)) {
+      await conn.rollback();
+      return res.status(400).json({ error: '결제 금액이 매물 가격과 일치하지 않습니다' });
+    }
+
+    const tossResult = await confirmPayment({ paymentKey, orderId, amount: Number(amount) });
+    if (!tossResult.success) {
+      await conn.rollback();
+      return res.status(400).json({ error: `결제 승인 실패: ${tossResult.message}` });
+    }
+
+    try {
+      const txHash = createTxHash();
+      const [[sellerWalletRow]] = await conn.query(
+        'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
+        [listing.seller_id]
+      );
+      const sellerWalletAddress = sellerWalletRow?.wallet_address ?? listing.seller_wallet_address ?? `0x${'0'.repeat(40)}`;
+      const platformFee      = Math.floor(listing.price * PLATFORM_FEE_RATE);
+      const settlementAmount = listing.price - platformFee;
+
+      let tradedTokenId = null;
+      const [[tokenRow]] = await conn.query(
+        `SELECT token_id FROM nft_tokens
+         WHERE listed_listing_id = ? AND status = 'listed'
+         ORDER BY minted_at ASC LIMIT 1 FOR UPDATE`,
+        [listingId]
+      );
+
+      if (tokenRow) {
+        tradedTokenId = tokenRow.token_id;
+        await conn.query(
+          `UPDATE nft_tokens
+           SET owner_user_id = ?, owner_wallet = ?, listed_listing_id = NULL,
+               status = 'owned', last_tx_hash = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE token_id = ?`,
+          [userId, buyerWalletAddress, txHash, tradedTokenId]
+        );
+      } else {
+        tradedTokenId = createTokenId('FRAG');
+        await conn.query(
+          `INSERT INTO nft_tokens
+             (token_id, token_type, owner_user_id, owner_wallet, fragment_type_id, status, source_action, mint_tx_hash, last_tx_hash)
+           VALUES (?, 'fragment', ?, ?, ?, 'owned', 'market_toss_transfer', ?, ?)`,
+          [tradedTokenId, userId, buyerWalletAddress, listing.fragment_type_id, txHash, txHash]
+        );
+      }
+
+      if (listing.quantity === 1) {
+        await conn.query(
+          'UPDATE market_listings SET is_active = FALSE, reserved_by = NULL, reserved_until = NULL WHERE id = ?',
+          [listingId]
+        );
+      } else {
+        await conn.query(
+          'UPDATE market_listings SET quantity = quantity - 1, reserved_by = NULL, reserved_until = NULL WHERE id = ?',
+          [listingId]
+        );
+      }
+
+      await conn.query(
+        `INSERT INTO user_fragments (user_id, fragment_type_id, count)
+         VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE count = count + 1`,
+        [userId, listing.fragment_type_id]
+      );
+
+      await conn.query(
+        `INSERT INTO trades
+           (fragment_type_id, listing_id, buyer_id, seller_id,
+            buyer_wallet_address, seller_wallet_address, token_id,
+            price, quantity, platform_fee, settlement_amount, tx_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+        [listing.fragment_type_id, listingId, userId, listing.seller_id,
+         buyerWalletAddress, sellerWalletAddress, tradedTokenId,
+         listing.price, platformFee, settlementAmount, txHash]
+      );
+
+      await conn.query(
+        `INSERT INTO price_history (fragment_type_id, price, recorded_date)
+         VALUES (?, ?, CURDATE()) ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+        [listing.fragment_type_id, listing.price]
+      );
+
+      const purchaseHistoryId = crypto.randomUUID();
+      await conn.query(
+        `INSERT INTO purchase_history
+           (id, buyer_id, fragment_type_id, listing_id, seller_id,
+            buyer_wallet_address, seller_wallet_address, token_id,
+            price, quantity, platform_fee, settlement_amount, tx_hash, toss_payment_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+        [purchaseHistoryId, userId, listing.fragment_type_id, listingId, listing.seller_id,
+         buyerWalletAddress, sellerWalletAddress, tradedTokenId,
+         listing.price, platformFee, settlementAmount, txHash, paymentKey]
+      );
+
+      await conn.query(
+        `INSERT INTO onchain_tx_logs
+           (id, user_id, wallet_address, action_type, tx_hash, token_id, payload_json)
+         VALUES (UUID(), ?, ?, 'FRAGMENT_TRANSFER', ?, ?,
+                 JSON_OBJECT('listingId', ?, 'sellerWallet', ?, 'buyerWallet', ?, 'price', ?, 'platformFee', ?, 'settlementAmount', ?, 'paymentKey', ?))`,
+        [userId, buyerWalletAddress, txHash, tradedTokenId,
+         listingId, sellerWalletAddress, buyerWalletAddress,
+         listing.price, platformFee, settlementAmount, paymentKey]
+      );
+
+      await conn.commit();
+
+      let earnedPoint = 0;
+      try {
+        const [[{ cnt }]] = await _pool.query(
+          `SELECT COUNT(*) AS cnt
+             FROM point_events
+            WHERE user_id = ?
+              AND event_type = 'MARKET_SALE_REWARD'
+              AND DATE(created_at) = CURDATE()`,
+          [listing.seller_id],
+        );
+        const memberJoined = await membershipService.isMembershipActive(_pool, listing.seller_id);
+        if (memberJoined && Number(cnt) < MARKET_SALE_DAILY_REWARD_LIMIT) {
+          const result = await fabricService.earnPointFromTrade({
+            userDidHash: fabricService.hashDid(sellerWalletAddress),
+            amount: listing.price,
+            rate:   MARKET_SALE_REWARD_RATE,
+          });
+          earnedPoint = result.earnedPoint;
+          await membershipService.recordPointEvent(_pool, {
+            userId: listing.seller_id,
+            walletAddress: sellerWalletAddress,
+            eventType: 'MARKET_SALE_REWARD',
+            reason: '팬 자산 판매 완료',
+            amount: earnedPoint,
+            metadata: {
+              listingId,
+              fragmentTypeId: listing.fragment_type_id,
+              price: listing.price,
+              paymentKey,
+              rate: MARKET_SALE_REWARD_RATE,
+              dailyLimit: MARKET_SALE_DAILY_REWARD_LIMIT,
+            },
+          });
+          console.log(`[market/toss-confirm] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.price}원 × 0.1%)`);
+        }
+      } catch (pointErr) {
+        console.error('[market/toss-confirm] 포인트 적립 실패:', pointErr.message);
+      }
+
+      const [[assetRow]] = await _pool.query(
+        'SELECT id, idol, asset_name FROM market_assets WHERE fragment_type_id = ? LIMIT 1',
+        [listing.fragment_type_id]
+      );
+
+      await notificationService.recordNotification(_pool, {
+        userId,
+        category: 'TRADE',
+        title: '팬 자산 구매 완료',
+        message: `${assetRow?.asset_name ?? '굿즈 파편'} 구매가 완료되었습니다.`,
+        amount: Number(listing.price),
+        metadata: { listingId, fragmentTypeId: listing.fragment_type_id, sellerId: listing.seller_id, purchaseHistoryId, paymentKey },
+      });
+      await notificationService.recordNotification(_pool, {
+        userId: listing.seller_id,
+        category: 'TRADE',
+        title: '팬 자산 판매 완료',
+        message: `${assetRow?.asset_name ?? '굿즈 파편'} 판매가 완료되었습니다.`,
+        amount: Number(listing.price),
+        metadata: { listingId, fragmentTypeId: listing.fragment_type_id, buyerId: userId, purchaseHistoryId, paymentKey },
+      });
+
+      console.log(`[market/toss-confirm] 파편 거래 완료 (토스): ${assetRow?.asset_name ?? listing.fragment_type_id} | ${listing.price}원 | 구매자: ${userId}`);
+
+      res.json({
+        success: true,
+        receipt: {
+          fragmentId:       assetRow?.id ?? listingId,
+          idol:             assetRow?.idol ?? '',
+          fragmentName:     assetRow?.asset_name ?? '',
+          sellerName:       listing.seller_name,
+          price:            listing.price,
+          platformFee,
+          settlementAmount,
+          earnedPoint,
+          tokenId:          tradedTokenId,
+          txHash,
+        },
+      });
+    } catch (dbErr) {
+      await conn.rollback();
+      try {
+        await cancelPayment({ paymentKey, cancelReason: '구매 처리 중 오류', cancelAmount: Number(amount) });
+      } catch (cancelErr) {
+        console.error('[market/toss-confirm] 보상 환불 실패:', cancelErr.message);
+      }
+      throw dbErr;
+    }
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(err.statusCode || 500).json({ error: err.message || '구매 처리 중 오류가 발생했습니다' });
+    }
+  } finally {
+    conn.release();
   }
 });
 

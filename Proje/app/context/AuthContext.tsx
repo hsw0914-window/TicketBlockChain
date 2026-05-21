@@ -15,7 +15,7 @@ type AuthContextValue = {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, nickname: string) => Promise<void>;
-  googleLogin: (credential: string) => Promise<void>;
+  googleLogin: (access_token: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -57,8 +57,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   }, []);
 
-  const googleLogin = useCallback(async (credential: string) => {
-    const { token, user: u } = await apiGoogleLogin(credential);
+  const googleLogin = useCallback(async (access_token: string) => {
+    const { token, user: u } = await apiGoogleLogin(access_token);
     localStorage.setItem('auth_token', token);
     localStorage.setItem('nickname', u.nickname);
     setUser(u);

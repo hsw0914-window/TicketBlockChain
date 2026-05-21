@@ -1,9 +1,22 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag } from "lucide-react";
+import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, Gift, QrCode } from "lucide-react";
+import { FaBell } from "react-icons/fa";
 import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
+
+type NotificationFilter = "all" | "trade" | "raffle" | "membership" | "point" | "box";
+
+interface NotificationItem {
+  id: string;
+  category: "TRADE" | "RAFFLE" | "MEMBERSHIP" | "POINT" | "BOX" | "SYSTEM";
+  title: string;
+  message: string;
+  amount?: number | null;
+  created_at: string;
+  read_at?: string | null;
+}
 
 export function Layout() {
   const location = useLocation();
@@ -11,7 +24,12 @@ export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [pointMenuOpen, setPointMenuOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationUnread, setNotificationUnread] = useState(0);
+  const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>("all");
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const pointMenuRef = useRef<HTMLDivElement>(null);
 
   const { theme, walletConnected, walletAddress, connectWallet, disconnectWallet, isConnectingWallet } = useAppSettings();
   const { isLoggedIn, user, logout } = useAuth();
@@ -29,6 +47,9 @@ export function Layout() {
       if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
         setProfileMenuOpen(false);
       }
+      if (pointMenuRef.current && !pointMenuRef.current.contains(e.target as Node)) {
+        setPointMenuOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -40,6 +61,79 @@ export function Layout() {
     ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
     : "지갑 인증";
 
+  const fetchNotifications = async (filter: NotificationFilter = notificationFilter) => {
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/notifications?type=${filter}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNotifications(Array.isArray(data.data) ? data.data : []);
+        setNotificationUnread(Number(data.unreadCount ?? 0));
+      }
+    } catch {
+      setNotifications([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    void fetchNotifications(notificationFilter);
+  }, [isLoggedIn, location.pathname, notificationFilter]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        void fetchNotifications(notificationFilter);
+      }
+    };
+
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [isLoggedIn, notificationFilter]);
+
+  const openPointMenu = async () => {
+    const next = !pointMenuOpen;
+    setPointMenuOpen(next);
+    if (next) {
+      await fetchNotifications(notificationFilter);
+    }
+  };
+
+  const markNotificationRead = async (id: string) => {
+    const token = localStorage.getItem("auth_token");
+    setNotifications((prev) => prev.filter((item) => item.id !== id));
+    setNotificationUnread((prev) => Math.max(0, prev - 1));
+    if (!token) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/notifications/read`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        await fetchNotifications(notificationFilter);
+      }
+    } catch {
+      await fetchNotifications(notificationFilter);
+    }
+  };
+
   const shellBackground =
     theme === "dark"
       ? "linear-gradient(180deg, #0f1720 0%, #121d27 40%, #17242e 100%)"
@@ -47,14 +141,14 @@ export function Layout() {
   const gridColor = theme === "dark" ? "rgba(126, 156, 184, 0.06)" : "rgba(57, 84, 114, 0.035)";
   const headerBackground = theme === "dark"
     ? scrolled ? "rgba(16,24,33,0.94)" : "rgba(20,30,40,0.86)"
-    : scrolled ? "rgba(245,248,250,0.94)" : "rgba(239,243,246,0.84)";
+    : "#ffffff";
   const headerBorder = theme === "dark"
     ? "1px solid rgba(123,144,166,0.16)"
-    : scrolled ? "1px solid rgba(70,97,124,0.16)" : "1px solid rgba(70,97,124,0.09)";
+    : "1px solid rgba(70,97,124,0.12)";
   const headerShadow = scrolled
     ? theme === "dark"
       ? "0 8px 24px rgba(0, 0, 0, 0.24)"
-      : "0 8px 24px rgba(17, 40, 73, 0.05)"
+      : "0 8px 24px rgba(17, 40, 73, 0.06)"
     : "none";
   const panelBackground = theme === "dark" ? "rgba(28, 40, 53, 0.92)" : "rgba(244,247,249,0.78)";
   const activeBackground = theme === "dark" ? "rgba(86,112,139,0.22)" : "rgba(90,116,146,0.12)";
@@ -63,15 +157,34 @@ export function Layout() {
   const titleGradient = theme === "dark" ? "linear-gradient(90deg, #d9e6f2, #93b1cb)" : "linear-gradient(90deg, #45617f, #6b8878)";
   const dropdownBg = theme === "dark" ? "rgba(22,32,43,0.98)" : "#f8fafc";
   const dropdownBorder = theme === "dark" ? "rgba(90,116,146,0.22)" : "#d0d8e2";
+  const notificationTabs: Array<{ id: NotificationFilter; label: string }> = [
+    { id: "all", label: "전체" },
+    { id: "trade", label: "예매·거래" },
+    { id: "raffle", label: "응모" },
+    { id: "membership", label: "멤버십" },
+    { id: "point", label: "포인트" },
+    { id: "box", label: "상자" },
+  ];
+  const notificationAccent = (category: NotificationItem["category"]) => {
+    if (category === "TRADE") return { background: "#edf3ff", color: "#1456a0", label: "예매·거래" };
+    if (category === "RAFFLE") return { background: "#f1efff", color: "#5b4bb7", label: "응모" };
+    if (category === "MEMBERSHIP") return { background: "#eaf8f0", color: "#168557", label: "멤버십" };
+    if (category === "POINT") return { background: "#edf7f5", color: "#0f766e", label: "포인트" };
+    if (category === "BOX") return { background: "#fff7ed", color: "#c05621", label: "상자" };
+    return { background: "#edf2f7", color: "#50647d", label: "알림" };
+  };
 
   const navItems = [
-    { path: "/tickets", label: "경기 예매", icon: Ticket },
-    { path: "/my-tickets", label: "내 입장권", icon: Ticket },
-    { path: "/ticket-resale", label: "티켓 양도", icon: Tag },
-    { path: "/combine", label: "카드 조합", icon: Layers },
-    { path: "/market", label: "팬 자산 장터", icon: ShoppingBag },
-    { path: "/community", label: "커뮤니티", icon: MessagesSquare },
-    { path: "/notice", label: "공지사항", icon: Bell },
+    { path: "/tickets",       label: "경기 예매",    icon: Ticket },
+    { path: "/my-tickets",    label: "내 입장권",    icon: Ticket },
+    { path: "/combine",       label: "카드 조합",    icon: Layers },
+    { path: "/ticket-resale", label: "티켓 양도",    icon: Tag },
+    { path: "/market",        label: "파편 장터",    icon: ShoppingBag },
+    { path: "/exchange",      label: "교환소",       icon: Gift },
+    { path: "/raffle",        label: "응모&선예매",    icon: Trophy },
+    { path: "/community",     label: "커뮤니티",     icon: MessagesSquare },
+    { path: "/notice",        label: "공지사항",     icon: Bell },
+    ...(user?.role === "admin" ? [{ path: "/entry-scanner", label: "QR 입장", icon: QrCode }] : []),
   ];
 
   const isActive = (path: string) => {
@@ -130,11 +243,11 @@ export function Layout() {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className="relative px-4 py-2.5 rounded-xl text-[0.92rem] font-semibold transition-all duration-200 group"
+                  className="relative px-4 py-2.5 rounded-xl text-[1rem] font-semibold transition-all duration-200 group"
                   style={{
                     color: active ? (theme === "dark" ? "#e2edf6" : "#223750") : textColor,
-                    background: active ? activeBackground : panelBackground,
-                    border: active ? "1px solid rgba(90,116,146,0.18)" : "1px solid transparent",
+                    background: "transparent",
+                    border: "none",
                   }}
                 >
                   <span className="relative z-10 transition-colors duration-200"
@@ -172,6 +285,95 @@ export function Layout() {
                   <Wallet className="w-4 h-4" />
                   <span>{isConnectingWallet ? "연결 중..." : walletLabel}</span>
                 </button>
+
+                <div className="relative" ref={pointMenuRef}>
+                  <button
+                    onClick={openPointMenu}
+                    className="hidden md:flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200 hover:scale-105"
+                    style={{
+                      background: theme === "dark" ? "rgba(90,116,146,0.18)" : "rgba(90,116,146,0.08)",
+                      border: "1px solid rgba(90,116,146,0.16)",
+                      color: theme === "dark" ? "#b8c7d6" : "#49647f",
+                      boxShadow: theme === "dark" ? "0 6px 14px rgba(0,0,0,0.18)" : "0 6px 14px rgba(41,61,85,0.05)",
+                    }}
+                    aria-label="알림"
+                  >
+                    <FaBell className="h-4 w-4" />
+                    {notificationUnread > 0 && (
+                      <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[0.65rem] font-black text-white" style={{ background: "#10b981" }}>
+                        {notificationUnread > 9 ? "9+" : notificationUnread}
+                      </span>
+                    )}
+                  </button>
+
+                  {pointMenuOpen && (
+                    <div className="absolute right-0 top-12 w-[360px] rounded-[16px] border shadow-xl z-50 overflow-hidden"
+                      style={{ background: dropdownBg, borderColor: dropdownBorder, boxShadow: "0 12px 32px rgba(17,40,73,0.12)" }}>
+                      <div className="px-4 py-3 border-b" style={{ borderColor: dropdownBorder }}>
+                        <p className="text-[0.84rem] font-black" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>알림</p>
+                        <div className="mt-3 grid grid-cols-3 gap-1 rounded-xl p-1" style={{ background: theme === "dark" ? "rgba(90,116,146,0.14)" : "#edf2f7" }}>
+                          {notificationTabs.map((tab) => {
+                            const active = notificationFilter === tab.id;
+                            return (
+                              <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => {
+                                  setNotificationFilter(tab.id);
+                                  void fetchNotifications(tab.id);
+                                }}
+                                className="h-8 rounded-lg text-[0.7rem] font-black transition-colors"
+                                style={{
+                                  background: active ? (theme === "dark" ? "rgba(216,230,242,0.12)" : "#ffffff") : "transparent",
+                                  color: active ? (theme === "dark" ? "#d9e6f2" : "#1f3248") : (theme === "dark" ? "#8ba0b4" : "#72849a"),
+                                  boxShadow: active && theme !== "dark" ? "0 4px 10px rgba(17,40,73,0.06)" : "none",
+                                }}
+                              >
+                                {tab.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto py-2">
+                        {notifications.length === 0 ? (
+                          <p className="px-4 py-6 text-center text-[0.82rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>새로운 알림이 없습니다.</p>
+                        ) : notifications.map((event) => {
+                          const accent = notificationAccent(event.category);
+                          return (
+                          <button
+                            key={event.id}
+                            type="button"
+                            onClick={() => void markNotificationRead(event.id)}
+                            className="block w-full px-4 py-3 text-left border-b last:border-b-0 transition-colors hover:bg-black/[0.03]"
+                            style={{ borderColor: dropdownBorder }}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="rounded-full px-2 py-0.5 text-[0.64rem] font-black" style={{ background: accent.background, color: accent.color }}>
+                                    {accent.label}
+                                  </span>
+                                  <p className="truncate text-[0.84rem] font-bold" style={{ color: theme === "dark" ? "#d9e6f2" : "#1f3248" }}>{event.title}</p>
+                                </div>
+                                {event.message && (
+                                  <p className="mt-1 text-[0.76rem] leading-5" style={{ color: theme === "dark" ? "#9cadbd" : "#60728a" }}>{event.message}</p>
+                                )}
+                                <p className="mt-1 text-[0.72rem]" style={{ color: theme === "dark" ? "#7a8fa3" : "#8a9aac" }}>{new Date(event.created_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
+                              </div>
+                              {event.category === "POINT" && (
+                                <span className="shrink-0 rounded-full px-3 py-1 text-[0.78rem] font-black" style={{ background: Number(event.amount || 0) >= 0 ? "#eaf8f0" : "#fff1f2", color: Number(event.amount || 0) >= 0 ? "#168557" : "#be123c" }}>
+                                  {Number(event.amount || 0) >= 0 ? "+" : "-"}{Math.abs(Number(event.amount || 0)).toLocaleString()}P
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* 로그인 상태: 프로필 드롭다운 */}
                 <div className="relative" ref={profileMenuRef}>

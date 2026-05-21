@@ -14,12 +14,30 @@ const { ethers } = require('ethers');
 const RPC_URL  = 'https://ethereum-hoodi-rpc.publicnode.com';
 const PRIV_KEY = process.env.MINTER_PRIVATE_KEY;
 
+function isPlaceholderValue(value) {
+  if (!value) return true;
+  const normalized = String(value).trim();
+  return normalized === ''
+    || normalized.includes('YOUR_')
+    || normalized.includes('CHANGE_ME')
+    || normalized.toLowerCase().includes('example')
+    || normalized.toLowerCase().includes('placeholder');
+}
+
+function isOnChainMintingEnabled(requiredEnvKeys = []) {
+  if (String(process.env.ENABLE_ONCHAIN_MINTING || '').toLowerCase() !== 'true') {
+    return false;
+  }
+
+  return requiredEnvKeys.every((key) => !isPlaceholderValue(process.env[key]));
+}
+
 // ─── nonce 순차 관리 ────────────────────────────────────────
 // 동시 트랜잭션 시 nonce 충돌 방지용 큐
 let _provider = null;
 let _signer   = null;
 let _nonce    = null;
-let _nonceLock = Promise.resolve();
+let _txQueue  = Promise.resolve();
 
 function getProvider() {
   if (!_provider) _provider = new ethers.JsonRpcProvider(RPC_URL);
@@ -32,21 +50,64 @@ function getSigner() {
   return _signer;
 }
 
-async function getNextNonce() {
-  // 이전 작업이 끝날 때까지 대기 후 순차 실행
+async function withTxQueue(task) {
   let resolve;
-  const prev = _nonceLock;
-  _nonceLock = new Promise(r => { resolve = r; });
+  const prev = _txQueue;
+  _txQueue = new Promise(r => { resolve = r; });
   await prev;
 
   try {
-    if (_nonce === null) {
-      _nonce = await getProvider().getTransactionCount(getSigner().address, 'pending');
-    }
-    return _nonce++;
+    return await task();
   } finally {
     resolve();
   }
+}
+
+async function refreshNonce() {
+  _nonce = await getProvider().getTransactionCount(getSigner().address, 'pending');
+  return _nonce;
+}
+
+function isNonceError(err) {
+  const text = [
+    err?.code,
+    err?.shortMessage,
+    err?.message,
+    err?.info?.error?.message,
+    err?.error?.message,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return text.includes('nonce_expired')
+    || text.includes('nonce too low')
+    || text.includes('nonce has already been used')
+    || text.includes('replacement transaction underpriced')
+    || text.includes('already known');
+}
+
+async function submitManagedTx(sendTx) {
+  return withTxQueue(async () => {
+    let lastError;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      if (_nonce === null) await refreshNonce();
+
+      const nonce = _nonce;
+      _nonce += 1;
+
+      try {
+        const tx = await sendTx(nonce);
+        return await tx.wait();
+      } catch (err) {
+        lastError = err;
+        if (!isNonceError(err) || attempt === 3) throw err;
+
+        const refreshed = await refreshNonce();
+        console.warn(`[nftService] nonce 재동기화: ${nonce} -> ${refreshed} (${err.code || err.message})`);
+      }
+    }
+
+    throw lastError;
+  });
 }
 
 // ─── FragmentNFT ABI (파편/카드) ────────────────────────────
@@ -55,6 +116,7 @@ const FRAGMENT_NFT_ABI = [
   'function mintFragment(address to, uint256 fragmentTypeId, uint256 amount) external',
   'function burnFragment(address from, uint256 fragmentTypeId, uint256 amount) external',
   'function mintCard(address to, uint256 cardTypeId) external',
+  'function fragmentBalance(address account, uint256 fragmentTypeId) external view returns (uint256)',
 ];
 
 function getFragmentContract() {
@@ -64,23 +126,28 @@ function getFragmentContract() {
 }
 
 async function mintFragmentOnChain(toAddress, onchainId) {
-  const nonce   = await getNextNonce();
-  const tx      = await getFragmentContract().mintFragment(toAddress, BigInt(onchainId), 1n, { nonce });
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getFragmentContract().mintFragment(toAddress, BigInt(onchainId), 1n, { nonce })
+  );
   return receipt.hash;
 }
 
 async function burnFragmentOnChain(ownerAddress, onchainId) {
-  const nonce   = await getNextNonce();
-  const tx      = await getFragmentContract().burnFragment(ownerAddress, BigInt(onchainId), 2n, { nonce });
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getFragmentContract().burnFragment(ownerAddress, BigInt(onchainId), 2n, { nonce })
+  );
   return receipt.hash;
 }
 
+async function getFragmentBalanceOnChain(ownerAddress, onchainId) {
+  const balance = await getFragmentContract().fragmentBalance(ownerAddress, BigInt(onchainId));
+  return Number(balance);
+}
+
 async function mintCardOnChain(toAddress, cardTypeId) {
-  const nonce   = await getNextNonce();
-  const tx      = await getFragmentContract().mintCard(toAddress, BigInt(cardTypeId), { nonce });
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getFragmentContract().mintCard(toAddress, BigInt(cardTypeId), { nonce })
+  );
   return receipt.hash;
 }
 
@@ -103,16 +170,17 @@ function getTicketContract() {
  * @returns {{ txHash: string, tokenId: number }}
  */
 async function mintTicketOnChain(toAddress, { gameId, gameDate, homeTeam, awayTeam, seatSection, originalPrice }) {
-  const contract = getTicketContract();
-  const tx = await contract.mint(toAddress, {
-    gameId,
-    gameDate,
-    homeTeam,
-    awayTeam,
-    seatSection,
-    originalPrice: BigInt(Math.round(originalPrice)),
+  const receipt = await submitManagedTx((nonce) => {
+    const contract = getTicketContract();
+    return contract.mint(toAddress, {
+      gameId,
+      gameDate,
+      homeTeam,
+      awayTeam,
+      seatSection,
+      originalPrice: BigInt(Math.round(originalPrice)),
+    }, { nonce });
   });
-  const receipt = await tx.wait();
 
   // 이벤트에서 tokenId 추출
   const iface  = new ethers.Interface(['event TicketMinted(address indexed to, uint256 tokenId, string gameId, string seatSection)']);
@@ -134,8 +202,9 @@ async function mintTicketOnChain(toAddress, { gameId, gameDate, homeTeam, awayTe
  * 입장 처리 (QR 확인 후 호출)
  */
 async function markTicketUsedOnChain(tokenId) {
-  const tx      = await getTicketContract().markUsed(BigInt(tokenId));
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getTicketContract().markUsed(BigInt(tokenId), { nonce })
+  );
   return receipt.hash;
 }
 
@@ -159,9 +228,9 @@ function getBoxContract() {
  * 티켓 구매 보상: 박스 NFT 민팅
  */
 async function mintBoxOnChain(toAddress) {
-  const nonce   = await getNextNonce();
-  const tx      = await getBoxContract().mint(toAddress, SEASON_BOX, 1n, { nonce });
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getBoxContract().mint(toAddress, SEASON_BOX, 1n, { nonce })
+  );
   return receipt.hash;
 }
 
@@ -169,9 +238,9 @@ async function mintBoxOnChain(toAddress) {
  * 박스 오픈: 박스 NFT 소각
  */
 async function burnBoxOnChain(ownerAddress) {
-  const nonce   = await getNextNonce();
-  const tx      = await getBoxContract().burn(ownerAddress, SEASON_BOX, 1n, { nonce });
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getBoxContract().burn(ownerAddress, SEASON_BOX, 1n, { nonce })
+  );
   return receipt.hash;
 }
 
@@ -197,21 +266,25 @@ function getMarketplaceContract() {
  * 서버 지갑에게 approve 받은 후 서버가 대신 listTicket 호출하는 방식
  */
 async function listTicketOnChain(tokenId, priceWei) {
-  const tx      = await getMarketplaceContract().listTicket(BigInt(tokenId), BigInt(priceWei));
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getMarketplaceContract().listTicket(BigInt(tokenId), BigInt(priceWei), { nonce })
+  );
   return receipt.hash;
 }
 
 async function cancelListingOnChain(tokenId) {
-  const tx      = await getMarketplaceContract().cancelListing(BigInt(tokenId));
-  const receipt = await tx.wait();
+  const receipt = await submitManagedTx((nonce) =>
+    getMarketplaceContract().cancelListing(BigInt(tokenId), { nonce })
+  );
   return receipt.hash;
 }
 
 module.exports = {
+  isOnChainMintingEnabled,
   // Fragment
   mintFragmentOnChain,
   burnFragmentOnChain,
+  getFragmentBalanceOnChain,
   mintCardOnChain,
   // Ticket
   mintTicketOnChain,

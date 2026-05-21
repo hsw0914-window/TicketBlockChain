@@ -1,4 +1,13 @@
 require('dotenv').config();
+
+// 필수 보안 환경변수 미설정 시 서버 시작 거부
+for (const key of ['JWT_SECRET', 'QR_SECRET']) {
+  if (!process.env[key]) {
+    console.error(`[startup] 필수 환경변수 미설정: ${key} — server/.env 를 확인하세요`);
+    process.exit(1);
+  }
+}
+
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2/promise");
@@ -15,21 +24,42 @@ const combineRoute   = require('./routes/combine');
 const marketRoute       = require('./routes/market');
 const ticketResaleRoute = require('./routes/ticketResale');
 const txHistoryRoute    = require('./routes/txHistory');
+const entryRoute        = require('./routes/entryRoutes');
+const pointRoute        = require('./routes/pointRoutes');
+const refundRoute       = require('./routes/refundRoutes');
+const settlementRoute   = require('./routes/settlementRoutes');
+const raffleRoute       = require('./routes/raffleRoutes');
+const exchangeRoute     = require('./routes/exchange');
+const notificationRoute = require('./routes/notificationRoutes');
+const mockFabric        = require('./services/fabricBridge');
 
 const app = express();
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  ...(process.env.FRONTEND_ORIGINS || "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-];
-
+const configuredFrontendOrigins = (process.env.FRONTEND_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    const allowed = [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      ...configuredFrontendOrigins,
+    ];
+    // ngrok / 외부 접속 허용 (개발 환경)
+    if (!origin || allowed.includes(origin) ||
+        origin.endsWith('.ngrok-free.app') ||
+        origin.endsWith('.ngrok-free.dev') ||
+        origin.endsWith('.ngrok.io')) {
+      return callback(null, true);
+    }
+    // 로컬 네트워크 IP 허용 (192.168.x.x, 10.x.x.x, 172.x.x.x)
+    if (/^https?:\/\/(192\.168\.|10\.|172\.)/.test(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error('CORS 차단: ' + origin));
+  },
   credentials: true,
 }));
 app.use(express.json());
@@ -43,6 +73,29 @@ async function start() {
 
   pool = mysql.createPool({ ...DB_CONFIG, database: DB_NAME });
 
+  // 테스트 계정 Fabric 포인트/멤버십 사전 세팅 (DB 실제 지갑 주소 기준)
+  const seedWallets = ['0x15f7cc396e4C66296cE92225830e24f491941Fc2'];
+  try {
+    const [[row]] = await pool.query(
+      "SELECT wallet_address FROM user_wallets WHERE user_id = 'test_user'"
+    );
+    if (row?.wallet_address && !seedWallets.includes(row.wallet_address)) {
+      seedWallets.push(row.wallet_address);
+    }
+  } catch (_) {}
+  for (const walletAddress of seedWallets) {
+    await mockFabric.seedUser({
+      walletAddress,
+      pointBalance: 10000,
+      totalEarned: 10000,
+      totalUsed: 0,
+      entryCount: 7,
+      joined: true,
+      grade: 'SILVER',
+    });
+  }
+  console.log(`[Seed] 포인트 시드 완료: ${seedWallets.join(', ')}`);
+
   // pool 주입
   authMiddleware.setPool(pool);
   authRoute.setPool(pool);
@@ -55,6 +108,13 @@ async function start() {
   marketRoute.setPool(pool);
   ticketResaleRoute.setPool(pool);
   txHistoryRoute.setPool(pool);
+  entryRoute.setPool(pool);
+  pointRoute.setPool(pool);
+  refundRoute.setPool(pool);
+  settlementRoute.setPool(pool);
+  raffleRoute.setPool(pool);
+  exchangeRoute.setPool(pool);
+  notificationRoute.setPool(pool);
 
   // ─── 신규 라우트 ────────────────────────────────────────
   app.use('/api/auth',       authRoute.router);
@@ -67,6 +127,13 @@ async function start() {
   app.use('/api/market',        marketRoute.router);
   app.use('/api/ticket-resale', ticketResaleRoute.router);
   app.use('/api/tx-history',   txHistoryRoute.router);
+  app.use('/api/entry',        entryRoute.router);
+  app.use('/api/points',       pointRoute.router);
+  app.use('/api/refunds',      refundRoute.router);
+  app.use('/api/settlements',  settlementRoute.router);
+  app.use('/api/raffle',       raffleRoute.router);
+  app.use('/api/exchange',      exchangeRoute.router);
+  app.use('/api/notifications', notificationRoute.router);
 
   // 업로드 이미지 정적 서빙
   app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
@@ -104,14 +171,14 @@ async function start() {
     res.json(row);
   });
 
-  app.post("/api/posts", async (req, res) => {
-    const { user_id, title, excerpt, content, category } = req.body;
-    if (!user_id || !title || !content || !category)
+  app.post("/api/posts", authMiddleware.requireAuth, async (req, res) => {
+    const { title, excerpt, content, category } = req.body;
+    if (!title || !content || !category)
       return res.status(400).json({ error: "필수 항목 누락" });
 
     const [result] = await pool.query(
       "INSERT INTO posts (user_id, title, excerpt, content, category) VALUES (?, ?, ?, ?, ?)",
-      [user_id, title, excerpt ?? "", content, category]
+      [req.user.user_id, title, excerpt ?? "", content, category]
     );
     const [[newPost]] = await pool.query(
       "SELECT * FROM posts WHERE post_id = ?",
@@ -120,8 +187,17 @@ async function start() {
     res.status(201).json(newPost);
   });
 
-  app.put("/api/posts/:id", async (req, res) => {
+  app.put("/api/posts/:id", authMiddleware.requireAuth, async (req, res) => {
     const { title, excerpt, content, category } = req.body;
+    const [[post]] = await pool.query(
+      "SELECT user_id FROM posts WHERE post_id = ? AND deleted = FALSE",
+      [req.params.id]
+    );
+    if (!post) return res.status(404).json({ error: "게시글 없음" });
+    if (post.user_id !== req.user.user_id) {
+      return res.status(403).json({ error: "본인 글만 수정할 수 있습니다." });
+    }
+
     await pool.query(
       "UPDATE posts SET title=?, excerpt=?, content=?, category=? WHERE post_id=?",
       [title, excerpt, content, category, req.params.id]
@@ -133,7 +209,16 @@ async function start() {
     res.json(updated);
   });
 
-  app.delete("/api/posts/:id", async (req, res) => {
+  app.delete("/api/posts/:id", authMiddleware.requireAuth, async (req, res) => {
+    const [[post]] = await pool.query(
+      "SELECT user_id FROM posts WHERE post_id = ? AND deleted = FALSE",
+      [req.params.id]
+    );
+    if (!post) return res.status(404).json({ error: "게시글 없음" });
+    if (post.user_id !== req.user.user_id) {
+      return res.status(403).json({ error: "본인 글만 삭제할 수 있습니다." });
+    }
+
     await pool.query(
       "UPDATE posts SET deleted = TRUE WHERE post_id = ?",
       [req.params.id]
@@ -141,8 +226,8 @@ async function start() {
     res.json({ ok: true });
   });
 
-  app.post("/api/posts/:id/like", async (req, res) => {
-    const { user_id } = req.body;
+  app.post("/api/posts/:id/like", authMiddleware.requireAuth, async (req, res) => {
+    const user_id = req.user.user_id;
     const postId = req.params.id;
 
     const [[existing]] = await pool.query(
@@ -152,7 +237,7 @@ async function start() {
 
     if (existing) {
       await pool.query("DELETE FROM post_likes WHERE user_id=? AND post_id=?", [user_id, postId]);
-      await pool.query("UPDATE posts SET like_count = like_count - 1 WHERE post_id=?", [postId]);
+      await pool.query("UPDATE posts SET like_count = GREATEST(like_count - 1, 0) WHERE post_id=?", [postId]);
       res.json({ liked: false });
     } else {
       await pool.query("INSERT INTO post_likes (user_id, post_id) VALUES (?, ?)", [user_id, postId]);
@@ -172,14 +257,14 @@ async function start() {
     res.json(rows);
   });
 
-  app.post("/api/posts/:id/comments", async (req, res) => {
-    const { user_id, content, parent_id } = req.body;
-    if (!user_id || !content)
+  app.post("/api/posts/:id/comments", authMiddleware.requireAuth, async (req, res) => {
+    const { content, parent_id } = req.body;
+    if (!content)
       return res.status(400).json({ error: "필수 항목 누락" });
 
     const [result] = await pool.query(
       "INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)",
-      [req.params.id, user_id, content, parent_id ?? null]
+      [req.params.id, req.user.user_id, content, parent_id ?? null]
     );
     const [[newComment]] = await pool.query(
       "SELECT * FROM comments WHERE comment_id = ?",
@@ -188,7 +273,16 @@ async function start() {
     res.status(201).json(newComment);
   });
 
-  app.delete("/api/comments/:id", async (req, res) => {
+  app.delete("/api/comments/:id", authMiddleware.requireAuth, async (req, res) => {
+    const [[comment]] = await pool.query(
+      "SELECT user_id FROM comments WHERE comment_id = ? AND deleted = FALSE",
+      [req.params.id]
+    );
+    if (!comment) return res.status(404).json({ error: "댓글 없음" });
+    if (comment.user_id !== req.user.user_id) {
+      return res.status(403).json({ error: "본인 댓글만 삭제할 수 있습니다." });
+    }
+
     await pool.query(
       "UPDATE comments SET deleted = TRUE WHERE comment_id = ?",
       [req.params.id]

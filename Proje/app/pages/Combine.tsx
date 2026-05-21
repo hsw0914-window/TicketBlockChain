@@ -39,14 +39,14 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
     }
 
     if (typeof payload === "string" && payload.includes("<!DOCTYPE")) {
-      throw new Error("카드 조합 서버 응답을 받지 못했습니다. 백엔드가 실행 중인지 확인해주세요.");
+      throw new Error("팬 자산 공방 서버 응답을 받지 못했습니다. 백엔드가 실행 중인지 확인해주세요.");
     }
 
     throw new Error(typeof payload === "string" && payload.trim().length > 0 ? payload : "요청 처리 중 오류가 발생했습니다.");
   }
 
   if (!isJson) {
-    throw new Error("카드 조합 서버가 올바른 JSON 응답을 보내지 않았습니다.");
+    throw new Error("팬 자산 공방 서버가 올바른 JSON 응답을 보내지 않았습니다.");
   }
 
   return payload as T;
@@ -218,7 +218,7 @@ export function Combine() {
       type: "card" as const,
       name: first.resultName,
       image: first.image,
-      description: `${first.name} 2개를 모아 ${first.resultName} 완성 카드가 만들어집니다.`,
+      description: `같은 파편을 조합하여 ${first.resultName} 원본 굿즈 카드를 완성할 수 있어요.`,
     };
   }, [canCombine, selectedFragmentObjects]);
 
@@ -246,7 +246,7 @@ export function Combine() {
     setSelectedFragments((cur) => [...cur, id]);
   };
 
-  // ─── 조합 API 호출 ────────────────────────────────────────
+  // ─── 파편 완성 API 호출 ────────────────────────────────────────
   const handleCombine = async () => {
     if (!canCombine) return;
     setCombining(true);
@@ -274,7 +274,7 @@ export function Combine() {
       setSelectedFragments([]);
       setActiveTab("nfts");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "조합 중 오류가 발생했습니다.");
+      alert(err instanceof Error ? err.message : "완성 처리 중 오류가 발생했습니다.");
     } finally {
       setCombining(false);
     }
@@ -316,7 +316,10 @@ export function Combine() {
   };
 
   const handleCloseResult = () => setResult(null);
-  const handleCloseOpenResult = () => setOpenResult(null);
+  const handleCloseOpenResult = () => {
+    setOpenResult(null);
+    setViewMode("combine");
+  };
 
   // ─── 로딩 / 에러 ─────────────────────────────────────────
   if (loading) {
@@ -346,31 +349,47 @@ export function Combine() {
   }
 
   return (
-    <div className="page-shell" style={{ width: "min(1480px, calc(100% - 3rem))" }}>
-      <div className="mb-6 flex items-center justify-center gap-4">
-        {[
-          { key: "openBox" as const, label: "박스 개봉", icon: Package },
-          { key: "combine" as const, label: "파편 조합", icon: Layers },
-        ].map((item) => {
-          const Icon = item.icon;
-          const active = viewMode === item.key;
-          return (
-            <Button
-              key={item.key}
-              onClick={() => setViewMode(item.key)}
-              className="rounded-[14px] px-5 py-2.5 font-semibold"
-              style={active ? { ...shellTone.selected, color: shellTone.accent } : { ...shellTone.surface, color: shellTone.muted }}
-            >
-              <Icon className="w-5 h-5 mr-2" />
-              {item.label}
-            </Button>
-          );
-        })}
-      </div>
+    <div className="page-shell page-shell-wide">
+      <header className="page-header">
+        <div className="page-header-main">
+          <p className="page-eyebrow mb-3" style={{ color: "#1456a0" }}>
+            COMBINE
+          </p>
+          <h1 className="page-title mb-2" style={{ color: shellTone.text }}>
+            카드 조합
+          </h1>
+          <p className="page-subtitle" style={{ color: shellTone.muted }}>
+            박스에서 얻은 파편을 조합하여 굿즈 카드를 얻을 수 있어요.
+          </p>
+        </div>
 
-      <div className="grid lg:grid-cols-[390px_1fr] gap-6">
-        <div className="space-y-4">
-          <Card className="p-4" style={shellTone.panelStrong}>
+        <div className="flex items-center gap-3">
+          {[
+            { key: "openBox" as const, label: "박스 개봉", icon: Package },
+            { key: "combine" as const, label: "파편 조합", icon: Layers },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = viewMode === item.key;
+            return (
+              <Button
+                key={item.key}
+                onClick={() => setViewMode(item.key)}
+                className="rounded-[14px] px-5 py-2.5 font-semibold"
+                style={active ? { ...shellTone.selected, color: shellTone.accent } : { ...shellTone.surface, color: shellTone.muted }}
+              >
+                <Icon className="w-5 h-5 mr-2" />
+                {item.label}
+              </Button>
+            );
+          })}
+        </div>
+      </header>
+
+      <div className="relative space-y-6 lg:space-y-0 lg:pl-[414px]">
+        <div
+          className="space-y-4 lg:space-y-0 lg:gap-4 lg:absolute lg:left-0 lg:top-0 lg:bottom-0 lg:w-[390px] lg:flex lg:flex-col lg:min-h-0 lg:overflow-hidden"
+        >
+          <Card className="p-4 lg:shrink-0" style={shellTone.panelStrong}>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={shellTone.surface}>
@@ -393,9 +412,9 @@ export function Combine() {
             </div>
           </Card>
 
-          <Card className="overflow-hidden" style={shellTone.panelStrong}>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2 border-b" style={{ background: isDark ? "#22303d" : "#edf1f5", borderColor: isDark ? "#334657" : "#d4dbe4" }}>
+          <Card className="overflow-hidden lg:flex-1 lg:min-h-0" style={shellTone.panelStrong}>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full h-full gap-0 lg:flex lg:flex-col lg:min-h-0">
+              <TabsList className="grid w-full grid-cols-2 border-b lg:shrink-0" style={{ background: isDark ? "#22303d" : "#edf1f5", borderColor: isDark ? "#334657" : "#d4dbe4" }}>
                 <TabsTrigger value="fragments" className="data-[state=active]:bg-transparent">
                   <Gem className="w-4 h-4 mr-2" />
                   파편
@@ -406,7 +425,7 @@ export function Combine() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="fragments" className="p-4 max-h-[620px] overflow-y-auto">
+              <TabsContent value="fragments" className="mt-0 p-4 max-h-[620px] overflow-y-scroll lg:max-h-none lg:flex-1 lg:basis-0 lg:min-h-0">
                 <div className="space-y-2">
                   {sortedFragments.map((fragment) => {
                     const selectedCount = getSelectedCount(selectedFragments, fragment.id);
@@ -483,7 +502,7 @@ export function Combine() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="nfts" className="p-4 max-h-[620px] overflow-y-auto">
+              <TabsContent value="nfts" className="mt-0 p-4 max-h-[620px] overflow-y-scroll lg:max-h-none lg:flex-1 lg:basis-0 lg:min-h-0">
                 <div className="space-y-2">
                   {cardInventory.map((card) => (
                     <Card key={card.id} className="p-3" style={shellTone.surface}>
@@ -528,13 +547,6 @@ export function Combine() {
         <div className="space-y-6">
           {viewMode === "openBox" ? (
             <>
-              <div>
-                <h1 className="page-title mb-2" style={{ color: shellTone.text }}>박스 개봉</h1>
-                <p className="page-subtitle" style={{ color: shellTone.muted }}>
-                  시즌 박스 하나만 운영하고, 키 없이 바로 열 수 있게 단순화했습니다.
-                </p>
-              </div>
-
               <Card className="p-6 relative overflow-hidden" style={shellTone.panel}>
                 <div className="absolute inset-0" style={{ background: isDark ? "linear-gradient(90deg, rgba(67, 108, 158, 0.14), rgba(58, 80, 106, 0.04))" : "linear-gradient(90deg, rgba(85,109,136,0.08), rgba(124,141,161,0.03))" }}></div>
                 <div className="flex items-start gap-4 relative z-10">
@@ -542,34 +554,35 @@ export function Combine() {
                     <Sparkles className="w-6 h-6" style={{ color: shellTone.success }} />
                   </div>
                   <div>
-                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>시즌 박스 안내</h3>
+                    <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>랜덤 박스 안내</h3>
                     <ul className="space-y-1 text-sm" style={{ color: shellTone.muted }}>
-                      <li>• 프리미엄 박스 없이 시즌 박스 한 종류만 유지합니다.</li>
-                      <li>• 열쇠 없이 바로 열 수 있어서 처음 쓰는 사람도 흐름이 단순합니다.</li>
-                      <li>• 시즌 박스에서는 조합에 사용하는 파편만 획득할 수 있어요.</li>
+                      <li>• 랜덤 박스를 열면 굿즈 카드 조합에 필요한 파편을 획득할 수 있습니다.</li>
+                      <li>• 획득한 파편은 왼쪽 인벤토리에 자동으로 추가됩니다.</li>
+                      <li>• 같은 파편 2개를 모으면 파편 조합에서 원본 굿즈 카드를 만들 수 있습니다.</li>
                     </ul>
                   </div>
                 </div>
               </Card>
 
-              <Card className="p-8 relative overflow-hidden" style={shellTone.panelStrong}>
+              <Card className="p-8 relative overflow-hidden lg:min-h-[724px]" style={shellTone.panelStrong}>
                 <div className="relative z-10 grid xl:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
                   <div className="space-y-5">
                     <div>
-                      <p className="text-[0.72rem] font-semibold tracking-[0.18em] uppercase" style={{ color: shellTone.muted }}>Season Box</p>
-                      <h2 className="mt-2 section-title" style={{ color: shellTone.text }}>시즌 박스 바로 열기</h2>
+                      <h2 className="section-title" style={{ color: shellTone.text }}>박스 개봉</h2>
                       <p className="mt-2 text-sm leading-6" style={{ color: shellTone.muted }}>
-                        개막전, 원정전, 승리 배지처럼 장터에서 실제로 거래되는 야구 자산 위주로 보상을 묶었습니다.
+                        어떤 파편이 나올지 모르는 박스를 열고, 필요한 파편을 모아 원본 굿즈 카드로 조합해보세요.
                       </p>
                     </div>
                     <div className="rounded-[22px] p-5 flex items-center gap-5" style={shellTone.surface}>
-                      <div className="w-24 h-24 rounded-[20px] flex items-center justify-center text-5xl" style={shellTone.panelSoft}>📦</div>
+                      <div className="w-24 h-24 rounded-[20px] flex items-center justify-center" style={shellTone.panelSoft}>
+                        <Package className="w-12 h-12" style={{ color: "#d39a49" }} />
+                      </div>
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}>단일 박스</span>
+                          <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}>랜덤 박스</span>
                           <span className="text-[0.68rem] px-2.5 py-1 rounded-full font-semibold" style={{ background: "#d39a49", color: "#ffffff" }}>보유 {seasonBoxCount}개</span>
                         </div>
-                        <p className="text-lg font-bold" style={{ color: shellTone.text }}>시즌 박스</p>
+                        <p className="text-lg font-bold" style={{ color: shellTone.text }}>랜덤 박스</p>
                         <p className="text-sm leading-6" style={{ color: shellTone.muted }}>별도 선택 없이 바로 열리며, 개봉 결과는 왼쪽 인벤토리에 자동 반영됩니다.</p>
                       </div>
                     </div>
@@ -597,6 +610,9 @@ export function Combine() {
                           </div>
                         </div>
                       ))}
+                      {allBoxRewards.length === 0 && boxRewardsPreview.length === 0 && (
+                        <p className="text-sm text-center py-8" style={{ color: shellTone.muted }}>보상 목록을 불러오는 중이에요.</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -609,19 +625,12 @@ export function Combine() {
                   style={{ background: shellTone.accentStrong, color: "#ffffff" }}
                 >
                   <Package className="w-5 h-5 mr-2" />
-                  {opening ? "박스 여는 중..." : "시즌 박스 열기"}
+                  {opening ? "박스 여는 중..." : "랜덤 박스 열기"}
                 </Button>
               </Card>
             </>
           ) : (
             <>
-              <div>
-                <h1 className="page-title mb-2" style={{ color: shellTone.text }}>카드 조합</h1>
-                <p className="page-subtitle" style={{ color: shellTone.muted }}>
-                  파편 2개만 골라서 완성 카드로 합치는 흐름으로 단순화했습니다.
-                </p>
-              </div>
-
               <Card className="p-6 relative overflow-hidden" style={shellTone.panel}>
                 <div className="absolute inset-0" style={{ background: isDark ? "linear-gradient(90deg, rgba(67, 108, 158, 0.14), rgba(58, 80, 106, 0.04))" : "linear-gradient(90deg, rgba(85,109,136,0.08), rgba(124,141,161,0.03))" }}></div>
                 <div className="flex items-start gap-4 relative z-10">
@@ -631,10 +640,9 @@ export function Combine() {
                   <div>
                     <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>조합 시스템 안내</h3>
                     <ul className="space-y-1 text-sm" style={{ color: shellTone.muted }}>
-                      <li>• 같은 파편 2개를 모아야 완성 카드 1개를 만들 수 있습니다.</li>
-                      <li>• 예를 들어 두산 홈런볼 골드컷 파편 2개를 모으면 두산 홈런볼 골드컷 카드가 완성됩니다.</li>
-                      <li>• 서로 다른 파편을 섞어 고정 카드가 나오는 방식은 사용하지 않고, 같은 파편 2개만 조합할 수 있습니다.</li>
-                      <li>• 부족한 파편은 각 항목의 장터 버튼을 눌러 바로 구매할 수 있어요.</li>
+                      <li>• 같은 종류의 파편 2개를 조합해야 원본 굿즈 1개를 만들 수 있습니다.</li>
+                      <li>• 부족한 파편은 상자 개봉이나 장터에서 구매 후 획득할 수 있습니다.</li>
+                      <li>• 완성된 원본 굿즈 카드는 실물 굿즈 교환에 사용할 수 있습니다.</li>
                     </ul>
                   </div>
                 </div>
@@ -642,26 +650,22 @@ export function Combine() {
 
               <Card className="p-8 relative overflow-hidden" style={shellTone.panelStrong}>
                 <div className="relative z-10 space-y-8">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
                     <div>
                       <h2 className="section-title" style={{ color: shellTone.text }}>조합 미리보기</h2>
                       <p className="mt-2 text-sm leading-6" style={{ color: shellTone.muted }}>
                         현재 선택한 파편이 오른쪽 결과 카드로 어떻게 이어지는지 바로 확인할 수 있어요.
                       </p>
                     </div>
-                    <span className="rounded-full px-3.5 py-1.5 text-[0.72rem] font-semibold" style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}>
-                      2개 선택 기준
-                    </span>
                   </div>
 
-                  <div className="grid lg:grid-cols-[minmax(0,1fr)_90px_280px] gap-6 items-center">
-                    <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 lg:gap-6">
                       {[0, 1].map((index) => {
                         const fragment = selectedFragmentObjects[index];
                         return (
-                          <div key={index}>
+                          <div key={index} className="min-w-0">
                             <div
-                              className="h-36 rounded-[22px] flex items-center justify-center relative overflow-hidden"
+                              className="aspect-square rounded-[22px] flex items-center justify-center relative overflow-hidden"
                               style={fragment ? shellTone.panelSoft : { ...shellTone.surface, border: `2px dashed ${shellTone.dashed}` }}
                             >
                               {fragment ? (
@@ -682,17 +686,16 @@ export function Combine() {
                           </div>
                         );
                       })}
-                    </div>
 
-                    <div className="flex justify-center">
-                      <div className="p-3 rounded-full" style={shellTone.surface}>
+                    <div className="flex h-full items-center justify-center pb-16">
+                      <div className="p-3 rounded-full shrink-0" style={shellTone.surface}>
                         <ArrowRight className="w-8 h-8" style={{ color: shellTone.accent }} />
                       </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="min-w-0 space-y-4">
                       <div
-                        className={`h-48 rounded-[24px] flex items-center justify-center relative overflow-hidden ${canCombine ? "animate-pulse" : ""}`}
+                        className={`aspect-square rounded-[22px] flex items-center justify-center relative overflow-hidden ${canCombine ? "animate-pulse" : ""}`}
                         style={canCombine ? shellTone.panelSoft : { ...shellTone.surface, border: `2px dashed ${shellTone.dashed}` }}
                       >
                         {canCombine && expectedCombineResult ? (
@@ -718,7 +721,8 @@ export function Combine() {
                         </div>
                       ) : (
                         <p className="text-sm leading-6" style={{ color: shellTone.muted }}>
-                          같은 파편을 2번 선택하면 완성 카드 이름과 결과 방향이 바로 표시됩니다.
+                          같은 파편을 조합하여 원본<br />
+                          굿즈 카드를 완성하세요.
                         </p>
                       )}
                     </div>
@@ -730,10 +734,63 @@ export function Combine() {
                         같은 파편 2개를 아직 고르지 않았어요
                       </p>
                       <p className="mt-2 text-[0.78rem] leading-6" style={{ color: shellTone.muted }}>
-                        왼쪽에서 같은 파편을 두 번 선택하세요. 수량이 1개뿐이면 장터에서 같은 파편을 하나 더 구매한 뒤 조합할 수 있습니다.
+                        파편이 1개뿐이라면 상자 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후, 완성할 수 있습니다.
                       </p>
                     </div>
                   )}
+
+                  <div className="rounded-[22px] p-5" style={shellTone.surface}>
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: shellTone.text }}>조합 가능한 파편 전체</p>
+                        <p className="mt-1 text-xs" style={{ color: shellTone.muted }}>
+                          교환소의 랜덤 실물 NFT 풀과 같은 10종 이미지로 맞춰 표시합니다.
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0 rounded-full px-3 py-1 text-[0.72rem] font-bold"
+                        style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}
+                      >
+                        {sortedFragments.length}종
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                      {sortedFragments.map((fragment) => (
+                        <button
+                          key={fragment.id}
+                          type="button"
+                          onClick={() => (fragment.count > 0 ? handleSelectFragment(fragment.id) : navigate(`/market?fragment=${fragment.marketAssetId ?? fragment.id}`))}
+                          className="min-w-0 overflow-hidden rounded-[16px] text-left transition-transform hover:-translate-y-0.5"
+                          style={shellTone.panelSoft}
+                        >
+                          <div className="aspect-square overflow-hidden">
+                            {fragment.image ? (
+                              <img src={fragment.image} alt={fragment.name} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center">
+                                <ImageIcon className="h-8 w-8" style={{ color: shellTone.muted }} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="space-y-1 px-3 py-3">
+                            <span
+                              className="inline-flex rounded-full px-2 py-0.5 text-[0.64rem] font-semibold"
+                              style={{ background: shellTone.accentSoft, color: shellTone.accent, border: shellTone.surface.border }}
+                            >
+                              {fragment.team}
+                            </span>
+                            <p className="line-clamp-2 min-h-[2.2rem] text-[0.78rem] font-semibold leading-[1.1rem]" style={{ color: shellTone.text }}>
+                              {fragment.resultName}
+                            </p>
+                            <p className="text-[0.68rem] font-medium" style={{ color: fragment.count > 0 ? shellTone.success : shellTone.muted }}>
+                              보유 {fragment.count}개
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
                   <Button
                     onClick={handleCombine}
@@ -743,7 +800,7 @@ export function Combine() {
                     style={{ background: shellTone.accentStrong, color: "#ffffff" }}
                   >
                     <Layers className="w-5 h-5 mr-2" />
-                    {combining ? "조합 중..." : "파편 2개 조합하기"}
+                    {combining ? "완성 중..." : "원본 굿즈 카드 만들기"}
                   </Button>
                 </div>
               </Card>
@@ -790,7 +847,7 @@ export function Combine() {
         )}
 
         {result && !combining && (
-          <ResultModal title="조합 완료" result={result} shellTone={shellTone} onClose={handleCloseResult} onOpenMarket={(assetId) => navigate(`/market?fragment=${assetId}`)} />
+          <ResultModal title="완성 완료" result={result} shellTone={shellTone} onClose={handleCloseResult} onOpenMarket={(assetId) => navigate(`/market?fragment=${assetId}`)} />
         )}
 
         {openResult && !opening && (
