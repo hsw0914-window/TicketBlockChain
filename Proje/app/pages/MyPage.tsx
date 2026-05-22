@@ -196,6 +196,7 @@ export function MyPage() {
       // 7. 상태 갱신
       const status = await getDidStatus();
       setDidStatus(status);
+      window.dispatchEvent(new Event("base-chain-wallet-refresh"));
     } catch (err: unknown) {
       // MetaMask 사용자 거부
       if (typeof err === "object" && err !== null && "code" in err && (err as { code: number }).code === 4001) {

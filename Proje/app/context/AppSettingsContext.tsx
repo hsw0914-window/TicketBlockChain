@@ -26,6 +26,8 @@ type AppSettingsContextValue = {
 const THEME_STORAGE_KEY = "base-chain-theme";
 const WALLET_STORAGE_KEY = "base-chain-wallet";
 const WALLET_PAUSED_KEY = "base-chain-wallet-paused";
+const AUTH_CHANGED_EVENT = "base-chain-auth-changed";
+const WALLET_REFRESH_EVENT = "base-chain-wallet-refresh";
 const API_BASE = (
   (import.meta.env.VITE_API_URL as string | undefined) ??
   (typeof window !== "undefined" ? window.location.origin : "http://localhost:4000")
@@ -43,6 +45,32 @@ function shortAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+function parseTokenUserId(): string | null {
+  if (typeof window === "undefined") return null;
+  const token = localStorage.getItem("auth_token");
+  if (!token) return null;
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const parsed = JSON.parse(window.atob(padded)) as { user_id?: string; sub?: string; id?: string };
+    return parsed.user_id ?? parsed.sub ?? parsed.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function scopedStorageKey(baseKey: string) {
+  const userId = parseTokenUserId();
+  return userId ? `${baseKey}:${userId}` : `${baseKey}:guest`;
+}
+
+function cleanupLegacyWalletStorage() {
+  localStorage.removeItem(WALLET_STORAGE_KEY);
+  localStorage.removeItem(WALLET_PAUSED_KEY);
+}
+
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
@@ -55,23 +83,25 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     setWalletChainId(chainId);
 
     if (typeof window !== "undefined") {
+      const storageKey = scopedStorageKey(WALLET_STORAGE_KEY);
       if (address) {
         localStorage.setItem(
-          WALLET_STORAGE_KEY,
+          storageKey,
           JSON.stringify({
             address,
             chainId,
           }),
         );
       } else {
-        localStorage.removeItem(WALLET_STORAGE_KEY);
+        localStorage.removeItem(storageKey);
       }
     }
   }, []);
 
   const syncWalletFromProvider = useCallback(async () => {
     if (typeof window === "undefined" || !window.ethereum) return;
-    if (localStorage.getItem(WALLET_PAUSED_KEY)) return;
+    if (localStorage.getItem("auth_token")) return;
+    if (localStorage.getItem(scopedStorageKey(WALLET_PAUSED_KEY))) return;
 
     try {
       const [accounts, chainId] = await Promise.all([
@@ -89,10 +119,13 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
 
   const syncVerifiedWalletFromServer = useCallback(async () => {
     if (typeof window === "undefined") return;
-    if (localStorage.getItem(WALLET_PAUSED_KEY)) return;
+    if (localStorage.getItem(scopedStorageKey(WALLET_PAUSED_KEY))) return;
 
     const token = localStorage.getItem("auth_token");
-    if (!token) return;
+    if (!token) {
+      applyWalletState(null, null);
+      return;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/did/status`, {
@@ -104,8 +137,13 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         wallet_verified?: boolean;
         did_status?: string;
       };
-      if (data.wallet_address && data.wallet_verified && data.did_status === "verified") {
-        applyWalletState(data.wallet_address, "server-verified");
+      if (data.wallet_address) {
+        applyWalletState(
+          data.wallet_address,
+          data.wallet_verified && data.did_status === "verified" ? "server-verified" : "server-registered",
+        );
+      } else {
+        applyWalletState(null, null);
       }
     } catch {
       // 서버 인증 지갑 자동 복원은 시연 편의 기능이므로 실패 시 조용히 무시한다.
@@ -120,7 +158,9 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const storedWallet = localStorage.getItem(WALLET_STORAGE_KEY);
+    cleanupLegacyWalletStorage();
+
+    const storedWallet = localStorage.getItem(scopedStorageKey(WALLET_STORAGE_KEY));
     if (storedWallet) {
       try {
         const parsed = JSON.parse(storedWallet) as { address?: string; chainId?: string | null };
@@ -129,18 +169,48 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           setWalletChainId(parsed.chainId ?? null);
         }
       } catch {
-        localStorage.removeItem(WALLET_STORAGE_KEY);
+        localStorage.removeItem(scopedStorageKey(WALLET_STORAGE_KEY));
       }
     }
 
-    void syncWalletFromProvider();
-    void syncVerifiedWalletFromServer();
+    if (localStorage.getItem("auth_token")) {
+      void syncVerifiedWalletFromServer();
+    } else {
+      void syncWalletFromProvider();
+    }
   }, [syncWalletFromProvider, syncVerifiedWalletFromServer]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleAuthChanged = () => {
+      cleanupLegacyWalletStorage();
+      setWalletError(null);
+      applyWalletState(null, null);
+      void syncVerifiedWalletFromServer();
+    };
+
+    const handleWalletRefresh = () => {
+      void syncVerifiedWalletFromServer();
+    };
+
+    window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+    window.addEventListener(WALLET_REFRESH_EVENT, handleWalletRefresh);
+
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+      window.removeEventListener(WALLET_REFRESH_EVENT, handleWalletRefresh);
+    };
+  }, [applyWalletState, syncVerifiedWalletFromServer]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.ethereum?.on || !window.ethereum?.removeListener) return;
 
     const handleAccountsChanged = (accounts: unknown) => {
+      if (localStorage.getItem("auth_token")) {
+        void syncVerifiedWalletFromServer();
+        return;
+      }
       const walletAccounts = Array.isArray(accounts) ? (accounts as string[]) : [];
       if (walletAccounts.length === 0) {
         applyWalletState(null, null);
@@ -207,7 +277,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      localStorage.removeItem(WALLET_PAUSED_KEY);
+      localStorage.removeItem(scopedStorageKey(WALLET_PAUSED_KEY));
       applyWalletState(accounts[0], chainId);
       return true;
     } catch (error) {
@@ -224,7 +294,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
 
   const disconnectWallet = useCallback(() => {
     setWalletError(null);
-    localStorage.setItem(WALLET_PAUSED_KEY, "1");
+    localStorage.setItem(scopedStorageKey(WALLET_PAUSED_KEY), "1");
     applyWalletState(null, null);
     // MetaMask 사이트 권한 해제 → 다음 연결 시 계정 선택 팝업 강제 표시
     if (window.ethereum) {

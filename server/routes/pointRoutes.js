@@ -38,6 +38,25 @@ async function getWalletForHistory(userId, walletAddress = '') {
   return wallet?.wallet_address || null;
 }
 
+function noPointBalance() {
+  return { balance: 0, totalEarned: 0, totalUsed: 0 };
+}
+
+function createWalletOwnerError() {
+  const err = new Error('현재 로그인한 계정에 등록된 지갑으로만 이용할 수 있습니다.');
+  err.statusCode = 403;
+  return err;
+}
+
+async function getWalletForCurrentUser(req, walletAddress = '') {
+  const requestedWallet = String(walletAddress || '').trim();
+  if (!req.user?.user_id) return requestedWallet || null;
+
+  const verifiedWallet = await membershipService.getVerifiedWallet(_pool, req.user.user_id, requestedWallet);
+  if (requestedWallet && !verifiedWallet) throw createWalletOwnerError();
+  return verifiedWallet;
+}
+
 // GET /api/points/history?month=YYYY-MM&walletAddress=0x...
 router.get('/history', requireAuth, async (req, res) => {
   try {
@@ -91,8 +110,15 @@ router.get('/history', requireAuth, async (req, res) => {
 // GET /api/points?walletAddress=0x...
 router.get('/', optionalAuth, async (req, res) => {
   try {
-    const { walletAddress } = req.query;
-    if (!walletAddress) return res.status(400).json({ error: 'walletAddress 필요' });
+    const walletAddress = await getWalletForCurrentUser(req, req.query.walletAddress);
+    if (!walletAddress) {
+      return res.json({
+        success: true,
+        data: noPointBalance(),
+        membershipJoined: false,
+        walletAddress: null,
+      });
+    }
 
     const userDidHash = fabricService.hashDid(walletAddress);
     const point = await fabricService.getPointBalance({ userDidHash });
@@ -103,25 +129,32 @@ router.get('/', optionalAuth, async (req, res) => {
       success: true,
       data: membership.joined ? point : { ...point, balance: 0, totalEarned: 0, totalUsed: 0 },
       membershipJoined: membership.joined,
+      walletAddress,
     });
   } catch (err) {
     console.error('[pointRoutes] GET /:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
 // GET /api/points/membership?walletAddress=0x...
 router.get('/membership', optionalAuth, async (req, res) => {
   try {
-    const { walletAddress } = req.query;
-    if (!walletAddress) return res.status(400).json({ error: 'walletAddress 필요' });
+    const walletAddress = await getWalletForCurrentUser(req, req.query.walletAddress);
+    if (!walletAddress) {
+      return res.json({
+        success: true,
+        data: { tier: 'NONE', joined: false, verified: false },
+        walletAddress: null,
+      });
+    }
 
     const userDidHash = fabricService.hashDid(walletAddress);
     const membership = await fabricService.getMembership({ userDidHash });
-    res.json({ success: true, data: membership });
+    res.json({ success: true, data: membership, walletAddress });
   } catch (err) {
     console.error('[pointRoutes] GET /membership:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -134,24 +167,24 @@ router.post('/use', requireAuth, async (req, res) => {
       return res.status(400).json({ error: '필수 항목 누락 (walletAddress, pointAmount)' });
     }
 
-    const userDidHash = fabricService.hashDid(walletAddress);
+    const verifiedWallet = await membershipService.getVerifiedWallet(_pool, req.user.user_id, walletAddress);
+    if (!verifiedWallet) throw createWalletOwnerError();
+
+    const userDidHash = fabricService.hashDid(verifiedWallet);
     const result = await fabricService.usePointForTicket({
       userDidHash,
       ticketId: ticketId || null,
       pointAmount: Number(pointAmount),
     });
 
-    const verifiedWallet = await membershipService.getVerifiedWallet(_pool, req.user.user_id, walletAddress);
-    if (verifiedWallet) {
-      await membershipService.recordPointEvent(_pool, {
-        userId: req.user.user_id,
-        walletAddress: verifiedWallet,
-        eventType: 'POINT_USE_TICKET',
-        reason: '티켓 예매 포인트 사용',
-        amount: -Math.abs(Number(pointAmount)),
-        metadata: { ticketId: ticketId || null },
-      });
-    }
+    await membershipService.recordPointEvent(_pool, {
+      userId: req.user.user_id,
+      walletAddress: verifiedWallet,
+      eventType: 'POINT_USE_TICKET',
+      reason: '티켓 예매 포인트 사용',
+      amount: -Math.abs(Number(pointAmount)),
+      metadata: { ticketId: ticketId || null },
+    });
 
     res.json({ success: true, data: result });
   } catch (err) {
@@ -169,7 +202,10 @@ router.post('/exchange', requireAuth, async (req, res) => {
       return res.status(400).json({ error: '필수 항목 누락 (walletAddress, itemType)' });
     }
 
-    const userDidHash = fabricService.hashDid(walletAddress);
+    const verifiedWallet = await membershipService.getVerifiedWallet(_pool, req.user.user_id, walletAddress);
+    if (!verifiedWallet) throw createWalletOwnerError();
+
+    const userDidHash = fabricService.hashDid(verifiedWallet);
     const result = await fabricService.exchangePointItem({ userDidHash, itemType });
 
     // fabric_events 로그
@@ -196,7 +232,7 @@ router.post('/exchange', requireAuth, async (req, res) => {
       try {
         const [[wallet]] = await _pool.query(
           'SELECT user_id FROM user_wallets WHERE wallet_address = ?',
-          [walletAddress]
+          [verifiedWallet]
         );
         if (wallet) {
           const raffleNftId = uuidv4();
@@ -205,7 +241,7 @@ router.post('/exchange', requireAuth, async (req, res) => {
             `INSERT INTO raffle_nfts
                (id, user_id, wallet_address, user_did_hash, status, source, expires_at)
              VALUES (?, ?, ?, ?, 'ISSUED', 'POINT_EXCHANGE', ?)`,
-            [raffleNftId, wallet.user_id, walletAddress, userDidHash, membershipService.addDays(new Date(), 60)]
+            [raffleNftId, wallet.user_id, verifiedWallet, userDidHash, membershipService.addDays(new Date(), 60)]
           );
           result.raffleNftId = raffleNftId;
           await notificationService.recordNotification(_pool, {
@@ -222,17 +258,14 @@ router.post('/exchange', requireAuth, async (req, res) => {
       }
     }
 
-    const verifiedWallet = await membershipService.getVerifiedWallet(_pool, req.user.user_id, walletAddress);
-    if (verifiedWallet) {
-      await membershipService.recordPointEvent(_pool, {
-        userId: req.user.user_id,
-        walletAddress: verifiedWallet,
-        eventType: itemType === 'RAFFLE_NFT' ? 'POINT_EXCHANGE_RAFFLE' : 'POINT_EXCHANGE_CARD',
-        reason: itemType === 'RAFFLE_NFT' ? '응모권 교환' : '실물 NFT 카드 교환',
-        amount: -Math.abs(Number(result.pointUsed || (itemType === 'RAFFLE_NFT' ? 1500 : 5000))),
-        metadata: { itemType, exchangeId: result.exchangeId, raffleNftId: result.raffleNftId || null },
-      });
-    }
+    await membershipService.recordPointEvent(_pool, {
+      userId: req.user.user_id,
+      walletAddress: verifiedWallet,
+      eventType: itemType === 'RAFFLE_NFT' ? 'POINT_EXCHANGE_RAFFLE' : 'POINT_EXCHANGE_CARD',
+      reason: itemType === 'RAFFLE_NFT' ? '응모권 교환' : '실물 NFT 카드 교환',
+      amount: -Math.abs(Number(result.pointUsed || (itemType === 'RAFFLE_NFT' ? 1500 : 5000))),
+      metadata: { itemType, exchangeId: result.exchangeId, raffleNftId: result.raffleNftId || null },
+    });
 
     res.json({ success: true, data: result });
   } catch (err) {

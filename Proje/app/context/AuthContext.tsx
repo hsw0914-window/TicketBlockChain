@@ -20,6 +20,16 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const AUTH_CHANGED_EVENT = 'base-chain-auth-changed';
+
+function notifyAuthChanged(user: AuthUser | null) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent(AUTH_CHANGED_EVENT, {
+      detail: { userId: user?.user_id ?? null, email: user?.email ?? null },
+    }),
+  );
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -36,9 +46,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((u) => {
         setUser(u);
         localStorage.setItem('nickname', u.nickname);
+        notifyAuthChanged(u);
       })
       .catch(() => {
         localStorage.removeItem('auth_token');
+        notifyAuthChanged(null);
       })
       .finally(() => setIsLoading(false));
   }, []);
@@ -48,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('auth_token', token);
     localStorage.setItem('nickname', u.nickname);
     setUser(u);
+    notifyAuthChanged(u);
   }, []);
 
   const register = useCallback(async (email: string, password: string, nickname: string) => {
@@ -55,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('auth_token', token);
     localStorage.setItem('nickname', u.nickname);
     setUser(u);
+    notifyAuthChanged(u);
   }, []);
 
   const googleLogin = useCallback(async (access_token: string) => {
@@ -62,12 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('auth_token', token);
     localStorage.setItem('nickname', u.nickname);
     setUser(u);
+    notifyAuthChanged(u);
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('nickname');
     setUser(null);
+    notifyAuthChanged(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(
