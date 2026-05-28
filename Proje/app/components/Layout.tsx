@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, Gift, QrCode } from "lucide-react";
+import { Ticket, Layers, ShoppingBag, Bell, Wallet, ChevronDown, Menu, X, Trophy, MessagesSquare, LogOut, User, Tag, Gift, QrCode, PackageCheck } from "lucide-react";
 import { FaBell } from "react-icons/fa";
 import { LuLogIn } from "react-icons/lu";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -16,6 +16,30 @@ interface NotificationItem {
   amount?: number | null;
   created_at: string;
   read_at?: string | null;
+}
+
+const TICKET_GAMES_CACHE_KEY = "basechain.ticketGames.cache.v1";
+const TICKET_GAMES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+
+function hasFreshTicketGamesCache() {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.sessionStorage.getItem(TICKET_GAMES_CACHE_KEY);
+    if (!raw) return false;
+    const cached = JSON.parse(raw) as { savedAt?: number; data?: unknown };
+    return Array.isArray(cached.data) && Boolean(cached.savedAt) && Date.now() - cached.savedAt <= TICKET_GAMES_CACHE_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function writeTicketGamesCache(data: unknown[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(TICKET_GAMES_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data }));
+  } catch {
+    // 세션 캐시 실패는 화면 전환을 막지 않는다.
+  }
 }
 
 export function Layout() {
@@ -34,6 +58,24 @@ export function Layout() {
   const { theme, walletConnected, walletAddress, connectWallet, disconnectWallet, isConnectingWallet } = useAppSettings();
   const { isLoggedIn, user, logout } = useAuth();
 
+  const prefetchTicketGames = () => {
+    if (hasFreshTicketGamesCache()) return;
+    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.success && Array.isArray(data.data)) {
+          writeTicketGamesCache(data.data);
+        }
+      })
+      .catch(() => {
+        // 예매 페이지 진입 시 자체 로딩/재시도 상태가 처리한다.
+      });
+  };
+
+  useEffect(() => {
+    const id = window.setTimeout(prefetchTicketGames, 350);
+    return () => window.clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -163,14 +205,14 @@ export function Layout() {
     { id: "raffle", label: "응모" },
     { id: "membership", label: "멤버십" },
     { id: "point", label: "포인트" },
-    { id: "box", label: "상자" },
+    { id: "box", label: "박스" },
   ];
   const notificationAccent = (category: NotificationItem["category"]) => {
     if (category === "TRADE") return { background: "#edf3ff", color: "#1456a0", label: "예매·거래" };
     if (category === "RAFFLE") return { background: "#f1efff", color: "#5b4bb7", label: "응모" };
     if (category === "MEMBERSHIP") return { background: "#eaf8f0", color: "#168557", label: "멤버십" };
     if (category === "POINT") return { background: "#edf7f5", color: "#0f766e", label: "포인트" };
-    if (category === "BOX") return { background: "#fff7ed", color: "#c05621", label: "상자" };
+    if (category === "BOX") return { background: "#fff7ed", color: "#c05621", label: "박스" };
     return { background: "#edf2f7", color: "#50647d", label: "알림" };
   };
 
@@ -180,6 +222,7 @@ export function Layout() {
     { path: "/combine",       label: "카드 조합",    icon: Layers },
     { path: "/ticket-resale", label: "티켓 양도",    icon: Tag },
     { path: "/market",        label: "파편 장터",    icon: ShoppingBag },
+    { path: "/physical-exchange", label: "실물 교환", icon: PackageCheck },
     { path: "/exchange",      label: "교환소",       icon: Gift },
     { path: "/raffle",        label: "응모&선예매",    icon: Trophy },
     { path: "/community",     label: "커뮤니티",     icon: MessagesSquare },
@@ -243,6 +286,8 @@ export function Layout() {
                 <Link
                   key={item.path}
                   to={item.path}
+                  onMouseEnter={item.path === "/tickets" ? prefetchTicketGames : undefined}
+                  onFocus={item.path === "/tickets" ? prefetchTicketGames : undefined}
                   className="relative whitespace-nowrap px-2.5 xl:px-3 py-2.5 rounded-xl text-[0.9rem] xl:text-[0.95rem] font-semibold transition-all duration-200 group"
                   style={{
                     color: active ? (theme === "dark" ? "#e2edf6" : "#223750") : textColor,
@@ -448,7 +493,13 @@ export function Layout() {
               const Icon = item.icon;
               const active = isActive(item.path);
               return (
-                <Link key={item.path} to={item.path} onClick={() => setMobileOpen(false)}
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => {
+                    if (item.path === "/tickets") prefetchTicketGames();
+                    setMobileOpen(false);
+                  }}
                   className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium"
                   style={{
                     background: active ? activeBackground : "transparent",

@@ -32,6 +32,7 @@ const raffleRoute       = require('./routes/raffleRoutes');
 const exchangeRoute     = require('./routes/exchange');
 const notificationRoute = require('./routes/notificationRoutes');
 const mockFabric        = require('./services/fabricBridge');
+const { ensureRuntimeSchema } = require('./services/schemaGuardService');
 
 const app = express();
 const configuredFrontendOrigins = (process.env.FRONTEND_ORIGINS || '')
@@ -72,26 +73,31 @@ async function start() {
   await initDB();
 
   pool = mysql.createPool({ ...DB_CONFIG, database: DB_NAME });
+  await ensureRuntimeSchema(pool);
 
-  // 테스트 계정 Fabric 포인트/멤버십 사전 세팅 (DB 실제 지갑 주소 기준)
+  // 테스트/시연 계정 Fabric 포인트/멤버십 사전 세팅 (DB 실제 지갑 주소 기준)
   const seedWallets = ['0x15f7cc396e4C66296cE92225830e24f491941Fc2'];
   try {
-    const [[row]] = await pool.query(
-      "SELECT wallet_address FROM user_wallets WHERE user_id = 'test_user'"
+    const [rows] = await pool.query(
+      `SELECT wallet_address
+         FROM user_wallets
+        WHERE user_id IN ('test_user', 'practice_admin')`
     );
-    if (row?.wallet_address && !seedWallets.includes(row.wallet_address)) {
-      seedWallets.push(row.wallet_address);
+    for (const row of rows) {
+      if (row?.wallet_address && !seedWallets.includes(row.wallet_address)) {
+        seedWallets.push(row.wallet_address);
+      }
     }
   } catch (_) {}
   for (const walletAddress of seedWallets) {
     await mockFabric.seedUser({
       walletAddress,
-      pointBalance: 10000,
-      totalEarned: 10000,
+      pointBalance: walletAddress.toLowerCase() === '0x9999999999999999999999999999999999999999' ? 990000 : 10000,
+      totalEarned: walletAddress.toLowerCase() === '0x9999999999999999999999999999999999999999' ? 990000 : 10000,
       totalUsed: 0,
-      entryCount: 7,
+      entryCount: walletAddress.toLowerCase() === '0x9999999999999999999999999999999999999999' ? 99 : 7,
       joined: true,
-      grade: 'SILVER',
+      grade: walletAddress.toLowerCase() === '0x9999999999999999999999999999999999999999' ? 'GOLD' : 'SILVER',
     });
   }
   console.log(`[Seed] 포인트 시드 완료: ${seedWallets.join(', ')}`);

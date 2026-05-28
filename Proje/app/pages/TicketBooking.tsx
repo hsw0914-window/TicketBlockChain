@@ -1516,14 +1516,17 @@ export function TicketBooking() {
                     value={pointInput}
                     onChange={(e) => { setPointInput(e.target.value); setPointError(null); }}
                     placeholder="사용할 포인트 (최소 1,000P)"
-                    className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
+                    className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
                     style={{ borderColor: pointError ? "#f87171" : "#d0d8e4", color: "#14253f" }}
                   />
                   <button
                     onClick={applyPoint}
                     disabled={!pointInput || !walletAddress}
-                    className="rounded-xl px-4 py-2 text-sm font-bold text-white"
-                    style={{ background: pointInput && walletAddress ? "#1456a0" : "#94a3b8" }}
+                    className="min-h-11 min-w-[62px] shrink-0 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-bold leading-none text-white"
+                    style={{
+                      background: pointInput && walletAddress ? "#1456a0" : "#94a3b8",
+                      wordBreak: "keep-all",
+                    }}
                   >
                     적용
                   </button>

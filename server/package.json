@@ -4,7 +4,12 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "backfill:resale-points": "node scripts/backfillTicketResalePoints.js",
+    "seed:practice-admin": "node scripts/seedPracticeAdmin.js",
+    "grant:admin-demo-points": "node scripts/grantAdminDemoPoints.js",
+    "grant:demo-inventory": "node scripts/grantDemoInventoryToActiveUsers.js",
+    "seed:presentation-demo-users": "node scripts/seedPresentationDemoUsers.js"
   },
   "dependencies": {
     "axios": "^1.16.1",

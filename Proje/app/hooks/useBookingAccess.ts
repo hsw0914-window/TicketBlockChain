@@ -30,7 +30,7 @@ export const ACCESS_MESSAGES: Record<Exclude<AccessStatus, "checking" | "ok">, {
 };
 
 export function useBookingAccess(): AccessStatus {
-  const { isLoggedIn, isLoading } = useAuth();
+  const { user, isLoggedIn, isLoading } = useAuth();
   const { walletConnected } = useAppSettings();
   const [status, setStatus] = useState<AccessStatus>("checking");
 
@@ -39,6 +39,11 @@ export function useBookingAccess(): AccessStatus {
 
     if (!isLoggedIn) {
       setStatus("need_login");
+      return;
+    }
+
+    if (user?.role === "admin") {
+      setStatus("ok");
       return;
     }
 
@@ -52,7 +57,7 @@ export function useBookingAccess(): AccessStatus {
         setStatus(s.did_status === "verified" ? "ok" : "need_did");
       })
       .catch(() => setStatus("need_did"));
-  }, [isLoggedIn, isLoading, walletConnected]);
+  }, [isLoggedIn, isLoading, user?.email, user?.role, walletConnected]);
 
   return status;
 }

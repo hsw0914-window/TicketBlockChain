@@ -158,7 +158,7 @@ export function TicketResaleSuccess() {
           <Button
             variant="outline"
             className="rounded-2xl border-[#d5dde6] bg-white text-[#53667d]"
-            onClick={() => navigate("/market")}
+            onClick={() => navigate("/ticket-resale")}
           >
             거래소로
           </Button>

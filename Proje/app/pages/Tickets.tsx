@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Calendar,
@@ -47,6 +47,44 @@ const statusFilterLabels: Record<StatusFilter, string> = {
   priority: "응모",
   ended: "마감",
 };
+
+const TICKET_GAMES_CACHE_KEY = "basechain.ticketGames.cache.v1";
+const TICKET_GAMES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+
+function readCachedGames(): ApiTicketGame[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.sessionStorage.getItem(TICKET_GAMES_CACHE_KEY);
+    if (!raw) return [];
+    const cached = JSON.parse(raw) as { savedAt?: number; data?: ApiTicketGame[] };
+    if (!Array.isArray(cached.data)) return [];
+    if (!cached.savedAt || Date.now() - cached.savedAt > TICKET_GAMES_CACHE_MAX_AGE_MS) return [];
+    return cached.data;
+  } catch {
+    return [];
+  }
+}
+
+function hasFreshCachedGames() {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.sessionStorage.getItem(TICKET_GAMES_CACHE_KEY);
+    if (!raw) return false;
+    const cached = JSON.parse(raw) as { savedAt?: number; data?: ApiTicketGame[] };
+    return Array.isArray(cached.data) && Boolean(cached.savedAt) && Date.now() - cached.savedAt <= TICKET_GAMES_CACHE_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function writeCachedGames(data: ApiTicketGame[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(TICKET_GAMES_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data }));
+  } catch {
+    // 세션 캐시 실패는 화면 표시를 막지 않는다.
+  }
+}
 
 function formatPrice(value?: number) {
   if (value == null) return null;
@@ -194,7 +232,9 @@ function remainingRate(event: ApiTicketGame) {
 }
 
 export function Tickets() {
-  const [events, setEvents] = useState<ApiTicketGame[]>([]);
+  const [events, setEvents] = useState<ApiTicketGame[]>(() => readCachedGames());
+  const [loadingEvents, setLoadingEvents] = useState(() => readCachedGames().length === 0);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [teamFilter, setTeamFilter] = useState("");
@@ -209,14 +249,35 @@ export function Tickets() {
   const navigate = useNavigate();
   const accessStatus = useBookingAccess();
 
-  useEffect(() => {
+  const fetchGames = useCallback(() => {
+    setLoadingEvents((current) => current);
+    setEventsError(null);
     fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) setEvents(data.data ?? []);
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
       })
-      .catch((err) => console.error("경기 목록 조회 실패:", err));
+      .then((data) => {
+        if (!data.success) throw new Error(data.error ?? "경기 목록 조회 실패");
+        const nextEvents = Array.isArray(data.data) ? data.data : [];
+        setEvents(nextEvents);
+        writeCachedGames(nextEvents);
+      })
+      .catch((err) => {
+        console.error("경기 목록 조회 실패:", err);
+        setEventsError("경기 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+        setEvents([]);
+      })
+      .finally(() => setLoadingEvents(false));
   }, []);
+
+  useEffect(() => {
+    if (hasFreshCachedGames()) {
+      setLoadingEvents(false);
+      return;
+    }
+    fetchGames();
+  }, [fetchGames]);
 
   useEffect(() => {
     const hasSoonUpcoming = events.some((event) => {
@@ -575,7 +636,23 @@ export function Tickets() {
         </div>
       </section>
 
-      {statusFilter === "all" ? (
+      {loadingEvents && (
+        <section className="mt-8 rounded-[20px] border border-dashed px-6 py-12 text-center" style={{ background: "#FAFBFD", borderColor: "#CBD5E1" }}>
+          <p className="text-[1rem] font-black" style={{ color: "#14253F" }}>경기 목록을 불러오는 중입니다.</p>
+          <p className="mt-2 text-[0.9rem]" style={{ color: "#64748B" }}>잠시만 기다려주세요.</p>
+        </section>
+      )}
+
+      {!loadingEvents && eventsError && (
+        <section className="mt-8 rounded-[20px] border border-dashed px-6 py-12 text-center" style={{ background: "#FFF7ED", borderColor: "#FED7AA" }}>
+          <p className="text-[1rem] font-black" style={{ color: "#9A3412" }}>{eventsError}</p>
+          <Button variant="outline" className="mt-5 rounded-[12px]" onClick={fetchGames}>
+            다시 불러오기
+          </Button>
+        </section>
+      )}
+
+      {!loadingEvents && !eventsError && (statusFilter === "all" ? (
         <>
           {renderGroup("open", "🟢 예매 가능", groupedEvents.open)}
           {renderGroup("upcoming", "🟠 오픈 예정", groupedEvents.upcoming, { tone: "#EA580C" })}
@@ -602,9 +679,9 @@ export function Tickets() {
             응모&선예매로 이동
           </Button>
         </section>
-      )}
+      ))}
 
-      {noResult && statusFilter !== "priority" && (
+      {!loadingEvents && !eventsError && noResult && statusFilter !== "priority" && (
         <section className="mt-8 rounded-[20px] border border-dashed px-6 py-12 text-center" style={{ background: "#FAFBFD", borderColor: "#CBD5E1" }}>
           <p className="text-[1rem] font-black" style={{ color: "#14253F" }}>
             현재 조건에 해당하는 경기가 없어요.

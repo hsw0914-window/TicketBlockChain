@@ -97,7 +97,8 @@ export function TicketBookingSuccess() {
     const token = localStorage.getItem("auth_token") ?? "";
 
     // 서버에 결제 승인 + NFT 민팅 요청
-    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/toss/confirm`, {
+    const apiBase = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
+    fetch(`${apiBase}/api/tickets/toss/confirm`, {
       method: "POST",
       headers: {
         "Content-Type":  "application/json",

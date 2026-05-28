@@ -11,8 +11,26 @@ let _pool;
 function setPool(pool) { _pool = pool; }
 
 const TIER_MAX_TICKETS = { '베이직': 1, '브론즈': 1, '실버': 2, '골드': 2 };
-const RAFFLE_APPLY_WINDOW_MS = 2 * 60 * 60 * 1000;
+const RAFFLE_APPLY_WINDOW_MS = Math.max(1, Number(process.env.RAFFLE_APPLY_WINDOW_HOURS || 24)) * 60 * 60 * 1000;
 const RAFFLE_RESULT_DELAY_MS = Math.max(1, Number(process.env.RAFFLE_RESULT_DELAY_SECONDS || 10)) * 1000;
+const DEFAULT_DEMO_ALWAYS_OPEN_GAME_IDS = ['PRESENTATION_RAFFLE_ALWAYS_ON'];
+const DEFAULT_PRIORITY_WINNER_CAP = 10; // T1/T2 각 5좌석
+
+function priorityWinnerCap() {
+  const value = Number(process.env.PRIORITY_RAFFLE_WINNER_CAP || DEFAULT_PRIORITY_WINNER_CAP);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_PRIORITY_WINNER_CAP;
+}
+
+function getDemoAlwaysOpenGameIds() {
+  return String(process.env.RAFFLE_DEMO_ALWAYS_OPEN_GAME_IDS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function isDemoAlwaysOpenGame(gameId) {
+  return new Set([...DEFAULT_DEMO_ALWAYS_OPEN_GAME_IDS, ...getDemoAlwaysOpenGameIds()]).has(gameId);
+}
 
 function raffleApplyCloseAt(openAt) {
   if (!openAt) return null;
@@ -37,7 +55,10 @@ function parseJsonArray(value) {
 
 async function ensureDraw(conn, gameId) {
   const [[existing]] = await conn.query(
-    'SELECT * FROM draws WHERE game_id = ? ORDER BY created_at DESC LIMIT 1',
+    `SELECT * FROM draws
+      WHERE game_id = ? AND status <> 'COMPLETED'
+      ORDER BY created_at DESC
+      LIMIT 1`,
     [gameId],
   );
   if (existing) {
@@ -50,7 +71,7 @@ async function ensureDraw(conn, gameId) {
     [gameId],
   );
   const drawId = uuidv4();
-  const winnerCount = Number(game?.raffle_winners_count ?? 5);
+  const winnerCount = Math.min(Number(game?.raffle_winners_count ?? 5), priorityWinnerCap());
   await conn.query(
     `INSERT INTO draws (id, game_id, status, winner_count, total_entries)
      VALUES (?, ?, 'PENDING', ?, 0)`,
@@ -65,27 +86,44 @@ async function ensureDraw(conn, gameId) {
   return { id: drawId, game_id: gameId, status: 'PENDING', winner_count: winnerCount, total_entries: 0 };
 }
 
+async function enterDrawWithRecoveredRaffleNft({ raffleNftId, userDidHash, drawId, gameId }) {
+  try {
+    return await fabricService.enterDraw({ raffleNftId, userDidHash, drawId });
+  } catch (err) {
+    if (!String(err.message || '').includes('RAFFLE_NFT_NOT_FOUND')) throw err;
+    await fabricService.registerRaffleNFT({ raffleNftId, userDidHash, gameId });
+    return fabricService.enterDraw({ raffleNftId, userDidHash, drawId });
+  }
+}
+
+async function recoverDrawEntriesOnFabric(conn, { drawId, gameId, entryIds }) {
+  if (!entryIds.length) return;
+  const placeholders = entryIds.map(() => '?').join(',');
+  const [nfts] = await conn.query(
+    `SELECT id, user_did_hash
+       FROM raffle_nfts
+      WHERE id IN (${placeholders})`,
+    entryIds,
+  );
+  for (const nft of nfts) {
+    try {
+      await fabricService.registerRaffleNFT({ raffleNftId: nft.id, userDidHash: nft.user_did_hash, gameId });
+    } catch (err) {
+      if (!String(err.message || '').includes('RAFFLE_NFT_ALREADY_EXISTS')) throw err;
+    }
+    try {
+      await fabricService.enterDraw({ raffleNftId: nft.id, userDidHash: nft.user_did_hash, drawId });
+    } catch (err) {
+      if (!String(err.message || '').includes('RAFFLE_NFT_ALREADY_USED')) throw err;
+    }
+  }
+}
+
 async function runRaffleDraw(gameId) {
   const conn = await _pool.getConnection();
   try {
     console.log(`[raffle] 자동 추첨 확인 시작: game=${gameId}`);
     await conn.beginTransaction();
-    const [[draw]] = await conn.query(
-      `SELECT d.*, g.raffle_winners_count
-         FROM draws d
-         JOIN games g ON g.id = d.game_id
-        WHERE d.game_id = ?
-        ORDER BY d.created_at DESC
-        LIMIT 1
-        FOR UPDATE`,
-      [gameId],
-    );
-    if (!draw || draw.status === 'COMPLETED') {
-      await conn.commit();
-      console.log(`[raffle] 자동 추첨 스킵: game=${gameId}, reason=${!draw ? 'draw 없음' : '이미 완료'}`);
-      return;
-    }
-
     const [entries] = await conn.query(
       `SELECT * FROM game_raffle_entries
         WHERE game_id = ? AND status = 'applied'
@@ -97,6 +135,21 @@ async function runRaffleDraw(gameId) {
       await conn.commit();
       console.log(`[raffle] 자동 추첨 완료: game=${gameId}, draw=${draw.id}, 응모자 없음`);
       return;
+    }
+
+    let [[draw]] = await conn.query(
+      `SELECT d.*, g.raffle_winners_count
+         FROM draws d
+         JOIN games g ON g.id = d.game_id
+        WHERE d.game_id = ? AND d.status <> 'COMPLETED'
+        ORDER BY d.created_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [gameId],
+    );
+    if (!draw) {
+      draw = await ensureDraw(conn, gameId);
+      console.log(`[raffle] 완료된 추첨 이후 새 응모 감지: game=${gameId}, draw=${draw.id}`);
     }
 
     const entryNfts = entries.map((entry) => ({
@@ -117,6 +170,7 @@ async function runRaffleDraw(gameId) {
     } catch (err) {
       if (err.message && err.message.includes('DRAW_NOT_FOUND')) {
         await fabricService.createDraw({ drawId: draw.id, gameId, winnerCount: draw.winner_count });
+        await recoverDrawEntriesOnFabric(conn, { drawId: draw.id, gameId, entryIds });
         console.log(`[raffle] 체인코드 추첨 재생성 후 실행: game=${gameId}, draw=${draw.id}`);
         const fabricResult = await fabricService.executeDraw({ drawId: draw.id, entryIds });
         winnerIds = Array.isArray(fabricResult?.winners) ? fabricResult.winners : [];
@@ -124,6 +178,7 @@ async function runRaffleDraw(gameId) {
         throw err;
       }
     }
+    winnerIds = winnerIds.slice(0, priorityWinnerCap());
 
     const winnerSet = new Set(winnerIds);
     const resultNotifications = [];
@@ -348,7 +403,7 @@ router.post('/enter', requireAuth, async (req, res) => {
     );
 
     const userDidHash = fabricService.hashDid(walletAddress);
-    await fabricService.enterDraw({ raffleNftId, userDidHash, drawId });
+    await enterDrawWithRecoveredRaffleNft({ raffleNftId, userDidHash, drawId, gameId: draw.game_id });
 
     await conn.query(
       `INSERT INTO fabric_events (id, event_name, user_did_hash, payload_json)
@@ -513,24 +568,27 @@ router.post('/apply', requireAuth, async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ error: '경기를 찾을 수 없습니다.' });
     }
-    if (!game.raffle_open_at) {
+    const isDemoAlwaysOpen = isDemoAlwaysOpenGame(game.id);
+    if (!game.raffle_open_at && !isDemoAlwaysOpen) {
       await conn.rollback();
       return res.status(400).json({ error: '이 경기는 응모가 지원되지 않습니다.' });
     }
 
-    const openAt = new Date(game.raffle_open_at);
-    const closeAt = raffleApplyCloseAt(game.raffle_open_at);
+    const openAt = game.raffle_open_at ? new Date(game.raffle_open_at) : new Date(0);
+    const closeAt = isDemoAlwaysOpen ? null : raffleApplyCloseAt(game.raffle_open_at);
     const now = new Date();
-    if (now < openAt) {
+    if (!isDemoAlwaysOpen && now < openAt) {
       await conn.rollback();
       return res.status(400).json({ error: '아직 응모 시간이 아닙니다.' });
     }
-    if (closeAt && now >= closeAt) {
+    if (!isDemoAlwaysOpen && closeAt && now >= closeAt) {
       await conn.rollback();
       return res.status(400).json({ error: '응모 시간이 마감되었습니다.' });
     }
 
-    const membership = await membershipService.getUserMembership(conn, userId);
+    const membership = req.user?.role === 'admin'
+      ? { joined: true, tier: '골드' }
+      : await membershipService.getUserMembership(conn, userId);
     if (!membership.joined) {
       await conn.rollback();
       return res.status(400).json({ error: '멤버십 가입 후 응모할 수 있습니다.' });
@@ -543,13 +601,24 @@ router.post('/apply', requireAuth, async (req, res) => {
     }
 
     const [[existing]] = await conn.query(
-      `SELECT id FROM game_raffle_entries WHERE user_id = ? AND game_id = ?`,
+      `SELECT id, status FROM game_raffle_entries
+        WHERE user_id = ? AND game_id = ? AND status <> 'lost'
+        ORDER BY applied_at DESC
+        LIMIT 1`,
       [userId, gameId],
     );
     if (existing) {
       await conn.rollback();
       return res.status(400).json({ error: '이미 응모한 경기입니다.' });
     }
+    const [[retryableLost]] = await conn.query(
+      `SELECT id FROM game_raffle_entries
+        WHERE user_id = ? AND game_id = ? AND status = 'lost'
+        ORDER BY applied_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [userId, gameId],
+    );
 
     const [[wallet]] = await conn.query(
       `SELECT wallet_address FROM user_wallets WHERE user_id = ?`,
@@ -586,21 +655,35 @@ router.post('/apply', requireAuth, async (req, res) => {
         WHERE id IN (${placeholders})`,
       [draw.id, gameId, ...nftIds],
     );
-    await conn.query(
-      `INSERT INTO game_raffle_entries (user_id, game_id, tickets_used, raffle_nft_ids, status)
-       VALUES (?, ?, ?, ?, 'applied')`,
-      [userId, gameId, ticketsUsed, JSON.stringify(nftIds)],
-    );
+    if (retryableLost) {
+      await conn.query(
+        `UPDATE game_raffle_entries
+            SET tickets_used = ?,
+                raffle_nft_ids = ?,
+                status = 'applied',
+                applied_at = NOW(),
+                used_at = NULL
+          WHERE id = ?`,
+        [ticketsUsed, JSON.stringify(nftIds), retryableLost.id],
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO game_raffle_entries (user_id, game_id, tickets_used, raffle_nft_ids, status)
+         VALUES (?, ?, ?, ?, 'applied')`,
+        [userId, gameId, ticketsUsed, JSON.stringify(nftIds)],
+      );
+    }
     await conn.query(
       `UPDATE draws SET total_entries = total_entries + ? WHERE id = ?`,
       [ticketsUsed, draw.id],
     );
 
     for (const nft of nfts) {
-      await fabricService.enterDraw({
+      await enterDrawWithRecoveredRaffleNft({
         raffleNftId: nft.id,
         userDidHash: nft.user_did_hash || fabricService.hashDid(wallet.wallet_address),
         drawId: draw.id,
+        gameId,
       });
       console.log(`[raffle] 체인코드 응모 참여 완료: nft=${nft.id}, draw=${draw.id}`);
     }
@@ -661,9 +744,10 @@ router.get('/my-entries', requireAuth, async (req, res) => {
       await runRaffleDraw(gameId);
     }
     const [finalRows] = gamesToDraw.size > 0 ? await fetchEntries() : [rows];
+    const visibleNow = new Date();
     const data = finalRows.map((row) => {
       const closeAt = raffleResultAt(row.applied_at);
-      const resultVisible = closeAt ? now >= closeAt : true;
+      const resultVisible = closeAt ? visibleNow >= closeAt : true;
       return {
         ...row,
         status: resultVisible ? row.status : 'applied',

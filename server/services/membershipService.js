@@ -35,6 +35,10 @@ function toFabricTier(tier) {
   return FABRIC_TIER[normalizeTier(tier) || '베이직'];
 }
 
+function fromFabricTier(grade) {
+  return normalizeTier(grade);
+}
+
 function formatMonth(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -77,6 +81,23 @@ async function getSeasonCount(pool, userId) {
   return Number(row?.season_count ?? 0);
 }
 
+async function getPointBalanceFromEvents(pool, userId) {
+  const [[row]] = await pool.query(
+    `SELECT
+       COALESCE(SUM(amount), 0) AS balance,
+       COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS totalEarned,
+       COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) AS totalUsed
+     FROM point_events
+     WHERE user_id = ?`,
+    [userId],
+  );
+  return {
+    balance: Number(row?.balance ?? 0),
+    totalEarned: Number(row?.totalEarned ?? 0),
+    totalUsed: Number(row?.totalUsed ?? 0),
+  };
+}
+
 function nextTierOf(tier) {
   const idx = TIER_ORDER.indexOf(normalizeTier(tier) || '베이직');
   return idx >= 0 && idx < TIER_ORDER.length - 1 ? TIER_ORDER[idx + 1] : null;
@@ -115,6 +136,60 @@ async function getMembershipSummary(pool, userId) {
     rewards: TIER_REWARDS,
     tierRequirements: TIER_REQUIREMENTS,
     tierMonthlyRaffles: TIER_MONTHLY_RAFFLES,
+  };
+}
+
+function applyFabricMembershipToSummary(summary, fabricMembership) {
+  if (!summary || !fabricMembership?.joined) return summary;
+  const currentTier = fromFabricTier(fabricMembership.grade || fabricMembership.tier) || summary.currentTier || '베이직';
+  const seasonCount = Number(fabricMembership.entryCount ?? summary.season_count ?? 0);
+  const nextTier = nextTierOf(currentTier);
+  const nextTierCount = nextTier ? TIER_REQUIREMENTS[nextTier] : null;
+  const monthlyClaimed = Number(summary.monthlyRaffleClaimed ?? 0);
+  const monthlyLimit = TIER_MONTHLY_RAFFLES[currentTier] || 0;
+
+  return {
+    ...summary,
+    joined: true,
+    currentTier,
+    season_count: seasonCount,
+    nextTier,
+    nextTierCount,
+    canTierUp: Boolean(nextTier && seasonCount >= TIER_REQUIREMENTS[nextTier]),
+    earnRate: TIER_EARN_RATES[currentTier] || 0,
+    monthlyRaffleLimit: monthlyLimit,
+    monthlyRaffleClaimed: monthlyClaimed,
+    monthlyRaffleRemaining: Math.max(0, monthlyLimit - monthlyClaimed),
+  };
+}
+
+async function syncFabricUserFromDb({ pool, fabricService, userId, walletAddress }) {
+  if (!pool || !fabricService || !userId || !walletAddress || typeof fabricService.seedUser !== 'function') {
+    return null;
+  }
+  const point = await getPointBalanceFromEvents(pool, userId);
+  const membership = await getUserMembership(pool, userId);
+  const seasonCount = await getSeasonCount(pool, userId);
+  const grade = toFabricTier(membership.tier || '베이직');
+  const seedResult = await fabricService.seedUser({
+    walletAddress,
+    pointBalance: point.balance,
+    totalEarned: point.totalEarned,
+    totalUsed: point.totalUsed,
+    entryCount: seasonCount,
+    joined: membership.joined,
+    grade,
+  });
+  return {
+    seedResult,
+    userDidHash: fabricService.hashDid(walletAddress),
+    point,
+    membership: {
+      joined: membership.joined,
+      grade,
+      tier: membership.tier,
+      entryCount: seasonCount,
+    },
   };
 }
 
@@ -222,13 +297,17 @@ module.exports = {
   TIER_REWARDS,
   normalizeTier,
   toFabricTier,
+  fromFabricTier,
   formatMonth,
   addDays,
   nextMonthEnd,
   getUserMembership,
   isMembershipActive,
   getSeasonCount,
+  getPointBalanceFromEvents,
   getMembershipSummary,
+  applyFabricMembershipToSummary,
+  syncFabricUserFromDb,
   getVerifiedWallet,
   issueRaffleNfts,
   issueRewardCards,

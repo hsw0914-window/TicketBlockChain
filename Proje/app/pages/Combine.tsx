@@ -18,6 +18,10 @@ import { useAppSettings } from "../context/AppSettingsContext";
 
 // ─── API 설정 ────────────────────────────────────────────────
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+const RANDOM_BOX_IMAGE = "/box/random-box.png";
+const BOX_OPENING_VIDEO = "/box/box-opening.mp4?v=20260523-0021";
+const BOX_REWARD_REVEAL_REMAINING_SECONDS = 2.35;
+const BOX_RESULT_MODAL_DELAY_MS = 1100;
 
 function apiUrl(path: string) {
   return `${API_BASE_URL}${path}`;
@@ -121,7 +125,11 @@ export function Combine() {
   const [activeTab, setActiveTab] = useState("fragments");
   const [viewMode, setViewMode] = useState<ViewMode>("combine");
   const [opening, setOpening] = useState(false);
+  const [openingPreparing, setOpeningPreparing] = useState(false);
   const [openResult, setOpenResult] = useState<RewardResult | null>(null);
+  const [pendingOpenResult, setPendingOpenResult] = useState<RewardResult | null>(null);
+  const [boxVideoFinished, setBoxVideoFinished] = useState(false);
+  const [boxRewardVisible, setBoxRewardVisible] = useState(false);
 
   // ── 인벤토리 로드 ─────────────────────────────────────────
   useEffect(() => {
@@ -154,6 +162,24 @@ export function Combine() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const video = document.createElement("video");
+    video.src = BOX_OPENING_VIDEO;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.load();
+  }, []);
+
+  useEffect(() => {
+    if (!opening || !pendingOpenResult || !boxVideoFinished) return;
+
+    setOpenResult(pendingOpenResult);
+    setPendingOpenResult(null);
+    setBoxVideoFinished(false);
+    setOpening(false);
+  }, [boxVideoFinished, opening, pendingOpenResult]);
 
   // ── 테마
   const shellTone = isDark
@@ -282,43 +308,48 @@ export function Combine() {
 
   // ─── 박스 열기 API 호출 ──────────────────────────────────
   const handleOpenBox = async () => {
-    if (!canOpen) return;
-    setOpening(true);
+    if (!canOpen || opening || openingPreparing) return;
+    setOpeningPreparing(true);
+    setOpenResult(null);
+    setPendingOpenResult(null);
+    setBoxVideoFinished(false);
+    setBoxRewardVisible(false);
     try {
-      // 애니메이션(1.6s)과 API 호출을 병렬 실행 → 둘 다 끝나면 결과 표시
-      const [, data] = await Promise.all([
-        new Promise<void>(resolve => setTimeout(resolve, 1600)),
-        fetch(apiUrl("/api/box/open"), {
-          method: "POST",
-          headers: API_HEADERS(walletAddress),
-        }).then(res => parseApiResponse<{
-          remainingBoxCount: number;
-          updatedInventory: { fragments: InventoryFragment[]; cards: InventoryCard[] };
-          reward: RewardResult & { txHash?: string | null; onChain?: boolean | "pending" };
-        }>(res)),
-      ]);
+      const data = await fetch(apiUrl("/api/box/open"), {
+        method: "POST",
+        headers: API_HEADERS(walletAddress),
+      }).then(res => parseApiResponse<{
+        remainingBoxCount: number;
+        updatedInventory: { fragments: InventoryFragment[]; cards: InventoryCard[] };
+        reward: RewardResult & { txHash?: string | null; onChain?: boolean | "pending" };
+      }>(res));
 
       setSeasonBoxCount(data.remainingBoxCount);
       setFragmentInventory(data.updatedInventory.fragments);
       setCardInventory(data.updatedInventory.cards);
-      setOpenResult({
+      const nextReward = {
         ...data.reward,
         txHash: data.reward.txHash ?? null,
         onChain: data.reward.onChain,
-      });
+      };
+      setPendingOpenResult(nextReward);
       if (data.reward.type === "fragment") setActiveTab("fragments");
       else setActiveTab("nfts");
+      setOpening(true);
     } catch (err) {
       alert(err instanceof Error ? err.message : "박스 열기 중 오류가 발생했습니다.");
-    } finally {
       setOpening(false);
+      setPendingOpenResult(null);
+      setBoxVideoFinished(false);
+      setBoxRewardVisible(false);
+    } finally {
+      setOpeningPreparing(false);
     }
   };
 
   const handleCloseResult = () => setResult(null);
   const handleCloseOpenResult = () => {
     setOpenResult(null);
-    setViewMode("combine");
   };
 
   // ─── 로딩 / 에러 ─────────────────────────────────────────
@@ -574,8 +605,8 @@ export function Combine() {
                       </p>
                     </div>
                     <div className="rounded-[22px] p-5 flex items-center gap-5" style={shellTone.surface}>
-                      <div className="w-24 h-24 rounded-[20px] flex items-center justify-center" style={shellTone.panelSoft}>
-                        <Package className="w-12 h-12" style={{ color: "#d39a49" }} />
+                      <div className="w-24 h-24 rounded-[20px] flex items-center justify-center overflow-hidden" style={shellTone.panelSoft}>
+                        <img src={RANDOM_BOX_IMAGE} alt="랜덤 박스" className="h-full w-full object-cover" />
                       </div>
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
@@ -619,13 +650,13 @@ export function Combine() {
 
                 <Button
                   onClick={handleOpenBox}
-                  disabled={!canOpen || opening}
+                  disabled={!canOpen || opening || openingPreparing}
                   size="lg"
                   className="mt-6 w-full font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ background: shellTone.accentStrong, color: "#ffffff" }}
                 >
                   <Package className="w-5 h-5 mr-2" />
-                  {opening ? "박스 여는 중..." : "랜덤 박스 열기"}
+                  {openingPreparing ? "보상 확인 중..." : opening ? "박스 여는 중..." : "랜덤 박스 열기"}
                 </Button>
               </Card>
             </>
@@ -641,7 +672,7 @@ export function Combine() {
                     <h3 className="mb-2 font-semibold" style={{ color: shellTone.text }}>조합 시스템 안내</h3>
                     <ul className="space-y-1 text-sm" style={{ color: shellTone.muted }}>
                       <li>• 같은 종류의 파편 2개를 조합해야 원본 굿즈 1개를 만들 수 있습니다.</li>
-                      <li>• 부족한 파편은 상자 개봉이나 장터에서 구매 후 획득할 수 있습니다.</li>
+                      <li>• 부족한 파편은 박스 개봉이나 장터에서 구매 후 획득할 수 있습니다.</li>
                       <li>• 완성된 원본 굿즈 카드는 실물 굿즈 교환에 사용할 수 있습니다.</li>
                     </ul>
                   </div>
@@ -734,7 +765,7 @@ export function Combine() {
                         같은 파편 2개를 아직 고르지 않았어요
                       </p>
                       <p className="mt-2 text-[0.78rem] leading-6" style={{ color: shellTone.muted }}>
-                        파편이 1개뿐이라면 상자 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후, 완성할 수 있습니다.
+                        파편이 1개뿐이라면 박스 개봉을 시도하거나 장터에서 같은 파편을 구매하여 같은 파편을 획득 후, 완성할 수 있습니다.
                       </p>
                     </div>
                   )}
@@ -835,14 +866,81 @@ export function Combine() {
 
         {opening && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center">
-            <div className="relative">
-              <motion.div animate={{ rotateY: [0, 360], scale: [1, 1.18, 1] }} transition={{ duration: 1.6, repeat: Infinity }}>
-                <div className="text-9xl">📦</div>
-              </motion.div>
-              <motion.div className="absolute inset-0 flex items-center justify-center" animate={{ scale: [0.8, 1.2, 0.8], opacity: [0.4, 1, 0.4] }} transition={{ duration: 1.2, repeat: Infinity }}>
-                <Sparkles className="w-24 h-24" style={{ color: "#e1b86e" }} />
-              </motion.div>
-            </div>
+            <motion.div initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="relative w-[min(82vw,520px)] overflow-hidden rounded-[28px] border border-white/12 bg-black shadow-[0_32px_90px_rgba(0,0,0,0.45)]">
+              <video
+                key={BOX_OPENING_VIDEO}
+                src={BOX_OPENING_VIDEO}
+                poster={RANDOM_BOX_IMAGE}
+                autoPlay
+                muted
+                playsInline
+                preload="auto"
+                onLoadedMetadata={(event) => {
+                  event.currentTarget.currentTime = 0;
+                  setBoxRewardVisible(false);
+                }}
+                onCanPlay={(event) => {
+                  void event.currentTarget.play().catch(() => {});
+                }}
+                onTimeUpdate={(event) => {
+                  const video = event.currentTarget;
+                  if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+                  if (video.currentTime >= video.duration - BOX_REWARD_REVEAL_REMAINING_SECONDS) {
+                    setBoxRewardVisible(true);
+                  }
+                }}
+                onEnded={() => {
+                  setBoxRewardVisible(true);
+                  window.setTimeout(() => setBoxVideoFinished(true), BOX_RESULT_MODAL_DELAY_MS);
+                }}
+                onError={() => {
+                  setBoxVideoFinished(true);
+                }}
+                className="block aspect-square w-full object-cover"
+              />
+              {boxRewardVisible && pendingOpenResult?.image && (
+                <motion.div
+                  initial={{
+                    opacity: 0,
+                    left: "50.3%",
+                    top: "62%",
+                    width: "16.5%",
+                    height: "33%",
+                    rotateX: 17,
+                    rotateZ: -13,
+                  }}
+                  animate={{
+                    opacity: [0, 0.9, 1, 1],
+                    left: ["50.3%", "50.05%", "49.72%", "49.34%"],
+                    top: ["62%", "54.2%", "45.4%", "37.4%"],
+                    width: ["16.5%", "19.8%", "24.2%", "27.8%"],
+                    height: ["33%", "38.2%", "44.1%", "48.8%"],
+                    rotateX: [17, 11, 5, 1.2],
+                    rotateZ: [-13, -8.5, -4.2, -1.4],
+                  }}
+                  transition={{
+                    duration: BOX_REWARD_REVEAL_REMAINING_SECONDS,
+                    times: [0, 0.18, 0.62, 1],
+                    ease: "easeOut",
+                  }}
+                  className="pointer-events-none absolute overflow-hidden rounded-[9px] shadow-[0_6px_14px_rgba(0,0,0,0.28)] will-change-transform"
+                  style={{
+                    x: "-50%",
+                    y: "-50%",
+                    transformOrigin: "50% 50%",
+                    transformPerspective: 720,
+                    clipPath: "polygon(4% 0%, 98% 2%, 94% 100%, 2% 98%)",
+                  }}
+                >
+                  <img
+                    src={pendingOpenResult.image}
+                    alt={pendingOpenResult.name}
+                    className="h-full w-full object-cover"
+                    draggable={false}
+                  />
+                </motion.div>
+              )}
+            </motion.div>
           </motion.div>
         )}
 

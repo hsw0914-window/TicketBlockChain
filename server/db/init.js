@@ -121,7 +121,8 @@ const ROOT_ADMIN_USER = {
   password: 'root1234',
 };
 
-const ADMIN_USER_IDS = [DEMO_ADMIN_USER.user_id, ROOT_ADMIN_USER.user_id];
+const PRACTICE_ADMIN_USER_ID = 'practice_admin';
+const ADMIN_USER_IDS = [DEMO_ADMIN_USER.user_id, ROOT_ADMIN_USER.user_id, PRACTICE_ADMIN_USER_ID];
 
 const SEED_STADIUMS = [
   { id: "jamsil",   name: "잠실야구장",              location: "서울특별시 송파구",    capacity: 25000 },
@@ -291,6 +292,7 @@ async function initDB() {
   await conn.query(`DROP TABLE IF EXISTS onchain_tx_logs`);
   await conn.query(`DROP TABLE IF EXISTS nft_tokens`);
   await conn.query(`DROP TABLE IF EXISTS user_boxes`);
+  await conn.query(`DROP TABLE IF EXISTS physical_redemption_requests`);
   await conn.query(`DROP TABLE IF EXISTS user_cards`);
   await conn.query(`DROP TABLE IF EXISTS user_fragments`);
   await conn.query(`DROP TABLE IF EXISTS box_reward_pool`);
@@ -758,6 +760,25 @@ async function initDB() {
       obtained_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id)      REFERENCES users(user_id) ON DELETE CASCADE,
       FOREIGN KEY (card_type_id) REFERENCES card_types(id)
+    )
+  `);
+
+  await conn.query(`
+    CREATE TABLE physical_redemption_requests (
+      id              CHAR(36)     PRIMARY KEY,
+      user_id         VARCHAR(50)  NOT NULL,
+      user_card_id    INT          NOT NULL,
+      wallet_address  VARCHAR(100) NOT NULL,
+      status          ENUM('requested','shipping','completed','cancelled') NOT NULL DEFAULT 'requested',
+      recipient_name  VARCHAR(80)  DEFAULT NULL,
+      phone           VARCHAR(40)  DEFAULT NULL,
+      address_json    JSON         DEFAULT NULL,
+      requested_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_physical_redemption_card (user_card_id),
+      INDEX idx_physical_redemption_user (user_id, requested_at),
+      FOREIGN KEY (user_id)      REFERENCES users(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE
     )
   `);
 

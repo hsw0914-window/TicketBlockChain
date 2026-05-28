@@ -191,7 +191,7 @@ const emptyDraft: EditorDraft = {
 
 
 
-const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000').replace(/\/$/, '');
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 const API = `${API_BASE}/api`;
 
 function emptyState(): CommunityState {
@@ -1040,7 +1040,7 @@ const jumpToPostDetail = () => {
     : 0;
 
 return (
-    <div className="page-shell space-y-12">
+    <div className="community-page page-shell space-y-12">
       {flashMessage && (
         <div
           className="rounded-xl px-4 py-3 text-[0.92rem] font-medium"
@@ -1117,21 +1117,21 @@ return (
 
         </section>
 
-        <div className="flex items-start gap-5">
+        <div className="community-main-layout flex items-start gap-5">
 
           {/* 카테고리 사이드바 */}
-          <div className="w-36 flex-shrink-0 overflow-hidden rounded-[6px] border" style={{ borderColor: "#cfd7e3" }}>
-            <div className="px-4 py-3" style={{ background: "#4f5d84" }}>
+          <div className="community-category-sidebar w-36 flex-shrink-0 overflow-hidden rounded-[6px] border" style={{ borderColor: "#cfd7e3" }}>
+            <div className="community-category-title px-4 py-3" style={{ background: "#4f5d84" }}>
               <span className="text-[0.82rem] font-bold tracking-wide text-white">카테고리</span>
             </div>
-            <div className="flex flex-col">
+            <div className="community-category-list flex flex-col">
               {Object.entries(categoryLabels).map(([key, label]) => {
                 const active = category === key;
                 return (
                   <button
                     key={key}
                     onClick={() => setCategory(key as CommunityCategory)}
-                    className="px-4 py-2.5 text-left text-[0.85rem] font-medium transition-colors"
+                    className="community-category-button px-4 py-2.5 text-left text-[0.85rem] font-medium transition-colors"
                     style={{
                       background: active ? "#eef1f8" : "#ffffff",
                       color: active ? "#2c3a83" : "#44526c",
@@ -1146,7 +1146,7 @@ return (
             </div>
           </div>
 
-          <div className="min-w-0 flex-1 space-y-5">
+          <div className="community-content min-w-0 flex-1 space-y-5">
             {selectedPost && selectedAuthor && (
               <>
                 <section
@@ -1643,14 +1643,14 @@ return (
               </>
             )}
             <section
-              className="overflow-hidden rounded-[6px] border flex flex-col"
+              className="community-board-section overflow-hidden rounded-[6px] border flex flex-col"
               style={{ background: "#f9fbfc", borderColor: "#cfd7e3" }}
             >
               <div
-                className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-[0.8rem]"
+                className="community-list-toolbar flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-[0.8rem]"
                 style={{ background: "#eef2f8", borderBottom: "1px solid #d9deea", color: "#5f6d88" }}
               >
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="community-sort-controls flex flex-wrap items-center gap-2">
                   {Object.entries(feedSortLabels).map(([key, label]) => {
                     const active = feedSort === key;
                     return (
@@ -1749,7 +1749,7 @@ return (
                         </span>
                       </div>
 
-                      <div className="md:hidden px-4 py-4 space-y-2">
+                      <div className="community-mobile-post md:hidden px-4 py-4 space-y-2">
                         <div className="flex flex-wrap items-center gap-2 text-[0.74rem]">
                           <span className="font-semibold" style={{ color: categoryAccent[post.category] }}>
                             {categoryLabels[post.category]}
@@ -1781,10 +1781,10 @@ return (
               </div>
 
               <div
-                className="flex flex-col items-center gap-4 px-5 py-5"
+                className="community-pagination-area flex flex-col items-center gap-4 px-5 py-5"
                 style={{ background: "#fcfdff", borderTop: "1px solid #e4e9f2" }}
               >
-                <div className="flex items-center gap-2">
+                <div className="community-pagination-controls flex items-center gap-2">
                   <button
                     onClick={() => setPostPage((page) => Math.max(1, page - 1))}
                     disabled={currentPostPage === 1}
@@ -1828,7 +1828,7 @@ return (
                   </button>
                 </div>
 
-                <div className="relative w-full max-w-2xl">
+                <div className="community-bottom-search relative w-full max-w-2xl">
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
@@ -1858,7 +1858,7 @@ return (
       {isLoggedIn && (
         <button
           onClick={openCreateEditor}
-          className="fixed right-8 z-40 flex items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
+          className="community-write-fab fixed right-8 z-40 flex items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
           style={{ background: "#4f5d84", color: "#ffffff", bottom: "24px", right: "24px", width: "64px", height: "64px" }}
         >
           <CiCirclePlus style={{ width: "36px", height: "36px" }} />

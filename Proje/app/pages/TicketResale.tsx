@@ -8,7 +8,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { getDidStatus } from "../api/didApi";
 import { signListingMessage } from "../lib/contract";
 
-const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000").replace(/\/$/, "");
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 const API = `${API_BASE}/api/ticket-resale`;
 
 function authHeaders() {

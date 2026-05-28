@@ -24,6 +24,19 @@ function parseMetadata(value) {
 }
 
 async function getWalletForHistory(userId, walletAddress = '') {
+  const [[user]] = await _pool.query('SELECT role FROM users WHERE user_id = ?', [userId]);
+  if (user?.role === 'admin') {
+    const [[wallet]] = await _pool.query(
+      `SELECT wallet_address
+         FROM user_wallets
+        WHERE user_id = ?
+        ORDER BY is_verified DESC, connected_at DESC
+        LIMIT 1`,
+      [userId],
+    );
+    return wallet?.wallet_address || String(walletAddress || '').trim() || null;
+  }
+
   if (walletAddress) {
     return membershipService.getVerifiedWallet(_pool, userId, walletAddress);
   }
@@ -31,7 +44,7 @@ async function getWalletForHistory(userId, walletAddress = '') {
     `SELECT wallet_address
        FROM user_wallets
       WHERE user_id = ?
-      ORDER BY is_verified DESC, created_at DESC
+      ORDER BY is_verified DESC, connected_at DESC
       LIMIT 1`,
     [userId],
   );
@@ -40,6 +53,22 @@ async function getWalletForHistory(userId, walletAddress = '') {
 
 function noPointBalance() {
   return { balance: 0, totalEarned: 0, totalUsed: 0 };
+}
+
+async function getFabricPointBalanceForUser(userId, walletAddress) {
+  const synced = await membershipService.syncFabricUserFromDb({
+    pool: _pool,
+    fabricService,
+    userId,
+    walletAddress,
+  });
+  const userDidHash = synced?.userDidHash || fabricService.hashDid(walletAddress);
+  try {
+    return await fabricService.getPointBalance({ userDidHash });
+  } catch (err) {
+    console.error('[pointRoutes] Fabric point read failed, using DB mirror:', err.message);
+    return synced?.point || membershipService.getPointBalanceFromEvents(_pool, userId);
+  }
 }
 
 function createWalletOwnerError() {
@@ -52,6 +81,18 @@ async function getWalletForCurrentUser(req, walletAddress = '') {
   const requestedWallet = String(walletAddress || '').trim();
   if (!req.user?.user_id) return requestedWallet || null;
 
+  if (req.user.role === 'admin') {
+    const [[wallet]] = await _pool.query(
+      `SELECT wallet_address
+         FROM user_wallets
+        WHERE user_id = ?
+        ORDER BY is_verified DESC, connected_at DESC
+        LIMIT 1`,
+      [req.user.user_id],
+    );
+    return wallet?.wallet_address || requestedWallet || null;
+  }
+
   const verifiedWallet = await membershipService.getVerifiedWallet(_pool, req.user.user_id, requestedWallet);
   if (requestedWallet && !verifiedWallet) throw createWalletOwnerError();
   return verifiedWallet;
@@ -62,15 +103,9 @@ router.get('/history', requireAuth, async (req, res) => {
   try {
     const month = normalizeMonth(req.query.month);
     const walletAddress = await getWalletForHistory(req.user.user_id, String(req.query.walletAddress || '').trim());
-    let point = { balance: 0, totalEarned: 0, totalUsed: 0 };
-
-    if (walletAddress) {
-      try {
-        point = await fabricService.getPointBalance({ userDidHash: fabricService.hashDid(walletAddress) });
-      } catch (err) {
-        console.error('[pointRoutes] history Fabric balance failed:', err.message);
-      }
-    }
+    const point = walletAddress
+      ? await getFabricPointBalanceForUser(req.user.user_id, walletAddress)
+      : noPointBalance();
 
     const [rows] = await _pool.query(
       `SELECT id, event_type, reason, amount, metadata_json,
@@ -120,14 +155,26 @@ router.get('/', optionalAuth, async (req, res) => {
       });
     }
 
-    const userDidHash = fabricService.hashDid(walletAddress);
-    const point = await fabricService.getPointBalance({ userDidHash });
-    const membership = req.user?.user_id
-      ? await membershipService.getUserMembership(_pool, req.user.user_id)
-      : { joined: true };
+    if (req.user?.user_id) {
+      await membershipService.syncFabricUserFromDb({
+        pool: _pool,
+        fabricService,
+        userId: req.user.user_id,
+        walletAddress,
+      });
+    }
+
+    const membership = req.user?.role === 'admin'
+      ? { joined: true }
+      : req.user?.user_id
+        ? await fabricService.getMembership({ userDidHash: fabricService.hashDid(walletAddress) })
+        : { joined: true };
+    const point = req.user?.user_id
+      ? await fabricService.getPointBalance({ userDidHash: fabricService.hashDid(walletAddress) })
+      : await fabricService.getPointBalance({ userDidHash: fabricService.hashDid(walletAddress) });
     res.json({
       success: true,
-      data: membership.joined ? point : { ...point, balance: 0, totalEarned: 0, totalUsed: 0 },
+      data: membership.joined ? point : noPointBalance(),
       membershipJoined: membership.joined,
       walletAddress,
     });
@@ -149,8 +196,19 @@ router.get('/membership', optionalAuth, async (req, res) => {
       });
     }
 
+    if (req.user?.user_id) {
+      await membershipService.syncFabricUserFromDb({
+        pool: _pool,
+        fabricService,
+        userId: req.user.user_id,
+        walletAddress,
+      });
+    }
+
     const userDidHash = fabricService.hashDid(walletAddress);
-    const membership = await fabricService.getMembership({ userDidHash });
+    const membership = req.user?.role === 'admin'
+      ? { tier: 'GOLD', joined: true, verified: true }
+      : await fabricService.getMembership({ userDidHash });
     res.json({ success: true, data: membership, walletAddress });
   } catch (err) {
     console.error('[pointRoutes] GET /membership:', err);

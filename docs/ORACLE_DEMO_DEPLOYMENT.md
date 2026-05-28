@@ -53,6 +53,10 @@ ENABLE_ONCHAIN_MINTING=false
 
 QR_SECRET=<long-random-secret>
 QR_SLOT_SECONDS=10
+QR_DEMO_ALWAYS_ON_GAME_IDS=PRACTICE_ALL_DAY_GAME
+RAFFLE_DEMO_ALWAYS_OPEN_GAME_IDS=PRESENTATION_RAFFLE_ALWAYS_ON
+DEMO_PRESENTATION_AUTO_GRANT=true
+DEMO_PRESENTATION_EMAILS=20214197@bu.ac.kr,juwwkd89@gmail.com,juwwkd89@bu.ac.kr
 
 PUBLIC_WEB_URL=https://example.com
 PUBLIC_API_URL=https://api.example.com
@@ -74,7 +78,15 @@ VITE_API_URL=https://api.example.com
 | Fabric | `FABRIC_MODE=mock` | 별도 Fabric 네트워크 없이 시연 가능 |
 | NFT 민팅 | `ENABLE_ONCHAIN_MINTING=false` | 가스비와 외부 RPC 의존성 방지 |
 | QR 토큰 | 실제 HMAC 서명 | 스캔 시나리오는 진짜 흐름으로 검증 |
+| BASE vs CHAIN QR | `QR_DEMO_ALWAYS_ON_GAME_IDS=PRACTICE_ALL_DAY_GAME` | 발표 중 2시간 전 제한으로 QR이 사라지지 않게 시연 티켓만 항상 표시 |
+| 응모&선예매 시연 경기 | `RAFFLE_DEMO_ALWAYS_OPEN_GAME_IDS=PRESENTATION_RAFFLE_ALWAYS_ON` | 응모 시간이 지나도 시연용 경기가 사라지거나 마감되지 않게 유지 |
 | 포인트 지급 | DB + mock Fabric | 시연 데이터로 충분함 |
+
+`QR_DEMO_ALWAYS_ON_GAME_IDS`는 시연용 allowlist다. 기본 시연 경기인 `PRACTICE_ALL_DAY_GAME`의 `BASE vs CHAIN` 티켓만 경기 시작 2시간 전/종료 후 제한 없이 QR을 계속 표시한다. 단, QR 토큰 자체는 일반 티켓과 동일하게 `QR_SLOT_SECONDS` 주기로 계속 갱신된다. 일반 경기 QR은 기존처럼 `QR_HOURS_BEFORE`와 `QR_SLOT_SECONDS` 정책을 따른다.
+
+`RAFFLE_DEMO_ALWAYS_OPEN_GAME_IDS`는 응모&선예매 시연용 allowlist다. 기본 시연 경기 `PRESENTATION_RAFFLE_ALWAYS_ON`은 일반 응모 마감 시간과 무관하게 계속 `응모 가능` 상태로 표시된다. 이 값은 발표용 계정 seed 스크립트 `npm run seed:presentation-demo-users -- --apply`가 생성하는 경기 ID와 맞춰야 한다.
+
+`DEMO_PRESENTATION_AUTO_GRANT=true`는 발표용 계정 자동 지급 스위치다. `DEMO_PRESENTATION_EMAILS`에 포함된 Google 계정이 로그인하면 포인트, 파편, 박스, 멤버십 등급이 자동 보정되고, 지갑 연결 후 응모권 99장이 보정된다. 운영 서버에서는 이 값을 `false`로 둔다.
 
 ## 용량 관리
 
@@ -97,6 +109,11 @@ Oracle Free Tier 또는 소형 VM에서 용량을 아끼기 위해 아래 원칙
 - [ ] `TOSS_MODE=mock`이다.
 - [ ] `ENABLE_ONCHAIN_MINTING=false`이다.
 - [ ] 실제 Toss secret, private key, wallet secret을 서버에 넣지 않았다.
+- [ ] `QR_DEMO_ALWAYS_ON_GAME_IDS`가 시연 경기 ID로만 제한되어 있다.
+- [ ] `RAFFLE_DEMO_ALWAYS_OPEN_GAME_IDS`가 시연 응모 경기 ID로만 제한되어 있다.
+- [ ] `DEMO_PRESENTATION_AUTO_GRANT=true`는 Oracle 시연 서버에서만 켰다.
+- [ ] `DEMO_PRESENTATION_EMAILS`에 발표용 Google 이메일만 들어 있다.
+- [ ] 발표용 계정 seed가 필요한 경우 Oracle 서버에서 `npm run seed:presentation-demo-users -- --apply`를 1회 실행했다.
 - [ ] QR 입장 성공 시 티켓이 `used`로 바뀐다.
 - [ ] 멤버십 가입자에게만 포인트가 적립된다.
 - [ ] 같은 QR을 다시 스캔하면 `ALREADY_USED`로 거부된다.

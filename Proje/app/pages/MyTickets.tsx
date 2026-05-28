@@ -21,6 +21,7 @@ interface NormalizedTicket {
   // UI용 추가 필드
   color:      string;
   rawStatus:  string;
+  statusLabel: string;
 }
 
 interface TicketGroup {
@@ -33,12 +34,16 @@ interface TicketGroup {
   tickets: NormalizedTicket[];
 }
 
+type TicketSort = "latest" | "oldest";
+
 // ─── API 응답 → UI 포맷 변환 ──────────────────────────────
 
 function normalizeApiTicket(t: any): NormalizedTicket {
   const rawStatus = String(t.status ?? "").toUpperCase();
   const isUsed = rawStatus === "USED";
+  const isExpired = rawStatus === "EXPIRED";
   const isActive = rawStatus === "ACTIVE" || rawStatus === "CONFIRMED";
+  const status: NormalizedTicket["status"] = isActive && !isExpired ? "ACTIVE" : "USED";
   return {
     ticketId:   t.ticketId ?? t.id,
     matchName:  t.matchName ?? t.game_name ?? t.game_id,
@@ -46,16 +51,17 @@ function normalizeApiTicket(t: any): NormalizedTicket {
     matchTime:  t.matchTime ?? null,
     seatInfo:   t.seatInfo ?? `${t.block ?? ""}블록 ${t.row_num ?? ""}열 ${t.seat_number ?? ""}번`,
     gate:       t.gate ?? t.grade ?? "",
-    status:     isUsed ? "USED" : isActive ? "ACTIVE" : "USED",
+    status,
     ticketCode: t.ticketCode ?? `#${String(t.ticketId ?? t.id).slice(0, 8).toUpperCase()}`,
     price:      t.price ?? null,
-    color:      isUsed ? "#5f7188" : "#1456a0",
+    color:      status === "USED" ? "#5f7188" : "#1456a0",
     rawStatus,
+    statusLabel: isExpired ? "기간 만료" : isUsed ? "관람 완료" : "사용 가능",
   };
 }
 
 function isDisplayableTicket(ticket: NormalizedTicket) {
-  return ["ACTIVE", "CONFIRMED", "USED"].includes(ticket.rawStatus);
+  return ["ACTIVE", "CONFIRMED", "USED", "EXPIRED"].includes(ticket.rawStatus);
 }
 
 // ─── 날짜/시간 포맷 ───────────────────────────────────────
@@ -76,7 +82,7 @@ function formatMonthLabel(monthKey: string) {
   return `${year}년 ${Number(month)}월`;
 }
 
-function groupTicketsByGame(tickets: NormalizedTicket[]): TicketGroup[] {
+function groupTicketsByGame(tickets: NormalizedTicket[], sort: TicketSort): TicketGroup[] {
   const groupMap = new Map<string, TicketGroup>();
 
   tickets.forEach((ticket) => {
@@ -100,9 +106,16 @@ function groupTicketsByGame(tickets: NormalizedTicket[]): TicketGroup[] {
   });
 
   return Array.from(groupMap.values()).sort((left, right) => {
-    const leftTime = left.tickets[0]?.matchTime ?? "";
-    const rightTime = right.tickets[0]?.matchTime ?? "";
-    return rightTime.localeCompare(leftTime);
+    const leftTime = left.tickets[0]?.matchTime;
+    const rightTime = right.tickets[0]?.matchTime;
+
+    if (!leftTime && !rightTime) return left.matchName.localeCompare(right.matchName);
+    if (!leftTime) return 1;
+    if (!rightTime) return -1;
+
+    return sort === "latest"
+      ? leftTime.localeCompare(rightTime)
+      : rightTime.localeCompare(leftTime);
   });
 }
 
@@ -163,7 +176,7 @@ function TicketQRPanel({
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#2dba73" }} />
         <p className="text-[0.82rem] font-bold tabular-nums" style={{ color: "#2dba73" }}>
-          {formattedCountdown} 후 자동 갱신
+          {qrData.demo ? `QR 시연용 · ${formattedCountdown} 후 자동 갱신` : `${formattedCountdown} 후 자동 갱신`}
         </p>
       </div>
       <p className="page-stat-label">현장 게이트에서 QR을 제시해 주세요</p>
@@ -198,7 +211,7 @@ function RefundModal({
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
 
-  const apiUrl = import.meta.env.VITE_API_URL;
+  const apiUrl = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
   const token  = localStorage.getItem("auth_token");
 
   useEffect(() => {
@@ -377,7 +390,7 @@ function TicketCard({
                 {ticket.status === "ACTIVE"
                   ? <CheckCircle className="w-4 h-4" />
                   : <Clock className="w-4 h-4" />}
-                {ticket.status === "ACTIVE" ? "사용 가능" : "관람 완료"}
+                {ticket.statusLabel}
               </div>
             </div>
 
@@ -480,12 +493,14 @@ export function MyTickets() {
   const [ticketView, setTicketView] = useState<"active" | "completed">("active");
   const [apiTickets, setApiTickets] = useState<NormalizedTicket[]>([]);
   const [selectedMonth, setSelectedMonth] = useState("all");
+  const [ticketSort, setTicketSort] = useState<TicketSort>("latest");
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   const fetchTickets = useCallback(() => {
     const token = localStorage.getItem("auth_token");
     if (!token) return;
-    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets`, {
+    const apiBase = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
+    fetch(`${apiBase}/api/my-tickets`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
@@ -537,7 +552,7 @@ export function MyTickets() {
 
   useEffect(() => {
     setExpandedGroups({});
-  }, [ticketView, selectedMonth]);
+  }, [ticketView, selectedMonth, ticketSort]);
 
   const monthFilteredTickets = useMemo(
     () =>
@@ -548,8 +563,8 @@ export function MyTickets() {
   );
 
   const ticketGroups = useMemo(
-    () => groupTicketsByGame(monthFilteredTickets),
-    [monthFilteredTickets],
+    () => groupTicketsByGame(monthFilteredTickets, ticketSort),
+    [monthFilteredTickets, ticketSort],
   );
 
   const activeCount    = apiTickets.filter((t) => t.status === "ACTIVE").length;
@@ -592,37 +607,59 @@ export function MyTickets() {
         <p className="text-[0.84rem]" style={{ color: "#6d7d90" }}>
           {ticketView === "active"
             ? "환불된 입장권은 목록에서 제외하고, 사용할 수 있는 티켓만 보여줍니다."
-            : "현장에서 입장 처리된 티켓만 따로 모아 봅니다."}
+            : "입장 처리되었거나 사용 시간이 지난 티켓을 따로 모아 봅니다."}
         </p>
       </div>
 
       {visibleTickets.length > 0 && (
-        <div className="mb-5 flex flex-wrap gap-2">
-          <button
-            onClick={() => setSelectedMonth("all")}
-            className="rounded-full px-4 py-2 text-sm font-semibold transition-all"
-            style={{
-              background: selectedMonth === "all" ? "#23425f" : "#f5f8fb",
-              border: "1px solid #dbe4ed",
-              color: selectedMonth === "all" ? "#ffffff" : "#6d7d90",
-            }}
-          >
-            전체
-          </button>
-          {monthOptions.map((option) => (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
             <button
-              key={option.key}
-              onClick={() => setSelectedMonth(option.key)}
+              onClick={() => setSelectedMonth("all")}
               className="rounded-full px-4 py-2 text-sm font-semibold transition-all"
               style={{
-                background: selectedMonth === option.key ? "#23425f" : "#f5f8fb",
+                background: selectedMonth === "all" ? "#23425f" : "#f5f8fb",
                 border: "1px solid #dbe4ed",
-                color: selectedMonth === option.key ? "#ffffff" : "#6d7d90",
+                color: selectedMonth === "all" ? "#ffffff" : "#6d7d90",
               }}
             >
-              {option.label}
+              전체
             </button>
-          ))}
+            {monthOptions.map((option) => (
+              <button
+                key={option.key}
+                onClick={() => setSelectedMonth(option.key)}
+                className="rounded-full px-4 py-2 text-sm font-semibold transition-all"
+                style={{
+                  background: selectedMonth === option.key ? "#23425f" : "#f5f8fb",
+                  border: "1px solid #dbe4ed",
+                  color: selectedMonth === option.key ? "#ffffff" : "#6d7d90",
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center rounded-[14px] p-1" style={{ background: "#eef3f8", border: "1px solid #dbe4ed" }}>
+            {[
+              { key: "latest" as const, label: "최신순" },
+              { key: "oldest" as const, label: "오래된 순" },
+            ].map((option) => (
+              <button
+                key={option.key}
+                onClick={() => setTicketSort(option.key)}
+                className="rounded-[10px] px-3.5 py-1.5 text-sm font-semibold transition-all"
+                style={{
+                  background: ticketSort === option.key ? "#ffffff" : "transparent",
+                  color: ticketSort === option.key ? "#23425f" : "#6d7d90",
+                  boxShadow: ticketSort === option.key ? "0 8px 18px rgba(17,40,73,0.08)" : "none",
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

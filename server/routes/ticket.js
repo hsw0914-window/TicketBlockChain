@@ -48,8 +48,59 @@ function createMockTicketMintResult(ticketId) {
   };
 }
 
+function demoAdminWalletAddress(user) {
+  if (user?.user_id === 'practice_admin' && user?.email === 'practice@basechain.dev') {
+    return '0x9999999999999999999999999999999999999999';
+  }
+  const seed = `${user?.user_id || 'admin'}:${user?.email || 'basechain'}`;
+  return `0x${crypto.createHash('sha256').update(`basechain-demo-admin:${seed}`).digest('hex').slice(0, 40)}`;
+}
+
+async function ensureAdminWalletDid(user) {
+  const [[existingWallet]] = await _pool.query(
+    'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
+    [user.user_id],
+  );
+  const walletAddress = existingWallet?.wallet_address || demoAdminWalletAddress(user);
+  const didValue = user.user_id === 'practice_admin' && user.email === 'practice@basechain.dev'
+    ? 'did:basechain:practice-admin'
+    : `did:basechain:${walletAddress.toLowerCase().slice(2)}`;
+
+  await _pool.query(
+    `INSERT INTO user_wallets
+       (user_id, wallet_address, nonce, is_verified, connected_at, verified_at)
+     VALUES (?, ?, NULL, 1, NOW(), NOW())
+     ON DUPLICATE KEY UPDATE
+       wallet_address = VALUES(wallet_address),
+       nonce = NULL,
+       is_verified = 1,
+       verified_at = NOW()`,
+    [user.user_id, walletAddress],
+  );
+
+  await _pool.query(
+    `INSERT INTO did_verifications
+       (user_id, did_value, wallet_address, last_signature, status, verified_at)
+     VALUES (?, ?, ?, 'admin-demo-signature', 'verified', NOW())
+     ON DUPLICATE KEY UPDATE
+       did_value = VALUES(did_value),
+       wallet_address = VALUES(wallet_address),
+       last_signature = VALUES(last_signature),
+       status = 'verified',
+       verified_at = NOW()`,
+    [user.user_id, didValue, walletAddress],
+  );
+
+  return walletAddress.toLowerCase();
+}
+
 async function requireVerifiedDidForWallet(req, res, next) {
   try {
+    if (req.user?.role === 'admin') {
+      req.verifiedWalletAddress = await ensureAdminWalletDid(req.user);
+      return next();
+    }
+
     const walletAddress = String(req.body.walletAddress || "").trim().toLowerCase();
 
     if (!walletAddress) {
@@ -93,10 +144,29 @@ async function requireVerifiedDidForWallet(req, res, next) {
 
 const QR_SECRET = process.env.QR_SECRET;
 const DEFAULT_QR_SLOT_SECONDS = 10;
+const DEFAULT_DEMO_QR_GAME_IDS = ['PRACTICE_ALL_DAY_GAME'];
 
 function getQrSlotSeconds() {
   const value = Number.parseInt(process.env.QR_SLOT_SECONDS || "", 10);
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_QR_SLOT_SECONDS;
+}
+
+function getDemoAlwaysOnGameIds() {
+  const raw = process.env.QR_DEMO_ALWAYS_ON_GAME_IDS ?? process.env.QR_PERMANENT_DEMO_GAME_IDS;
+  if (raw == null) return DEFAULT_DEMO_QR_GAME_IDS;
+  return raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
+function isDemoAlwaysOnQrTicket(ticket) {
+  const gameId = String(ticket?.game_id || '');
+  if (getDemoAlwaysOnGameIds().includes(gameId)) return true;
+  if (process.env.QR_DEMO_ALWAYS_ON_GAME_IDS != null || process.env.QR_PERMANENT_DEMO_GAME_IDS != null) return false;
+  return String(ticket?.home_team || '').toUpperCase() === 'BASE'
+    && String(ticket?.away_team || '').toUpperCase() === 'CHAIN'
+    && String(ticket?.stadium_id || '') === 'practice-stadium';
 }
 
 // 테스트용: DEBUG_TIME_OFFSET_HOURS 만큼 현재 시간을 앞당김
@@ -118,8 +188,17 @@ function generateQRToken(ticketId, slot) {
 }
 
 // 경기 목록 조회
+const GAMES_CACHE_TTL_MS = Number.parseInt(process.env.GAMES_CACHE_TTL_MS || "30000", 10);
+let gamesCache = { expiresAt: 0, payload: null };
+
 router.get("/games", async (req, res) => {
   try {
+    const now = Date.now();
+    if (gamesCache.payload && gamesCache.expiresAt > now) {
+      res.set("Cache-Control", "public, max-age=5, stale-while-revalidate=60");
+      return res.json(gamesCache.payload);
+    }
+
     const [games] = await _pool.query(`
       SELECT g.id, g.home_team, g.away_team,
         DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
@@ -139,7 +218,10 @@ router.get("/games", async (req, res) => {
       JOIN stadiums s ON g.stadium_id = s.id
       ORDER BY g.game_date ASC, g.game_time ASC
     `);
-    res.json({ success: true, data: games });
+    const payload = { success: true, data: games };
+    gamesCache = { expiresAt: now + Math.max(1000, GAMES_CACHE_TTL_MS), payload };
+    res.set("Cache-Control", "public, max-age=5, stale-while-revalidate=60");
+    res.json(payload);
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "경기 목록 조회 실패" });
@@ -286,7 +368,7 @@ router.get("/:ticketId/qr", requireAuth, async (req, res) => {
 
     // 티켓 + 경기 정보 조회
     const [rows] = await _pool.query(
-      `SELECT t.*, g.game_date, g.game_time
+      `SELECT t.*, g.game_date, g.game_time, g.home_team, g.away_team, g.stadium_id
        FROM tickets t
        LEFT JOIN games g ON t.game_id = g.id
        WHERE t.id = ? AND t.wallet_address = ?`,
@@ -328,10 +410,11 @@ router.get("/:ticketId/qr", requireAuth, async (req, res) => {
     const nowMs          = getNowMs();
     const msUntilGame    = gameDateTime.getTime() - nowMs;
     const hoursUntilGame = msUntilGame / (1000 * 60 * 60);
+    const demoAlwaysOn   = isDemoAlwaysOnQrTicket(ticket);
 
     // 경기 시작 N시간 전부터 QR 활성화 (QR_HOURS_BEFORE 환경변수로 제어, 기본 2시간)
     const qrHoursBefore = Number(process.env.QR_HOURS_BEFORE ?? 2);
-    if (hoursUntilGame > qrHoursBefore) {
+    if (!demoAlwaysOn && hoursUntilGame > qrHoursBefore) {
       return res.json({
         available: false,
         message:   `경기 시작 ${qrHoursBefore}시간 전부터 QR 조회 가능`,
@@ -339,7 +422,7 @@ router.get("/:ticketId/qr", requireAuth, async (req, res) => {
     }
 
     // 경기 종료 후 2시간 이상 지난 경우
-    if (hoursUntilGame < -2) {
+    if (!demoAlwaysOn && hoursUntilGame < -2) {
       return res.json({ available: false, message: "경기가 종료되었습니다" });
     }
 
@@ -354,7 +437,8 @@ router.get("/:ticketId/qr", requireAuth, async (req, res) => {
       qrToken,
       expiresAt:        new Date(slotEndMs).toISOString(),
       remainingSeconds,
-      message:          "QR 조회 가능",
+      demo:             demoAlwaysOn,
+      message:          demoAlwaysOn ? "QR 시연용 조회 가능" : "QR 조회 가능",
     });
   } catch (err) {
     console.error(err);
@@ -506,7 +590,8 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
     let mintedResults;
     try {
       mintedResults = [];
-      const useMockMint = isMockTossPayment(paymentKey) ||
+      const useMockMint = req.user?.role === 'admin' ||
+        isMockTossPayment(paymentKey) ||
         !isOnChainMintingEnabled(['MINTER_PRIVATE_KEY', 'TICKET_NFT_ADDRESS']);
       for (const { ticketId, row, seatNumber, price } of ticketRows) {
         const mintResult = useMockMint

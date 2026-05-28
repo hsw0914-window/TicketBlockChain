@@ -16,7 +16,19 @@ function setPool(pool) { _pool = pool; }
 const MAX_PRICE_RATIO = 1.1;
 const TICKET_RESALE_FEE_RATE = 0.03;
 const TICKET_RESALE_REWARD_RATE = 0.003;
-const TICKET_RESALE_DAILY_REWARD_LIMIT = 3;
+const LISTING_GAME_TIME_SQL = `
+  COALESCE(
+    g.game_time,
+    (SELECT g2.game_time
+       FROM games g2
+      WHERE g2.home_team = tl.home_team
+        AND g2.away_team = tl.away_team
+        AND DATE(g2.game_date) = DATE(tl.game_date)
+      LIMIT 1),
+    '18:30:00'
+  )
+`;
+const ACTIVE_LISTING_TIME_WINDOW_SQL = `TIMESTAMP(tl.game_date, ${LISTING_GAME_TIME_SQL}) >= DATE_SUB(NOW(), INTERVAL 1 HOUR)`;
 
 function formatDate(v) {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -45,6 +57,104 @@ function calculateTicketSettlement(price) {
   const platformFee = Math.round(grossAmount * TICKET_RESALE_FEE_RATE);
   const settlementAmount = grossAmount - platformFee;
   return { grossAmount, platformFee, settlementAmount };
+}
+
+function calculateTicketResaleReward(price) {
+  return Math.floor((Number(price) || 0) * TICKET_RESALE_REWARD_RATE);
+}
+
+function getTicketResaleRewardEventType(role) {
+  return role === 'buyer' ? 'TICKET_RESALE_BUYER_REWARD' : 'TICKET_RESALE_REWARD';
+}
+
+function getTicketResaleRewardReason(role) {
+  return role === 'buyer' ? '티켓 양도 구매 포인트 적립' : '티켓 양도 판매 포인트 적립';
+}
+
+async function hasTicketResaleRewardEvent(pool, { userId, eventType, tradeId, listingId }) {
+  const [[row]] = await pool.query(
+    `SELECT id
+       FROM point_events
+      WHERE user_id = ?
+        AND event_type = ?
+        AND (
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, "$.tradeId")) = ?
+          OR JSON_UNQUOTE(JSON_EXTRACT(metadata_json, "$.listingId")) = ?
+        )
+      LIMIT 1`,
+    [userId, eventType, tradeId, listingId],
+  );
+  return Boolean(row?.id);
+}
+
+async function awardTicketResaleReward(pool, {
+  userId,
+  walletAddress,
+  role,
+  tradeId,
+  listingId,
+  ticketId,
+  counterpartyId,
+  price,
+}) {
+  if (!userId || !walletAddress) return 0;
+
+  const memberJoined = await membershipService.isMembershipActive(pool, userId);
+  if (!memberJoined) return 0;
+
+  const earnedPoint = calculateTicketResaleReward(price);
+  if (earnedPoint <= 0) return 0;
+
+  const eventType = getTicketResaleRewardEventType(role);
+  const alreadyRecorded = await hasTicketResaleRewardEvent(pool, {
+    userId,
+    eventType,
+    tradeId,
+    listingId,
+  });
+  if (alreadyRecorded) return 0;
+
+  await membershipService.recordPointEvent(pool, {
+    userId,
+    walletAddress,
+    eventType,
+    reason: getTicketResaleRewardReason(role),
+    amount: earnedPoint,
+    metadata: {
+      tradeId,
+      listingId,
+      ticketId,
+      counterpartyId,
+      price: Number(price),
+      rate: TICKET_RESALE_REWARD_RATE,
+      role,
+    },
+  });
+
+  try {
+    await pool.query(
+      `INSERT INTO fabric_events
+         (id, event_name, ticket_id, user_did_hash, payload_json)
+       VALUES (UUID(), 'TICKET_RESALE_POINT_EARNED', ?, ?,
+               JSON_OBJECT('source', 'TicketResaleReward', 'tradeId', ?, 'listingId', ?, 'userId', ?, 'counterpartyId', ?, 'role', ?, 'amount', ?, 'rate', ?, 'earnedPoint', ?))`,
+      [
+        ticketId,
+        fabricService.hashDid(walletAddress),
+        tradeId,
+        listingId,
+        userId,
+        counterpartyId,
+        role,
+        Number(price),
+        TICKET_RESALE_REWARD_RATE,
+        earnedPoint,
+      ],
+    );
+  } catch (eventErr) {
+    console.error('[ticketResale] fabric_events 포인트 로그 실패:', eventErr.message);
+  }
+
+  return earnedPoint;
 }
 
 async function ensureListingSignatureColumns(conn) {
@@ -201,6 +311,7 @@ router.get('/listings', optionalAuth, async (req, res) => {
   const userId = req.user?.user_id ?? null;
   try {
     const conditions = ["tl.status = 'active'"];
+    conditions.push(ACTIVE_LISTING_TIME_WINDOW_SQL);
     const params = [];
     if (team) {
       const teams = Array.isArray(team) ? team : [team];
@@ -215,13 +326,7 @@ router.get('/listings', optionalAuth, async (req, res) => {
     const [rows] = await _pool.query(
       `SELECT tl.id, u.nickname AS sellerName, tl.seller_id AS sellerId,
          DATE_FORMAT(tl.game_date, '%Y-%m-%d') AS gameDate,
-         COALESCE(
-           TIME_FORMAT(g.game_time, '%H:%i:%s'),
-           (SELECT TIME_FORMAT(g2.game_time, '%H:%i:%s')
-            FROM games g2
-            WHERE g2.home_team = tl.home_team AND DATE(g2.game_date) = DATE(tl.game_date)
-            LIMIT 1)
-         ) AS gameTime,
+         TIME_FORMAT(${LISTING_GAME_TIME_SQL}, '%H:%i:%s') AS gameTime,
          tl.home_team AS homeTeam, tl.away_team AS awayTeam,
          tl.seat_section AS seatSection,
          tl.original_price AS originalPrice,
@@ -266,7 +371,10 @@ router.get('/my', requireAuth, async (req, res) => {
          tl.price_wei AS priceWei,
          tl.status, tl.created_at AS createdAtRaw
        FROM ticket_listings tl
+       LEFT JOIN tickets tk ON tk.id = tl.ticket_id
+       LEFT JOIN games g ON g.id = tk.game_id
        WHERE tl.seller_id = ? AND tl.status = 'active'
+         AND ${ACTIVE_LISTING_TIME_WINDOW_SQL}
        ORDER BY tl.game_date ASC, tl.created_at DESC`,
       [userId],
     );
@@ -513,13 +621,14 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
 
     // 결제 승인 완료 — 이후 실패 시 보상 환불 필요
     let newTicketId;
+    const tradeId = crypto.randomUUID();
     try {
       const { grossAmount, platformFee, settlementAmount } = calculateTicketSettlement(listing.listed_price);
       await conn.query(`UPDATE ticket_listings SET status = 'completed' WHERE id = ?`, [req.params.id]);
       await conn.query(
         `INSERT INTO ticket_trades (id, listing_id, buyer_id, seller_id, price, platform_fee, settlement_amount, buy_tx_hash, toss_payment_key)
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-        [crypto.randomUUID(), req.params.id, userId, listing.seller_id, grossAmount, platformFee, settlementAmount, paymentKey],
+        [tradeId, req.params.id, userId, listing.seller_id, grossAmount, platformFee, settlementAmount, paymentKey],
       );
       newTicketId = await ensureTransferredTicket(conn, listing, buyerWalletAddress);
       await conn.commit();
@@ -545,8 +654,6 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
       });
 
       // Fabric TransferTicket 기록
-      let earnedPoint = 0;
-      const sellerMemberJoined = await membershipService.isMembershipActive(_pool, listing.seller_id);
       try {
         await fabricService.transferTicket({
           ticketId:          newTicketId,
@@ -558,71 +665,44 @@ router.post('/toss-confirm/:id', requireAuth, async (req, res) => {
         console.error('[ticketResale] Fabric TransferTicket 실패:', fabricErr.message);
       }
 
-      // 판매자 포인트 적립 (거래금액 0.3%, 하루 3건 한도)
+      // 양도 포인트 적립: 구매자와 판매자 모두에게 거래금액의 0.3% 적립
+      let sellerEarnedPoint = 0;
+      let buyerEarnedPoint = 0;
       try {
         const [[sellerWalletRow]] = await _pool.query(
           'SELECT wallet_address FROM user_wallets WHERE user_id = ?',
           [listing.seller_id],
         );
-        if (sellerWalletRow?.wallet_address) {
-          const [[{ cnt }]] = await _pool.query(
-            `SELECT COUNT(*) AS cnt
-               FROM point_events
-              WHERE user_id = ?
-                AND event_type = 'TICKET_RESALE_REWARD'
-                AND DATE(created_at) = CURDATE()`,
-            [listing.seller_id],
-          );
-          if (sellerMemberJoined && Number(cnt) < TICKET_RESALE_DAILY_REWARD_LIMIT) {
-            const result = await fabricService.earnPointFromTrade({
-              userDidHash: fabricService.hashDid(sellerWalletRow.wallet_address),
-              amount:      listing.listed_price,
-              rate:        TICKET_RESALE_REWARD_RATE,
-            });
-            earnedPoint = result.earnedPoint;
-            console.log(`[ticketResale] 판매자 포인트 적립: ${earnedPoint}P (거래금액 ${listing.listed_price}원 × 0.3%)`);
-            if (earnedPoint > 0) {
-              await membershipService.recordPointEvent(_pool, {
-                userId: listing.seller_id,
-                walletAddress: sellerWalletRow.wallet_address,
-                eventType: 'TICKET_RESALE_REWARD',
-                reason: '티켓 판매 완료',
-                amount: earnedPoint,
-                metadata: {
-                  listingId: req.params.id,
-                  ticketId: newTicketId,
-                  buyerId: userId,
-                  price: Number(listing.listed_price),
-                  rate: TICKET_RESALE_REWARD_RATE,
-                  dailyLimit: TICKET_RESALE_DAILY_REWARD_LIMIT,
-                },
-              });
-              await _pool.query(
-                `INSERT INTO fabric_events
-                   (id, event_name, ticket_id, user_did_hash, payload_json)
-                 VALUES (UUID(), 'TICKET_RESALE_POINT_EARNED', ?, ?,
-                         JSON_OBJECT('source', 'EarnPointFromTrade', 'listingId', ?, 'sellerId', ?, 'buyerId', ?, 'amount', ?, 'rate', ?, 'earnedPoint', ?))`,
-                [
-                  newTicketId,
-                  fabricService.hashDid(sellerWalletRow.wallet_address),
-                  req.params.id,
-                  listing.seller_id,
-                  userId,
-                  Number(listing.listed_price),
-                  TICKET_RESALE_REWARD_RATE,
-                  earnedPoint,
-                ],
-              );
-            }
-          }
-        }
+        sellerEarnedPoint = await awardTicketResaleReward(_pool, {
+          userId: listing.seller_id,
+          walletAddress: sellerWalletRow?.wallet_address,
+          role: 'seller',
+          tradeId,
+          listingId: req.params.id,
+          ticketId: newTicketId,
+          counterpartyId: userId,
+          price: listing.listed_price,
+        });
+        buyerEarnedPoint = await awardTicketResaleReward(_pool, {
+          userId,
+          walletAddress: buyerWalletAddress,
+          role: 'buyer',
+          tradeId,
+          listingId: req.params.id,
+          ticketId: newTicketId,
+          counterpartyId: listing.seller_id,
+          price: listing.listed_price,
+        });
+        console.log(`[ticketResale] 양도 포인트 적립: 판매자 +${sellerEarnedPoint}P, 구매자 +${buyerEarnedPoint}P (거래금액 ${listing.listed_price}원 × 0.3%)`);
       } catch (pointErr) {
         console.error('[ticketResale] 포인트 적립 실패:', pointErr.message);
       }
 
       res.json({
         success: true,
-        earnedPoint,
+        earnedPoint: sellerEarnedPoint + buyerEarnedPoint,
+        sellerEarnedPoint,
+        buyerEarnedPoint,
         receipt: buildResaleReceipt(listing, paymentKey),
       });
     } catch (dbErr) {

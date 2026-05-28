@@ -58,14 +58,10 @@ router.post('/verify', async (req, res) => {
       return res.status(400).json({ allowed: false, reason: 'MISSING_PARAMS' });
     }
 
-    // 1. QR 토큰 유효성 검증
-    if (!isValidQRToken(ticketId, qrToken)) {
-      return res.json({ allowed: false, reason: 'INVALID_QR_TOKEN' });
-    }
-
-    // 2. DB에서 티켓 + 경기 정보 조회
+    // 1. DB에서 티켓 + 경기 정보 조회
     const [[ticket]] = await _pool.query(
-      `SELECT t.*, g.game_date, g.game_time, g.status AS game_status
+      `SELECT t.*, g.game_date, g.game_time, g.status AS game_status,
+              g.home_team, g.away_team, g.stadium_id
        FROM tickets t
        LEFT JOIN games g ON t.game_id = g.id
        WHERE t.id = ?`,
@@ -74,6 +70,11 @@ router.post('/verify', async (req, res) => {
 
     if (!ticket) {
       return res.json({ allowed: false, reason: 'TICKET_NOT_FOUND' });
+    }
+
+    // 2. QR 토큰 유효성 검증
+    if (!isValidQRToken(ticketId, qrToken)) {
+      return res.json({ allowed: false, reason: 'INVALID_QR_TOKEN' });
     }
     if (ticket.status === 'used') {
       return res.json({ allowed: false, reason: 'ALREADY_USED' });
@@ -156,7 +157,7 @@ router.post('/verify', async (req, res) => {
     );
 
     // 7. QR 입장 보상 반영
-    // - 상자는 멤버십 가입 여부와 무관하게 실제 입장 완료 시 지급
+    // - 박스는 멤버십 가입 여부와 무관하게 실제 입장 완료 시 지급
     // - 포인트는 멤버십 가입자에게만 적립
     let boxTxHash = null;
     let memberJoined = false;
@@ -181,12 +182,12 @@ router.post('/verify', async (req, res) => {
         await notificationService.recordNotification(_pool, {
           userId: walletRow.user_id,
           category: 'BOX',
-          title: '시즌 박스 획득',
-          message: 'QR 입장이 완료되어 시즌 굿즈 박스 1개가 지급되었습니다.',
+          title: '랜덤 박스 NFT 획득',
+          message: '랜덤 박스 NFT가 지급되었습니다.',
           amount: 1,
           metadata: { ticketId, gameId: ticket.game_id, gateId: gateId || 'GATE_DEFAULT', boxTxHash },
         });
-        console.log(`[entry] 입장 상자 지급 완료: user=${walletRow.user_id}, ticket=${ticketId}, member=${memberJoined}`);
+        console.log(`[entry] 입장 박스 지급 완료: user=${walletRow.user_id}, ticket=${ticketId}, member=${memberJoined}`);
 
         if (memberJoined) {
           const membershipSummary = await membershipService.getMembershipSummary(_pool, walletRow.user_id);

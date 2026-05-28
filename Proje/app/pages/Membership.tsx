@@ -6,7 +6,7 @@ import { GiBaseballBat, GiBaseballGlove } from "react-icons/gi";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { getDidStatus } from "../api/didApi";
 
-const API_BASE = import.meta.env.VITE_API_URL;
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 
 const TIER_ORDER = ["베이직", "브론즈", "실버", "골드"] as const;
 type TierName = typeof TIER_ORDER[number];

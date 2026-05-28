@@ -12,7 +12,7 @@ function setPool(pool) {
 function normalizeTicket(t) {
   const gameDate = t.game_date ? String(t.game_date).slice(0, 10) : "";
   const gameTime = t.game_time ? String(t.game_time).slice(0, 8) : "00:00:00";
-  const dbStatus = t.status; // 'confirmed' | 'used'
+  const displayStatus = t.display_status || t.status; // 'confirmed' | 'used' | 'expired'
 
   return {
     ticketId:   t.id,
@@ -21,7 +21,8 @@ function normalizeTicket(t) {
     matchTime:  gameDate ? `${gameDate}T${gameTime}` : null,
     seatInfo:   `${t.grade ?? ""} ${t.block ?? ""}블록 ${t.row_num ?? ""}열 ${t.seat_number ?? ""}번`.trim(),
     gate:       t.grade ?? "",
-    status:     dbStatus === "confirmed" ? "ACTIVE" : "USED",
+    status:     displayStatus === "confirmed" ? "ACTIVE" : "USED",
+    rawStatus:  String(displayStatus || "").toUpperCase(),
     ticketCode: `GAME-${String(t.id).slice(0, 8).toUpperCase()}`,
     price:      t.price,
   };
@@ -44,7 +45,13 @@ router.get("/nearest", requireAuth, async (req, res) => {
          CONCAT(g.home_team, ' vs ', g.away_team) AS game_name,
          DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
          g.game_time,
-         s.name AS stadium_name, s.location
+         s.name AS stadium_name, s.location,
+         CASE
+           WHEN t.status = 'confirmed'
+             AND TIMESTAMP(g.game_date, g.game_time) + INTERVAL 2 HOUR < NOW()
+             THEN 'expired'
+           ELSE t.status
+         END AS display_status
        FROM tickets t
        LEFT JOIN games g    ON t.game_id    = g.id
        LEFT JOIN stadiums s ON g.stadium_id = s.id
@@ -80,7 +87,13 @@ router.get("/", requireAuth, async (req, res) => {
          CONCAT(g.home_team, ' vs ', g.away_team) AS game_name,
          DATE_FORMAT(g.game_date, '%Y-%m-%d') AS game_date,
          g.game_time,
-         s.name AS stadium_name, s.location
+         s.name AS stadium_name, s.location,
+         CASE
+           WHEN t.status = 'confirmed'
+             AND TIMESTAMP(g.game_date, g.game_time) + INTERVAL 2 HOUR < NOW()
+             THEN 'expired'
+           ELSE t.status
+         END AS display_status
        FROM tickets t
        LEFT JOIN games g    ON t.game_id    = g.id
        LEFT JOIN stadiums s ON g.stadium_id = s.id

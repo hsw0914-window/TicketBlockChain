@@ -3,10 +3,10 @@ import { createBrowserRouter, Navigate } from "react-router";
 import { Layout } from "./components/Layout";
 import { Home } from "./pages/Home";
 import { NotFound } from "./pages/NotFound";
+import { Tickets } from "./pages/Tickets";
 
 const Login          = lazy(() => import("./pages/Login").then((m) => ({ default: m.Login })));
 const Register       = lazy(() => import("./pages/Register").then((m) => ({ default: m.Register })));
-const Tickets        = lazy(() => import("./pages/Tickets").then((m) => ({ default: m.Tickets })));
 const TicketBooking        = lazy(() => import("./pages/TicketBooking").then((m) => ({ default: m.TicketBooking })));
 const TicketBookingSuccess = lazy(() => import("./pages/TicketBookingSuccess").then((m) => ({ default: m.TicketBookingSuccess })));
 const MyTickets      = lazy(() => import("./pages/MyTickets").then((m) => ({ default: m.MyTickets })));
@@ -26,6 +26,7 @@ const MemeInfo       = lazy(() => import("./pages/MemeInfo").then((m) => ({ defa
 const Attendance     = lazy(() => import("./pages/Attendance").then((m) => ({ default: m.Attendance })));
 const Detail         = lazy(() => import("./pages/Detail").then((m) => ({ default: m.Detail })));
 const Exchange       = lazy(() => import("./pages/Exchange").then((m) => ({ default: m.Exchange })));
+const PhysicalExchange = lazy(() => import("./pages/PhysicalExchange").then((m) => ({ default: m.PhysicalExchange })));
 const EntryScanner   = lazy(() => import("./pages/EntryScanner").then((m) => ({ default: m.EntryScanner })));
 const Raffle         = lazy(() => import("./pages/Raffle").then((m) => ({ default: m.Raffle })));
 
@@ -78,6 +79,7 @@ export const router = createBrowserRouter([
       { path: "attendance",               Component: withSuspense(Attendance) },
       { path: "detail/:id",               Component: withSuspense(Detail) },
       { path: "exchange",                  Component: withSuspense(Exchange) },
+      { path: "physical-exchange",         Component: withSuspense(PhysicalExchange) },
       { path: "entry-scanner",             Component: withSuspense(EntryScanner) },
     ],
   },

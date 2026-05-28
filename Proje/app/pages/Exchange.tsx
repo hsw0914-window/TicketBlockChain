@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Coins, Gift, MapPin, ShieldAlert, Sparkles, Ticket, X } from "lucide-react";
-import { useSearchParams } from "react-router";
+import { Award, Check, Coins, Gift, MapPin, PackageCheck, ShieldAlert, Sparkles, Ticket, X } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router";
 import { Button } from "../components/ui/button";
 import { useAppSettings } from "../context/AppSettingsContext";
 
@@ -30,6 +30,15 @@ type ExchangeStatus = {
   cardPool: CardOption[];
 };
 
+type TierReward = {
+  tier: string;
+  requiredCount: number;
+  rewardCards: number;
+  rewardRaffles: number;
+  eligible: boolean;
+  claimed: boolean;
+};
+
 type DeliveryAddress = {
   recipient: string;
   phone: string;
@@ -53,6 +62,7 @@ const emptyAddress: DeliveryAddress = {
 };
 
 export function Exchange() {
+  const navigate = useNavigate();
   const { theme, walletAddress } = useAppSettings();
   const [searchParams, setSearchParams] = useSearchParams();
   const isDark = theme === "dark";
@@ -66,14 +76,21 @@ export function Exchange() {
   const accentBlue = "#2563eb";
   const accentGreen = "#10b981";
 
-  const initialTab = searchParams.get("tab") === "raffle" || searchParams.get("type") === "raffle" ? "raffle" : "card";
-  const [activeTab, setActiveTab] = useState<"card" | "raffle">(initialTab);
+  const getTabFromParams = () => {
+    const tab = searchParams.get("tab") || searchParams.get("type");
+    if (tab === "raffle") return "raffle";
+    if (tab === "tier") return "tier";
+    return "card";
+  };
+  const [activeTab, setActiveTab] = useState<"card" | "raffle" | "tier">(getTabFromParams());
   const [loading, setLoading] = useState(true);
   const [points, setPoints] = useState(0);
   const [raffleCount, setRaffleCount] = useState<number | null>(null);
   const [status, setStatus] = useState<ExchangeStatus | null>(null);
+  const [tierRewards, setTierRewards] = useState<TierReward[]>([]);
   const [cardPurchasing, setCardPurchasing] = useState(false);
   const [rafflePurchasing, setRafflePurchasing] = useState<number | null>(null);
+  const [claimingTier, setClaimingTier] = useState<string | null>(null);
   const [confirmCard, setConfirmCard] = useState(false);
   const [cardResult, setCardResult] = useState<CardResult | null>(null);
   const [showDelivery, setShowDelivery] = useState(false);
@@ -86,15 +103,16 @@ export function Exchange() {
   };
 
   useEffect(() => {
-    const nextTab = searchParams.get("tab") === "raffle" || searchParams.get("type") === "raffle" ? "raffle" : "card";
-    setActiveTab(nextTab);
+    setActiveTab(getTabFromParams());
   }, [searchParams]);
 
-  const selectTab = (tab: "card" | "raffle") => {
+  const selectTab = (tab: "card" | "raffle" | "tier") => {
     setActiveTab(tab);
     const nextParams = new URLSearchParams(searchParams);
     if (tab === "raffle") {
       nextParams.set("tab", "raffle");
+    } else if (tab === "tier") {
+      nextParams.set("tab", "tier");
     } else {
       nextParams.delete("tab");
       nextParams.delete("type");
@@ -110,16 +128,24 @@ export function Exchange() {
     return data as ExchangeStatus;
   };
 
+  const fetchTierRewards = async () => {
+    const res = await fetch(`${API_BASE}/api/auth/tier-rewards`, { headers: apiHeaders() });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "티어 혜택 조회 실패");
+    setTierRewards(data.rewards ?? []);
+    return data.rewards as TierReward[];
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
-      const tasks: Promise<unknown>[] = [fetchStatus()];
+      const tasks: Promise<unknown>[] = [fetchStatus(), fetchTierRewards()];
       if (walletAddress) {
         tasks.push(fetch(`${API_BASE}/api/points?walletAddress=${walletAddress}`, { headers: apiHeaders() }).then(r => r.json()));
         tasks.push(fetch(`${API_BASE}/api/raffle/my?walletAddress=${walletAddress}`, { headers: apiHeaders() }).then(r => r.json()).catch(() => ({ success: false, data: [] })));
       }
 
-      const [, pointData, raffleData] = await Promise.all(tasks);
+      const [, , pointData, raffleData] = await Promise.all(tasks);
       if (pointData && typeof pointData === "object" && "success" in pointData && pointData.success) {
         setPoints(Number(pointData.data?.balance ?? pointData.data ?? 0));
       }
@@ -210,6 +236,29 @@ export function Exchange() {
     }
   };
 
+  const handleClaimTierReward = async (tier: string) => {
+    if (!walletAddress) { showToast("지갑 연결이 필요합니다.", "error"); return; }
+    setClaimingTier(tier);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/claim-tier-reward`, {
+        method: "POST",
+        headers: apiHeaders(),
+        body: JSON.stringify({ walletAddress, tier }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "티어 혜택 수령 실패");
+      await Promise.all([fetchTierRewards(), fetchStatus()]);
+      setRaffleCount((prev) => (prev ?? 0) + Number(data.rewardRaffles ?? 0));
+      const cardCount = Number(data.rewardCards ?? data.awardedCards?.length ?? 0);
+      const raffleRewardCount = Number(data.rewardRaffles ?? data.issuedRaffleNftIds?.length ?? 0);
+      showToast(`${tier} 혜택 수령 완료: 실물 NFT ${cardCount}장, 응모권 ${raffleRewardCount}장`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "티어 혜택 수령 중 오류가 발생했습니다.", "error");
+    } finally {
+      setClaimingTier(null);
+    }
+  };
+
   const deliveryFilled = delivery.recipient.trim() && delivery.phone.trim() && delivery.zipcode.trim() && delivery.address.trim();
 
   return (
@@ -228,13 +277,14 @@ export function Exchange() {
         {[
           { key: "card", label: "랜덤 실물 NFT", icon: Gift },
           { key: "raffle", label: "응모권 교환", icon: Ticket },
+          { key: "tier", label: "티어 혜택", icon: Award },
         ].map(tab => {
           const Icon = tab.icon;
           const active = activeTab === tab.key;
           return (
             <button
               key={tab.key}
-              onClick={() => selectTab(tab.key as "card" | "raffle")}
+              onClick={() => selectTab(tab.key as "card" | "raffle" | "tier")}
               className="flex items-center gap-2 px-5 py-2.5 rounded-[14px] text-[0.92rem] font-bold transition-all"
               style={{
                 background: active ? (isDark ? "rgba(37,99,235,0.22)" : "#eef3ff") : surfaceBg,
@@ -247,6 +297,18 @@ export function Exchange() {
             </button>
           );
         })}
+        <button
+          onClick={() => navigate("/physical-exchange")}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-[14px] text-[0.92rem] font-bold transition-all"
+          style={{
+            background: surfaceBg,
+            border: surfaceBorder,
+            color: mutedText,
+          }}
+        >
+          <PackageCheck className="w-4 h-4" />
+          실물 교환
+        </button>
       </div>
 
       <PointSummary
@@ -421,6 +483,65 @@ export function Exchange() {
                 </div>
               );
             })}
+          </motion.div>
+        )}
+
+        {activeTab === "tier" && (
+          <motion.div key="tier" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-5">
+            <div className="rounded-[20px] border p-6" style={{ background: panelBg, border: panelBorder }}>
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-[15px] flex items-center justify-center shrink-0" style={{ background: isDark ? "rgba(245,158,11,0.16)" : "#fff7ed" }}>
+                  <Award className="w-6 h-6" style={{ color: "#d97706" }} />
+                </div>
+                <div>
+                  <h2 className="text-[1.25rem] font-black" style={{ color: neutralText }}>등급 달성 혜택</h2>
+                  <p className="mt-1 text-[0.9rem] leading-6" style={{ color: mutedText }}>
+                    티어가 오르면 최초 1회 실물 NFT와 우선 응모권을 받을 수 있어요.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid md:grid-cols-3 gap-4">
+                {tierRewards.map((reward) => {
+                  const canClaim = walletAddress && reward.eligible && !reward.claimed && (reward.rewardCards > 0 || reward.rewardRaffles > 0);
+                  const loadingTier = claimingTier === reward.tier;
+                  return (
+                    <div key={reward.tier} className="rounded-[16px] border p-4 flex flex-col min-h-[250px]" style={{ background: surfaceBg, border: surfaceBorder }}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="rounded-full px-3 py-1 text-[0.82rem] font-black" style={{
+                          background: reward.tier === "골드" ? "#fff7ed" : reward.tier === "실버" ? "#eef2f7" : "#fff4e6",
+                          color: reward.tier === "골드" ? "#b45309" : reward.tier === "실버" ? "#64748b" : "#b45309",
+                        }}>
+                          {reward.tier}
+                        </span>
+                        <span className="text-[0.75rem] font-bold" style={{ color: reward.claimed ? accentGreen : reward.eligible ? accentBlue : mutedText }}>
+                          {reward.claimed ? "수령 완료" : reward.eligible ? "수령 가능" : `${reward.requiredCount}회 달성 필요`}
+                        </span>
+                      </div>
+
+                      <div className="mt-5 space-y-3">
+                        <InfoRow label="조건" value={`입장 ${reward.requiredCount}회`} mutedText={mutedText} neutralText={neutralText} surfaceBg={panelBg} surfaceBorder={surfaceBorder} />
+                        <InfoRow label="실물 NFT" value={`${reward.rewardCards}장`} mutedText={mutedText} neutralText={neutralText} surfaceBg={panelBg} surfaceBorder={surfaceBorder} />
+                        <InfoRow label="우선 응모권" value={`${reward.rewardRaffles}장`} mutedText={mutedText} neutralText={neutralText} surfaceBg={panelBg} surfaceBorder={surfaceBorder} />
+                      </div>
+
+                      <Button
+                        disabled={!canClaim || loadingTier}
+                        onClick={() => handleClaimTierReward(reward.tier)}
+                        className="w-full h-11 rounded-[12px] text-[0.9rem] font-black mt-auto"
+                        style={{
+                          background: canClaim ? "linear-gradient(135deg, #132850, #2563eb)" : (isDark ? "rgba(88,110,134,0.2)" : "#e2e8f0"),
+                          color: canClaim ? "#fff" : mutedText,
+                          cursor: canClaim && !loadingTier ? "pointer" : "not-allowed",
+                        }}
+                      >
+                        {loadingTier ? "수령 중..." : reward.claimed ? "이미 받았어요" : reward.eligible ? "실물 NFT 받기" : "아직 받을 수 없어요"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

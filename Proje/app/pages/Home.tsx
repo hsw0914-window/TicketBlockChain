@@ -14,6 +14,7 @@ import {
 // ─── DATA ────────────────────────────────────────────────────────────────────
 
 const PLATFORM_SUBTITLE = "구단별 입장권, 선수 카드 NFT, 공식 재판매를 한곳에서 관리하는 야구 팬 플랫폼";
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 
 // 경기 상태 → 표시용 변환 헬퍼
 const STADIUM_IMAGES = [
@@ -88,11 +89,15 @@ function NftTicketCard() {
   const { walletAddress } = useAppSettings();
   const [ticket, setTicket] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [qrExpanded, setQrExpanded] = useState(false);
+  const [isMobileView, setIsMobileView] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches
+  );
 
   const fetchNearest = useCallback(() => {
     const token = localStorage.getItem("auth_token");
     if (!token) { setLoading(false); return; }
-    fetch(`${import.meta.env.VITE_API_URL}/api/my-tickets/nearest`, {
+    fetch(`${API_BASE}/api/my-tickets/nearest`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -103,6 +108,14 @@ function NftTicketCard() {
 
   // 초기 로드
   useEffect(() => { fetchNearest(); }, [fetchNearest]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 768px)");
+    const syncMobileView = () => setIsMobileView(mediaQuery.matches);
+    syncMobileView();
+    mediaQuery.addEventListener("change", syncMobileView);
+    return () => mediaQuery.removeEventListener("change", syncMobileView);
+  }, []);
 
   // 티켓이 있을 때 10초마다 폴링 (QR 스캔 후 사용완료 자동 반영)
   useEffect(() => {
@@ -116,6 +129,18 @@ function NftTicketCard() {
     walletAddress,
     ticket ? "ACTIVE" : "NONE",
   );
+  const activeQrPayload = ticket && qrData?.available && qrData.qrToken
+    ? JSON.stringify({ ticketId: ticket.ticketId, qrToken: qrData.qrToken })
+    : null;
+
+  useEffect(() => {
+    if (!qrExpanded) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setQrExpanded(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [qrExpanded]);
 
   // 날짜/시간 포맷
   const matchDate = ticket?.matchTime ? ticket.matchTime.slice(0, 10).replace(/-/g, ".") : "—";
@@ -123,11 +148,11 @@ function NftTicketCard() {
 
   return (
     <motion.div
-      initial={{ opacity: 0, rotateY: -15, x: 60 }}
+      initial={{ opacity: 0, rotateY: isMobileView ? 0 : -15, x: isMobileView ? 0 : 60 }}
       animate={{ opacity: 1, rotateY: 0, x: 0 }}
       transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1], delay: 0.3 }}
       style={{ perspective: "1000px" }}
-      className="relative w-full max-w-sm mx-auto"
+      className="home-ticket-card-root relative w-full max-w-sm mx-auto"
     >
       {/* Glow */}
       <div className="absolute inset-0 rounded-3xl blur-3xl -z-10"
@@ -210,11 +235,16 @@ function NftTicketCard() {
               {/* QR 영역 */}
               <div className="p-3 rounded-2xl"
                 style={{ background: "rgba(20,86,160,0.10)", border: "1px solid rgba(126,200,255,0.22)" }}>
-                {qrData?.available && qrData.qrToken ? (
+                {activeQrPayload ? (
                   <div className="flex items-center gap-4">
-                    <div className="rounded-xl overflow-hidden bg-white p-1.5 shrink-0">
-                      <QRCodeSVG value={JSON.stringify({ ticketId: ticket?.ticketId, qrToken: qrData.qrToken })} size={56} />
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setQrExpanded(true)}
+                      className="rounded-xl overflow-hidden bg-white p-1.5 shrink-0 transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-[#7ec8ff]"
+                      aria-label="입장 QR 크게 보기"
+                    >
+                      <QRCodeSVG value={activeQrPayload} size={56} />
+                    </button>
                     <div>
                       <p className="text-xs text-[#a393d1] mb-0.5">현장 입장 QR</p>
                       <p className="text-xs text-white font-bold" style={{ color: "#2dba73" }}>
@@ -251,6 +281,52 @@ function NftTicketCard() {
         <div className="h-1 w-full opacity-60"
           style={{ background: "linear-gradient(90deg, transparent, #1456a0, #2dba73, transparent)" }} />
       </div>
+
+      {activeQrPayload && qrExpanded && (
+        <div
+          className="fixed inset-0 z-50 flex cursor-pointer items-center justify-center p-4"
+          style={{ background: "rgba(2, 8, 23, 0.72)", backdropFilter: "blur(8px)" }}
+          onClick={() => setQrExpanded(false)}
+        >
+          <div
+            className="relative w-full max-w-[430px] cursor-pointer rounded-[28px] p-7 text-center"
+            style={{
+              background: "#ffffff",
+              border: "1px solid rgba(126,200,255,0.28)",
+              boxShadow: "0 28px 80px rgba(2,8,23,0.32)",
+            }}
+            onClick={() => setQrExpanded(false)}
+          >
+            <button
+              type="button"
+              onClick={() => setQrExpanded(false)}
+              className="absolute right-4 top-4 rounded-full p-2 transition-colors hover:bg-slate-100"
+              aria-label="QR 확대 닫기"
+            >
+              <X className="h-5 w-5 text-slate-500" />
+            </button>
+
+            <p className="mb-1 text-[0.75rem] font-bold tracking-[0.24em] uppercase" style={{ color: "#1456a0" }}>
+              Entry QR
+            </p>
+            <h3 className="mb-2 text-xl font-black" style={{ color: "#14253f" }}>{ticket.matchName}</h3>
+            <p className="mb-5 text-sm" style={{ color: "#64748b" }}>{ticket.seatInfo}</p>
+
+            <div className="mx-auto mb-5 flex max-w-full justify-center rounded-[26px] bg-white p-4" style={{ border: "1px solid #dbe4ed" }}>
+              <QRCodeSVG value={activeQrPayload} size={280} />
+            </div>
+
+            <div className="rounded-[16px] px-4 py-3" style={{ background: "#eef7f1", border: "1px solid #cdebd8" }}>
+              <p className="text-sm font-bold" style={{ color: "#15803d" }}>
+                {formattedCountdown} 후 자동 갱신
+              </p>
+              <p className="mt-1 text-xs" style={{ color: "#64748b" }}>
+                현장 게이트에서 이 QR을 제시해 주세요.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -321,7 +397,7 @@ export function Home() {
   }
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/api/tickets/games`)
+    fetch(`${API_BASE}/api/tickets/games`)
       .then((r) => r.json())
       .then((res: { success: boolean; data: GameData[] }) => {
         const data = res.data ?? [];
@@ -348,7 +424,7 @@ export function Home() {
   const ModalIcon = blockedStatus === "need_login" ? Lock : blockedStatus === "need_wallet" ? Wallet : ShieldCheck;
 
   return (
-    <div className="w-full">
+    <div className="home-page w-full">
       {/* ── 접근 제한 모달 ── */}
       {blockedStatus && modalInfo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}>
@@ -380,16 +456,16 @@ export function Home() {
       {/* ═══════════════════════════════════════════════════════════════════════
           SECTION 1 · HERO BANNER
       ═══════════════════════════════════════════════════════════════════════ */}
-      <section className="relative min-h-screen flex items-center overflow-hidden">
+      <section className="home-hero relative min-h-screen flex items-center overflow-hidden">
         {/* Background image */}
         <div className="absolute inset-0 z-0">
           <img
             src="https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=1920&q=80"
             alt="baseball stadium"
-            className="w-full h-full object-cover"
+            className="home-hero-bg-image w-full h-full object-cover"
           />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to right, rgba(5,0,16,0.97) 40%, rgba(5,0,16,0.75) 70%, rgba(5,0,16,0.5) 100%)" }} />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(5,0,16,0.9) 0%, transparent 50%)" }} />
+          <div className="home-hero-side-overlay absolute inset-0" style={{ background: "linear-gradient(to right, rgba(5,0,16,0.97) 40%, rgba(5,0,16,0.75) 70%, rgba(5,0,16,0.5) 100%)" }} />
+          <div className="home-hero-bottom-overlay absolute inset-0" style={{ background: "linear-gradient(to top, rgba(5,0,16,0.9) 0%, transparent 50%)" }} />
         </div>
 
         {/* Scan line effect */}
@@ -397,17 +473,17 @@ export function Home() {
           style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,1) 2px, rgba(255,255,255,1) 4px)" }} />
 
         {/* Content */}
-        <div className="relative z-10 w-full max-w-[1600px] mx-auto px-6 pt-[70px]">
-          <div className="grid lg:grid-cols-2 gap-12 items-center min-h-[calc(100vh-70px)] py-16">
+        <div className="home-hero-shell relative z-10 w-full max-w-[1600px] mx-auto px-6 pt-[70px]">
+          <div className="home-hero-grid grid lg:grid-cols-2 gap-12 items-center min-h-[calc(100vh-70px)] py-16">
 
             {/* Left: Event info */}
-            <div className="space-y-6">
+            <div className="home-hero-copy space-y-6">
               <motion.div
                 initial={{ opacity: 0, x: -40 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
               >
-                <div className="flex items-center gap-3 mb-6">
+                <div className="home-hero-badges flex items-center gap-3 mb-6">
                   <div className="soft-badge"
                     style={{ background: "rgba(20,86,160,0.18)", border: "1px solid rgba(126,200,255,0.38)", color: "#7ec8ff" }}>
                     <div className="w-1.5 h-1.5 rounded-full bg-[#7ec8ff] animate-pulse" />
@@ -420,7 +496,7 @@ export function Home() {
                   </div>
                 </div>
 
-                <h1 className="mb-5" style={{ fontSize: "clamp(2.6rem, 5vw, 4.4rem)", fontWeight: 800, lineHeight: 1.02, letterSpacing: "-0.05em" }}>
+                <h1 className="home-hero-title mb-5" style={{ fontSize: "clamp(2.6rem, 5vw, 4.4rem)", fontWeight: 800, lineHeight: 1.02, letterSpacing: "-0.05em" }}>
                   <span className="block text-white">야구 팬을 위한</span>
                   <span className="block mt-2" style={{
                     background: "linear-gradient(90deg, #7ec8ff, #ffffff, #9fe1bf)",
@@ -429,7 +505,7 @@ export function Home() {
                   }}>BASE CHAIN</span>
                 </h1>
 
-                <p className="page-body max-w-xl">
+                <p className="home-hero-subtitle page-body max-w-xl">
                   {PLATFORM_SUBTITLE}
                 </p>
               </motion.div>
@@ -441,7 +517,7 @@ export function Home() {
                 className="space-y-3"
               >
                 {/* Event highlight */}
-                <div className="p-5 rounded-2xl"
+                <div className="home-feature-game p-5 rounded-2xl"
                   style={{ background: "rgba(20,86,160,0.10)", border: "1px solid rgba(126,200,255,0.18)", backdropFilter: "blur(10px)" }}>
                   <p className="page-eyebrow text-[#c6d5ea] mb-3">다음 주요 경기</p>
                   {heroGame ? (
@@ -452,7 +528,7 @@ export function Home() {
                       <h2 className="section-title text-[1.65rem] text-white mb-3">
                         {heroGame.home_team} vs {heroGame.away_team}
                       </h2>
-                      <div className="space-y-2">
+                      <div className="home-game-meta space-y-2">
                         <div className="flex items-center gap-2 text-[0.95rem] text-[#c8b9f0]">
                           <Calendar className="w-4 h-4 text-[#7ec8ff] shrink-0" />
                           {heroGame.game_date} ({heroGame.day_of_week}) {heroGame.game_time?.slice(0, 5)}
@@ -482,10 +558,10 @@ export function Home() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.8, delay: 0.35 }}
-                className="flex flex-wrap gap-3"
+                className="home-hero-actions flex flex-wrap gap-3"
               >
                 <Link to="/tickets">
-                  <button className="flex items-center gap-2 px-7 py-3.5 rounded-xl text-sm font-bold text-white transition-all duration-200 hover:scale-105 hover:brightness-110"
+                  <button className="home-primary-cta flex items-center gap-2 px-7 py-3.5 rounded-xl text-sm font-bold text-white transition-all duration-200 hover:scale-105 hover:brightness-110"
                     style={{ background: "linear-gradient(135deg, #1456a0, #1e7fd0)", boxShadow: "0 0 24px rgba(20,86,160,0.35), 0 0 48px rgba(20,86,160,0.12)" }}>
                     <Ticket className="w-4 h-4" />
                     경기 예매하기
@@ -493,7 +569,7 @@ export function Home() {
                   </button>
                 </Link>
                 <Link to="/my-tickets">
-                  <button className="flex items-center gap-2 px-7 py-3.5 rounded-xl text-sm font-bold transition-all duration-200 hover:scale-105"
+                  <button className="home-secondary-cta flex items-center gap-2 px-7 py-3.5 rounded-xl text-sm font-bold transition-all duration-200 hover:scale-105"
                     style={{ background: "rgba(45,186,115,0.10)", border: "1px solid rgba(45,186,115,0.36)", color: "#8ff1bb", boxShadow: "0 0 16px rgba(45,186,115,0.12)" }}>
                     <QrCode className="w-4 h-4" />
                     내 입장권 보기
@@ -506,7 +582,7 @@ export function Home() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.8, delay: 0.5 }}
-                className="flex gap-6 pt-2"
+                className="home-hero-stats flex gap-6 pt-2"
               >
                 {[
                   { value: "18,240+", label: "발급된 입장권 NFT", color: "#7ec8ff" },
@@ -522,7 +598,7 @@ export function Home() {
             </div>
 
             {/* Right: NFT Ticket Card */}
-            <div className="flex justify-center lg:justify-end">
+            <div className="home-ticket-preview flex justify-center lg:justify-end">
               <NftTicketCard />
             </div>
           </div>

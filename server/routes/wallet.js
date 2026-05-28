@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const { requireAuth } = require('../middleware/auth');
 const { verifyEthSignature } = require('../utils/didUtils');
+const fabricService = require('../services/fabricBridge');
+const { grantPresentationDemoAssetsIfEligible } = require('../services/presentationDemoService');
 
 const router = express.Router();
 let _pool;
@@ -43,6 +45,12 @@ router.post('/connect', requireAuth, async (req, res) => {
         'INSERT INTO user_wallets (user_id, wallet_address) VALUES (?, ?)',
         [req.user.user_id, normalizedAddress]
       );
+    }
+
+    try {
+      await grantPresentationDemoAssetsIfEligible(_pool, req.user.user_id, fabricService);
+    } catch (demoErr) {
+      console.error('[wallet/connect] 시연용 자동 지급 실패:', demoErr.message);
     }
 
     res.json({ message: '지갑이 등록되었습니다. 서명 검증을 진행해주세요.', address: normalizedAddress });
@@ -97,6 +105,12 @@ router.post('/verify', requireAuth, async (req, res) => {
       'UPDATE user_wallets SET is_verified = TRUE, verified_at = NOW(), nonce = NULL WHERE user_id = ?',
       [req.user.user_id]
     );
+
+    try {
+      await grantPresentationDemoAssetsIfEligible(_pool, req.user.user_id, fabricService);
+    } catch (demoErr) {
+      console.error('[wallet/verify] 시연용 자동 지급 실패:', demoErr.message);
+    }
 
     res.json({ message: '지갑 서명 검증 완료!', verified: true, address: wallet.wallet_address });
   } catch (err) {

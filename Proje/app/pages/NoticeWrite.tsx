@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 
 type NoticeType = "공지" | "이벤트" | "업데이트";
 
-const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000").replace(/\/$/, "");
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 
 export function NoticeWrite() {
   const navigate = useNavigate();

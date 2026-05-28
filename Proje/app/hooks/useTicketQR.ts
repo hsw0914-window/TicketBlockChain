@@ -4,6 +4,7 @@ export interface QRData {
   available: boolean;
   qrToken?: string;
   remainingSeconds?: number;
+  demo?: boolean;
   message: string;
 }
 
@@ -67,7 +68,7 @@ export function useTicketQR(
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [qrData?.available]);
+  }, [qrData?.available, qrData?.remainingSeconds]);
 
   // QR 비활성화 상태: 30초마다 폴링 (2시간 전 window 감지)
   useEffect(() => {

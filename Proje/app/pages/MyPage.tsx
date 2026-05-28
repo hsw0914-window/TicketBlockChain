@@ -31,6 +31,7 @@ type Preferences = {
 };
 
 const PREFERENCES_STORAGE_KEY = "base-chain-user-preferences-v1";
+const INITIAL_TX_VISIBLE_COUNT = 5;
 
 const defaultPreferences: Preferences = {
   ticketAlerts: true,
@@ -98,6 +99,7 @@ export function MyPage() {
   type TxLog = { id: string; label: string; txHash: string; createdAt: string; explorerUrl: string; };
   const [txLogs, setTxLogs] = useState<TxLog[]>([]);
   const [txLoading, setTxLoading] = useState(false);
+  const [txExpanded, setTxExpanded] = useState(false);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -211,6 +213,8 @@ export function MyPage() {
 
   const isDidVerified = didStatus?.did_status === "verified";
   const authSteps = didStatus?.auth_steps;
+  const visibleTxLogs = txExpanded ? txLogs : txLogs.slice(0, INITIAL_TX_VISIBLE_COUNT);
+  const hiddenTxCount = Math.max(0, txLogs.length - INITIAL_TX_VISIBLE_COUNT);
 
   return (
     <div className="page-shell space-y-8">
@@ -518,8 +522,26 @@ export function MyPage() {
             className="rounded-[24px] border px-6 py-6 flex flex-col"
             style={{ background: "#f8fafc", borderColor: "#d6dfe8", boxShadow: "0 10px 24px rgba(17,40,73,0.05)" }}
           >
-            <div className="mb-5 flex items-center gap-3">
-              <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>온체인 트랜잭션 이력</h2>
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <h2 className="section-title text-[1.15rem]" style={{ color: "#1f3248" }}>온체인 트랜잭션 이력</h2>
+                {txLogs.length > 0 && (
+                  <span className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold" style={{ background: "#eef2f6", borderColor: "#d0d8e2", color: "#6d7d90" }}>
+                    총 {txLogs.length}건
+                  </span>
+                )}
+              </div>
+              {hiddenTxCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setTxExpanded((current) => !current)}
+                  className="inline-flex h-9 items-center justify-center rounded-[10px] border px-3 text-[0.78rem] font-bold transition"
+                  style={{ background: "#fff", borderColor: "#d0d8e2", color: "#526183" }}
+                >
+                  {txExpanded ? "접기" : `${hiddenTxCount}개 더보기`}
+                  <ChevronRight className={`ml-1 h-3.5 w-3.5 transition-transform ${txExpanded ? "-rotate-90" : "rotate-90"}`} />
+                </button>
+              )}
             </div>
             {txLoading ? (
               <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin" style={{ color: "#526183" }} /></div>
@@ -527,7 +549,7 @@ export function MyPage() {
               <p className="text-center text-[0.85rem] py-6" style={{ color: "#8a9aac" }}>온체인 트랜잭션 내역이 없습니다.</p>
             ) : (
               <div className="space-y-3">
-                {txLogs.map(tx => (
+                {visibleTxLogs.map(tx => (
                   <div key={tx.id} className="flex items-center justify-between rounded-[14px] border px-4 py-3"
                     style={{ background: "#fff", borderColor: "#e2eaf2" }}>
                     <div className="flex flex-col gap-0.5 min-w-0">
@@ -548,6 +570,16 @@ export function MyPage() {
                     </a>
                   </div>
                 ))}
+                {hiddenTxCount > 0 && !txExpanded && (
+                  <button
+                    type="button"
+                    onClick={() => setTxExpanded(true)}
+                    className="w-full rounded-[14px] border px-4 py-3 text-[0.82rem] font-bold transition"
+                    style={{ background: "#eef2f6", borderColor: "#d0d8e2", color: "#526183" }}
+                  >
+                    나머지 {hiddenTxCount}개 트랜잭션 더보기
+                  </button>
+                )}
               </div>
             )}
           </section>

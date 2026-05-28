@@ -56,6 +56,11 @@ type Tier = "베이직" | "브론즈" | "실버" | "골드";
 type RaffleState = "before" | "open" | "closed";
 
 const TIER_MAX_TICKETS: Record<Tier, number> = { 베이직: 1, 브론즈: 1, 실버: 2, 골드: 2 };
+const DEMO_ALWAYS_OPEN_GAME_IDS = new Set(["PRESENTATION_RAFFLE_ALWAYS_ON"]);
+
+function isDemoAlwaysOpenGame(game: Pick<Game, "id"> | null | undefined) {
+  return Boolean(game && DEMO_ALWAYS_OPEN_GAME_IDS.has(game.id));
+}
 
 function fmtDateTime(value: string | null) {
   if (!value) return "-";
@@ -75,7 +80,17 @@ function fmtTime(value: string | null | undefined) {
   return value ? String(value).slice(0, 5) : "-";
 }
 
+function getPriorityBookingOpenAt(game: Pick<Game, "booking_open_at" | "game_date" | "game_time"> | null | undefined) {
+  if (!game) return null;
+  const baseMs = game.booking_open_at
+    ? new Date(game.booking_open_at).getTime()
+    : new Date(`${String(game.game_date).slice(0, 10)}T${String(game.game_time || "18:30:00").slice(0, 8)}+09:00`).getTime();
+  if (Number.isNaN(baseMs)) return null;
+  return new Date(baseMs - 2 * 60 * 60 * 1000).toISOString();
+}
+
 function getRaffleCloseAt(game: Game) {
+  if (isDemoAlwaysOpenGame(game)) return null;
   if (!game.raffle_open_at) return null;
   return new Date(new Date(game.raffle_open_at).getTime() + 2 * 60 * 60 * 1000).toISOString();
 }
@@ -102,6 +117,7 @@ function dDayLabel(value: string | null, nowMs: number) {
 }
 
 function raffleState(game: Game, nowMs: number): RaffleState {
+  if (isDemoAlwaysOpenGame(game)) return "open";
   if (!game.raffle_open_at) return "before";
   const open = new Date(game.raffle_open_at).getTime();
   const close = open + 2 * 60 * 60 * 1000;
@@ -122,6 +138,15 @@ function entryLabel(entry: Entry | null | undefined) {
   if (entry.status === "lost") return { label: "미당첨", bg: "#f1f5f9", text: "#64748b", border: "#e2e8f0" };
   if (entry.status === "used") return { label: "선예매 완료", bg: "#eef2ff", text: "#1e3a8a", border: "#c7d2fe" };
   return { label: "응모 완료", bg: "#eef2ff", text: "#1e3a8a", border: "#c7d2fe" };
+}
+
+function entryActionLabel(entry: Entry | null | undefined) {
+  if (!entry) return null;
+  if (entry.status === "won") return "선예매 시작하기";
+  if (entry.status === "lost") return "미당첨";
+  if (entry.status === "used") return "선예매 완료";
+  if (entry.result_visible) return "결과 확인 중";
+  return "응모 내역 확인";
 }
 
 function DateBlock({ game }: { game: Game }) {
@@ -180,7 +205,9 @@ export function Raffle() {
 
   const entryByGameId = useMemo(() => {
     const map = new Map<string, Entry>();
-    entries.forEach((entry) => map.set(entry.game_id, entry));
+    entries.forEach((entry) => {
+      if (!map.has(entry.game_id)) map.set(entry.game_id, entry);
+    });
     return map;
   }, [entries]);
 
@@ -209,11 +236,19 @@ export function Raffle() {
     [games, groups, selectedGameId],
   );
   const currentEntry = selected ? entryByGameId.get(selected.id) ?? null : null;
+  const retryableLostEntry = currentEntry?.status === "lost";
+  const activeEntry = retryableLostEntry ? null : currentEntry;
   const maxTickets = TIER_MAX_TICKETS[tier] ?? 1;
   const state = selected ? raffleState(selected, nowMs) : "before";
   const closeAt = selected ? getRaffleCloseAt(selected) : null;
   const isUrgent = state === "open" && closeAt ? new Date(closeAt).getTime() - nowMs < 24 * 60 * 60 * 1000 : false;
   const selectedRequiredTickets = Math.min(maxTickets, ticketsUsed);
+  const selectedDemoAlwaysOpen = isDemoAlwaysOpenGame(selected);
+  const priorityBookingOpenAt = getPriorityBookingOpenAt(selected);
+  const canStartPriorityBooking = Boolean(
+    currentEntry?.status === "won"
+    && (!priorityBookingOpenAt || nowMs >= new Date(priorityBookingOpenAt).getTime()),
+  );
 
   function goLoginForRaffle() {
     setMessage({ type: "error", text: "로그인 후 응모권과 응모 내역을 이용할 수 있습니다." });
@@ -266,6 +301,19 @@ export function Raffle() {
     return () => window.clearTimeout(id);
   }, [currentEntry?.id, currentEntry?.status, currentEntry?.raffle_close_at]);
 
+  useEffect(() => {
+    const needsResultRefresh = entries.some((entry) => (
+      entry.status === "applied"
+      && entry.raffle_close_at
+      && Date.now() >= new Date(entry.raffle_close_at).getTime()
+    ));
+    if (!needsResultRefresh) return;
+    const id = window.setInterval(() => {
+      void loadData();
+    }, 3_000);
+    return () => window.clearInterval(id);
+  }, [entries]);
+
   async function applyRaffle() {
     if (!selected) return;
     if (!isLoggedIn) {
@@ -308,7 +356,9 @@ export function Raffle() {
     const active = selected?.id === game.id;
     const gameState = raffleState(game, nowMs);
     const gameCloseAt = getRaffleCloseAt(game);
-    const gameEntry = entryByGameId.get(game.id) ?? null;
+    const latestEntry = entryByGameId.get(game.id) ?? null;
+    const gameEntry = latestEntry?.status === "lost" ? null : latestEntry;
+    const demoAlwaysOpen = isDemoAlwaysOpenGame(game);
     const urgent = gameState === "open" && gameCloseAt
       ? new Date(gameCloseAt).getTime() - nowMs < 24 * 60 * 60 * 1000
       : false;
@@ -339,29 +389,42 @@ export function Raffle() {
         <div className="flex min-w-[118px] flex-col items-end gap-1">
           <StatusChip state={gameState} urgent={urgent} entry={gameEntry} />
           <span className="text-[0.72rem] font-bold" style={{ color: urgent ? "#ea580c" : "#64748b" }}>
-            {gameState === "open" && gameCloseAt ? `${remainingLabel(gameCloseAt, nowMs)} 후 마감` : dDayLabel(game.raffle_open_at, nowMs)}
+            {demoAlwaysOpen ? "시연용 계속 오픈" : gameState === "open" && gameCloseAt ? `${remainingLabel(gameCloseAt, nowMs)} 후 마감` : dDayLabel(game.raffle_open_at, nowMs)}
           </span>
         </div>
       </button>
     );
   };
 
-  const canApply = Boolean(selected && state === "open" && raffleCount >= ticketsUsed && !currentEntry && isLoggedIn && walletConnected && walletAddress);
+  const canApply = Boolean(selected && state === "open" && raffleCount >= ticketsUsed && !activeEntry && isLoggedIn && walletConnected && walletAddress);
   const primaryActionLabel = !isLoggedIn
     ? "로그인 후 응모"
     : !walletConnected || !walletAddress
     ? "지갑 연결 후 응모"
-    : currentEntry?.status === "won"
-      ? "선예매 시작하기"
-      : currentEntry
-        ? "응모 내역 확인"
-        : state === "before"
-          ? "오픈 알림 받기"
-          : state === "closed"
-            ? "응모 마감"
-            : raffleCount < ticketsUsed
-              ? "교환소로 이동"
+    : activeEntry
+      ? entryActionLabel(activeEntry) ?? "응모 내역 확인"
+      : state === "before"
+        ? "오픈 알림 받기"
+        : state === "closed"
+          ? "응모 마감"
+          : raffleCount < ticketsUsed
+            ? "교환소로 이동"
+            : retryableLostEntry
+              ? "다시 응모하기"
               : "응모하기";
+
+  const primaryActionDisabled = applying
+    || (activeEntry?.status === "won" && !canStartPriorityBooking)
+    || activeEntry?.status === "used"
+    || (activeEntry?.status === "applied" && activeEntry.result_visible)
+    || (state === "closed" && !activeEntry)
+    || (state === "before" && !activeEntry);
+
+  const primaryActionIcon = activeEntry?.status === "won"
+    ? <Wallet className="mr-2 h-4 w-4" />
+    : activeEntry
+        ? <CalendarCheck className="mr-2 h-4 w-4" />
+        : <Gift className="mr-2 h-4 w-4" />;
 
   function openMyEntries() {
     if (!isLoggedIn) {
@@ -377,11 +440,20 @@ export function Raffle() {
 
   function handlePrimaryAction() {
     if (!selected) return;
-    if (currentEntry?.status === "won") {
-      navigate(`/tickets/${currentEntry.game_id}/booking?mode=priority&entryId=${currentEntry.id}`);
+    if (activeEntry?.status === "won") {
+      if (!canStartPriorityBooking) {
+        setMessage({
+          type: "error",
+          text: priorityBookingOpenAt
+            ? `선예매는 ${fmtDateTime(priorityBookingOpenAt)}부터 시작됩니다.`
+            : "아직 선예매를 시작할 수 없습니다.",
+        });
+        return;
+      }
+      navigate(`/tickets/${activeEntry.game_id}/booking?mode=priority&entryId=${activeEntry.id}`);
       return;
     }
-    if (currentEntry) {
+    if (activeEntry) {
       openMyEntries();
       return;
     }
@@ -638,7 +710,7 @@ export function Raffle() {
                   {selected ? `${selected.home_team} vs ${selected.away_team}` : "경기 선택"}
                 </h2>
               </div>
-              {selected && <StatusChip state={state} urgent={isUrgent} entry={currentEntry} />}
+              {selected && <StatusChip state={state} urgent={isUrgent} entry={activeEntry} />}
             </div>
 
             {selected ? (
@@ -646,10 +718,10 @@ export function Raffle() {
                 {[
                   ["일시", `${fmtCompactDate(selected.game_date)} ${fmtTime(selected.game_time)}`],
                   ["구장", selected.stadium_name],
-                  ["응모 마감", state === "before" ? "오픈 후 2시간" : fmtDateTime(closeAt)],
+                  ["응모 마감", selectedDemoAlwaysOpen ? "시연용 계속 오픈" : state === "before" ? "오픈 후 2시간" : fmtDateTime(closeAt)],
                   ["필요 응모권", `${selectedRequiredTickets}장`],
-                  ["결과 발표", currentEntry?.raffle_close_at ? fmtDateTime(currentEntry.raffle_close_at) : "응모 후 약 10초 뒤"],
-                  ["선예매 시작", selected.booking_open_at ? fmtDateTime(selected.booking_open_at) : "당첨 후 가능"],
+                  ["결과 발표", activeEntry?.raffle_close_at ? fmtDateTime(activeEntry.raffle_close_at) : "응모 후 약 10초 뒤"],
+                  ["선예매 시작", priorityBookingOpenAt ? fmtDateTime(priorityBookingOpenAt) : "당첨 후 가능"],
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between gap-4 border-b border-dashed py-2.5 text-[0.9rem]" style={{ borderColor: "#e2e8f0" }}>
                     <span className="font-semibold" style={{ color: "#64748b" }}>{label}</span>
@@ -657,7 +729,7 @@ export function Raffle() {
                   </div>
                 ))}
 
-                {!currentEntry && (
+                {!activeEntry && (
                   <div className="mt-4">
                     <p className="mb-2 text-[0.82rem] font-black" style={{ color: "#334155" }}>사용할 응모권</p>
                     <div className="grid grid-cols-2 gap-2">
@@ -684,37 +756,41 @@ export function Raffle() {
                 <div
                   className="mt-4 flex gap-2 rounded-[12px] border px-3 py-3 text-[0.85rem] font-semibold"
                   style={{
-                    background: currentEntry
+                    background: activeEntry
                       ? "#eef2ff"
                       : raffleCount >= ticketsUsed && state === "open"
                         ? "#ecfdf5"
                         : "#fff7ed",
-                    borderColor: currentEntry
+                    borderColor: activeEntry
                       ? "#c7d2fe"
                       : raffleCount >= ticketsUsed && state === "open"
                         ? "#bbf7d0"
                         : "#fed7aa",
-                    color: currentEntry
+                    color: activeEntry
                       ? "#1e3a8a"
                       : raffleCount >= ticketsUsed && state === "open"
                         ? "#15803d"
                         : "#ea580c",
                   }}
                 >
-                  {currentEntry ? <CalendarCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+                  {activeEntry ? <CalendarCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
                   <span>
-                    {currentEntry
-                      ? currentEntry.status === "won"
+                    {activeEntry
+                      ? activeEntry.status === "won"
                         ? "당첨되었습니다. 우선 예매를 시작할 수 있어요."
-                        : currentEntry.status === "lost"
-                          ? "응모 결과가 공개되었습니다. 이번 응모는 미당첨이에요."
+                          : activeEntry.status === "used"
+                            ? "이미 선예매를 완료한 응모입니다."
+                            : activeEntry.result_visible
+                              ? "결과를 확인 중입니다. 잠시 후 자동으로 갱신됩니다."
                           : "이미 응모한 경기입니다. 결과가 공개되면 이곳에서 확인할 수 있어요."
                       : !isLoggedIn
                         ? "로그인하면 응모권 보유 수와 내 응모 내역을 확인할 수 있어요."
                         : !walletConnected || !walletAddress
                         ? "지갑을 연결하면 응모를 진행할 수 있어요."
                         : state === "open" && raffleCount >= ticketsUsed
-                          ? `보유 응모권 ${raffleCount}장 · 응모 가능합니다.`
+                          ? retryableLostEntry
+                            ? `이전 응모는 미당첨 처리되었습니다. 보유 응모권 ${raffleCount}장으로 다시 응모할 수 있어요.`
+                            : `보유 응모권 ${raffleCount}장 · 응모 가능합니다.`
                           : state === "open"
                             ? `응모권이 ${ticketsUsed - raffleCount}장 부족해요.`
                             : state === "before"
@@ -726,21 +802,16 @@ export function Raffle() {
                 <div className="mt-4 grid gap-2">
                   <Button
                     className="h-12 rounded-[12px] font-black text-white"
-                    disabled={applying || (state === "closed" && !currentEntry) || (state === "before" && !currentEntry)}
+                    disabled={primaryActionDisabled}
                     style={{
-                      background: currentEntry?.status === "won" ? "#16a34a" : state === "open" || currentEntry ? "#1e3a8a" : "#cbd5e1",
+                      background: activeEntry?.status === "won"
+                        ? "#16a34a"
+                        : state === "open" || activeEntry ? "#1e3a8a" : "#cbd5e1",
                     }}
                     onClick={handlePrimaryAction}
                   >
-                    {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : currentEntry?.status === "won" ? <Wallet className="mr-2 h-4 w-4" /> : <Gift className="mr-2 h-4 w-4" />}
+                    {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : primaryActionIcon}
                     {primaryActionLabel}
-                  </Button>
-                  <Button
-                    className="h-10 rounded-[12px] border bg-white font-bold"
-                    style={{ borderColor: "#e2e8f0", color: "#334155" }}
-                    onClick={() => navigate(`/tickets/${selected.id}/booking`)}
-                  >
-                    좌석 선택으로 이동
                   </Button>
                 </div>
 

@@ -118,7 +118,7 @@ const fragmentSortOptions: Array<{ key: FragmentSort; label: string }> = [
   { key: "price_asc", label: "가격 낮은 순" },
 ];
 const KBO_TEAMS = ["LG", "두산", "KIA", "삼성", "SSG", "롯데", "NC", "키움", "한화", "KT"];
-const FRAGMENTS_PER_PAGE = 10;
+const FRAGMENTS_PER_PAGE = 8;
 
 function getMarketViewerHandle() {
   return localStorage.getItem("nickname") ?? "unknown";
@@ -126,6 +126,35 @@ function getMarketViewerHandle() {
 
 function formatPrice(price: number) {
   return `${price.toLocaleString()}원`;
+}
+
+function hasMarketPrice(price: number | null | undefined) {
+  return Number(price ?? 0) > 0;
+}
+
+function formatMarketPrice(price: number | null | undefined) {
+  return hasMarketPrice(price) ? formatPrice(Number(price)) : "매물 없음";
+}
+
+function getSuggestedSellPrice(fragment: Pick<FragmentMarket, "floorPrice" | "lastPrice">) {
+  if (hasMarketPrice(fragment.floorPrice)) return fragment.floorPrice + 1200;
+  if (hasMarketPrice(fragment.lastPrice)) return fragment.lastPrice;
+  return 1000;
+}
+
+function getComparableMarketPrice(fragment: Pick<FragmentMarket, "floorPrice" | "lastPrice">) {
+  if (hasMarketPrice(fragment.floorPrice)) return fragment.floorPrice;
+  if (hasMarketPrice(fragment.lastPrice)) return fragment.lastPrice;
+  return null;
+}
+
+function marketCompareLabel(sellPrice: number, quantity: number, fragment: Pick<FragmentMarket, "floorPrice" | "lastPrice">) {
+  const reference = getComparableMarketPrice(fragment);
+  const referenceLabel = hasMarketPrice(fragment.floorPrice) ? "최저가" : hasMarketPrice(fragment.lastPrice) ? "최근 체결가" : null;
+  if (!reference || !referenceLabel) return "비교 가능한 기존 매물이 없어 신규 등록가로 표시됩니다";
+  const diff = sellPrice - reference;
+  const unitLabel = diff === 0 ? `${referenceLabel}와 동일` : `${referenceLabel} 대비 ${diff > 0 ? "+" : ""}${formatPrice(diff)}`;
+  return quantity > 1 ? `${unitLabel} · 총 ${formatPrice(sellPrice * quantity)}` : unitLabel;
 }
 
 function getFragmentResultName(fragment: Pick<FragmentMarket, "fragmentName" | "resultName">) {
@@ -190,7 +219,7 @@ export function Market() {
       setMarketState(data);
       if (!selectedId && data.length > 0) {
         setSelectedId(data[0].id);
-        setSellPrice(data[0].floorPrice + 1200);
+        setSellPrice(getSuggestedSellPrice(data[0]));
       }
       setApiError(null);
     } catch {
@@ -264,7 +293,7 @@ export function Market() {
     setMarketViewMode("detail");
     setActiveFilter("전체");
     setQuery("");
-    setSellPrice(requestedFragment.floorPrice + 1200);
+    setSellPrice(getSuggestedSellPrice(requestedFragment));
     setSellQuantity(Math.min(2, Math.max(requestedFragment.owned, 1)));
   }, [authLoading, isLoggedIn, marketState, navigate, searchParams]);
 
@@ -308,12 +337,16 @@ export function Market() {
       const matchesTeam = selectedTeams.length === 0 || selectedTeams.includes(fragment.idol);
       return matchesQuery && matchesFilter && matchesTeam;
     }).sort((left, right) => {
-      if (fragmentSort === "price_desc") return right.floorPrice - left.floorPrice;
-      return left.floorPrice - right.floorPrice;
+      const leftPrice = getComparableMarketPrice(left) ?? Number.MAX_SAFE_INTEGER;
+      const rightPrice = getComparableMarketPrice(right) ?? Number.MAX_SAFE_INTEGER;
+      if (fragmentSort === "price_desc") return rightPrice - leftPrice;
+      return leftPrice - rightPrice;
     });
   }, [activeFilter, fragmentSort, marketState, query, selectedTeams]);
 
   const totalFragmentPages = Math.max(1, Math.ceil(filteredFragments.length / FRAGMENTS_PER_PAGE));
+  const fragmentPageStart = filteredFragments.length === 0 ? 0 : (fragmentPage - 1) * FRAGMENTS_PER_PAGE + 1;
+  const fragmentPageEnd = Math.min(fragmentPage * FRAGMENTS_PER_PAGE, filteredFragments.length);
   const paginatedFragments = useMemo(() => {
     const start = (fragmentPage - 1) * FRAGMENTS_PER_PAGE;
     return filteredFragments.slice(start, start + FRAGMENTS_PER_PAGE);
@@ -357,11 +390,12 @@ export function Market() {
     submitting: { label: "등록 처리 중...", hint: "지갑 서명과 장터 등록을 처리하고 있어요.", disabled: true, bg: "#1e3a8acc", color: "#ffffff" },
     success: { label: "같은 파편 추가 등록하기", hint: "등록 완료. 아래 내 매물 관리에서 바로 수정하거나 취소할 수 있어요.", disabled: false, bg: "#16a34a", color: "#ffffff" },
     error: { label: submitError?.code === "wallet" ? "지갑 연결 후 다시 등록하기" : submitError?.code === "quantity" ? "수량을 조정해 다시 등록" : "다시 시도", hint: submitError?.message ?? "등록에 실패했어요. 잠시 후 다시 시도해 주세요.", disabled: false, bg: submitError?.code === "quantity" ? "#fff7ed" : "#1e3a8a", color: submitError?.code === "quantity" ? "#ea580c" : "#ffffff", border: submitError?.code === "quantity" ? "#fed7aa" : undefined },
-    ready: { label: `${formatPrice(sellPrice)}에 판매 등록하기`, hint: `정산 ${formatPrice(Math.max(expectedSettlement, 0))} · 수수료 ${formatPrice(saleFee)}`, disabled: false, bg: "#1e3a8a", color: "#ffffff" },
+    ready: { label: `${formatPrice(totalSaleAmount)}에 ${sellQuantity}개 판매 등록하기`, hint: `단가 ${formatPrice(sellPrice)} · 정산 ${formatPrice(Math.max(expectedSettlement, 0))} · 수수료 ${formatPrice(saleFee)}`, disabled: false, bg: "#1e3a8a", color: "#ffffff" },
   };
   const sellCta = sellCtaCopy[sellCtaState];
-  const abnormalPriceRatio = selectedFragment.floorPrice > 0 ? sellPrice / selectedFragment.floorPrice : 1;
-  const hasPriceWarning = sellPrice > 0 && selectedFragment.floorPrice > 0 && (abnormalPriceRatio < 0.5 || abnormalPriceRatio > 2);
+  const comparableMarketPrice = getComparableMarketPrice(selectedFragment);
+  const abnormalPriceRatio = comparableMarketPrice ? sellPrice / comparableMarketPrice : 1;
+  const hasPriceWarning = sellPrice > 0 && Boolean(comparableMarketPrice) && (abnormalPriceRatio < 0.5 || abnormalPriceRatio > 2);
 
   const visibleFragmentListings = useMemo(() => {
     return [...selectedFragmentListings].sort((left, right) => {
@@ -374,7 +408,7 @@ export function Market() {
   const openMarketDetail = (fragment: FragmentMarket) => {
     if (!requireLogin()) return;
     setSelectedId(fragment.id);
-    setSellPrice(fragment.floorPrice + 1200);
+    setSellPrice(getSuggestedSellPrice(fragment));
     setSellQuantity(Math.min(2, Math.max(getOwnedCount(fragment), 1)));
     setMarketViewMode("detail");
   };
@@ -513,9 +547,10 @@ export function Market() {
   };
 
   const applySuggestedSellPrice = (mode: "floor" | "undercut" | "last") => {
-    if (mode === "floor") { setSellPrice(selectedFragment.floorPrice); return; }
-    if (mode === "undercut") { setSellPrice(Math.max(selectedFragment.floorPrice - 100, 1000)); return; }
-    setSellPrice(selectedFragment.lastPrice);
+    const reference = getComparableMarketPrice(selectedFragment);
+    if (mode === "floor") { setSellPrice(reference ?? getSuggestedSellPrice(selectedFragment)); return; }
+    if (mode === "undercut") { setSellPrice(reference ? Math.max(reference - 100, 1000) : getSuggestedSellPrice(selectedFragment)); return; }
+    setSellPrice(hasMarketPrice(selectedFragment.lastPrice) ? selectedFragment.lastPrice : getSuggestedSellPrice(selectedFragment));
   };
 
   const handleCancelListing = async (listingId: string) => {
@@ -551,14 +586,14 @@ export function Market() {
   const selectedViewerListings = useMemo(() => [...(selectedFragment.myListings ?? [])].sort((a, b) => a.price - b.price), [selectedFragment.myListings]);
   const totalViewerListingCount = useMemo(() => marketState.reduce((sum, f) => sum + (f.myListings?.length ?? 0), 0), [marketState]);
   const totalViewerListingQuantity = useMemo(() => marketState.reduce((sum, f) => sum + (f.myListings ?? []).reduce((q, l) => q + l.quantity, 0), 0), [marketState]);
-  const selectedListingVsFloor = selectedListing ? selectedListing.price - selectedFragment.floorPrice : null;
+  const selectedListingVsFloor = selectedListing && hasMarketPrice(selectedFragment.floorPrice) ? selectedListing.price - selectedFragment.floorPrice : null;
 
   useEffect(() => {
     if (activeTab !== "sell") return;
     if (getOwnedCount(selectedFragment) > 0 || ownedFragments.length === 0) return;
     const firstOwned = ownedFragments[0];
     setSelectedId(firstOwned.id);
-    setSellPrice(firstOwned.floorPrice);
+    setSellPrice(getSuggestedSellPrice(firstOwned));
     setSellQuantity(1);
   }, [activeTab, ownedFragments, selectedFragment]);
 
@@ -704,7 +739,7 @@ export function Market() {
                         <div className="px-3 py-2.5">
                           <h3 className="text-[0.82rem] font-bold leading-snug line-clamp-2" style={{ color: neutralText }}>{fragment.fragmentName}</h3>
                           <div className="mt-1.5 flex items-center justify-between gap-2">
-                            <p className="text-[0.92rem] font-bold" style={{ color: priceGreen }}>{formatPrice(fragment.floorPrice)}</p>
+                            <p className="text-[0.92rem] font-bold" style={{ color: priceGreen }}>{formatMarketPrice(fragment.floorPrice)}</p>
                             <span className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[0.68rem] font-semibold" style={{ background: accentSurface, border: `1px solid ${accentBorder}`, color: actionBlue }}>구매 <ArrowRight className="w-2.5 h-2.5" /></span>
                           </div>
                         </div>
@@ -722,21 +757,42 @@ export function Market() {
                 </div>
 
                 {filteredFragments.length > 0 && (
-                  <div className="mt-6 flex justify-center gap-2">
-                    {Array.from({ length: totalFragmentPages }, (_, index) => index + 1).map((page) => (
+                  <div className="mt-6 flex flex-col items-center gap-3">
+                    <p className="text-[0.78rem] font-semibold" style={{ color: mutedText }}>
+                      한 페이지 8개씩 · 총 {filteredFragments.length}개 중 {fragmentPageStart}-{fragmentPageEnd}개 표시
+                    </p>
+                    <div className="flex justify-center gap-2">
                       <button
-                        key={page}
-                        onClick={() => setFragmentPage(page)}
-                        className="h-9 min-w-9 px-3 text-[0.82rem] font-semibold transition-colors"
-                        style={{
-                          background: fragmentPage === page ? actionBlue : "#fff",
-                          border: `1px solid ${fragmentPage === page ? actionBlue : lineColor}`,
-                          color: fragmentPage === page ? "#fff" : mutedText,
-                        }}
+                        onClick={() => setFragmentPage((page) => Math.max(1, page - 1))}
+                        disabled={fragmentPage === 1}
+                        className="h-9 rounded-[10px] px-3 text-[0.8rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                        style={{ background: "#fff", border: `1px solid ${lineColor}`, color: mutedText }}
                       >
-                        {page}
+                        이전
                       </button>
-                    ))}
+                      {Array.from({ length: totalFragmentPages }, (_, index) => index + 1).map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => setFragmentPage(page)}
+                          className="h-9 min-w-9 rounded-[10px] px-3 text-[0.82rem] font-semibold transition-colors"
+                          style={{
+                            background: fragmentPage === page ? actionBlue : "#fff",
+                            border: `1px solid ${fragmentPage === page ? actionBlue : lineColor}`,
+                            color: fragmentPage === page ? "#fff" : mutedText,
+                          }}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setFragmentPage((page) => Math.min(totalFragmentPages, page + 1))}
+                        disabled={fragmentPage === totalFragmentPages}
+                        className="h-9 rounded-[10px] px-3 text-[0.8rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                        style={{ background: "#fff", border: `1px solid ${lineColor}`, color: mutedText }}
+                      >
+                        다음
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -804,7 +860,7 @@ export function Market() {
                       </div>
                     </div>
                     <div className="flex items-center gap-4 shrink-0 text-[0.8rem]">
-                      <div className="text-center"><p className="text-[0.62rem]" style={{ color: mutedText }}>최저가</p><p className="font-bold" style={{ color: priceGreen }}>{formatPrice(selectedFragment.floorPrice)}</p></div>
+                      <div className="text-center"><p className="text-[0.62rem]" style={{ color: mutedText }}>최저가</p><p className="font-bold" style={{ color: priceGreen }}>{formatMarketPrice(selectedFragment.floorPrice)}</p></div>
                       <div className="text-center"><p className="text-[0.62rem]" style={{ color: mutedText }}>판매자</p><p className="font-semibold" style={{ color: neutralText }}>{selectedFragmentListings.length}명</p></div>
                       <div className="text-center"><p className="text-[0.62rem]" style={{ color: mutedText }}>내 보유</p><p className="font-semibold" style={{ color: neutralText }}>{getOwnedCount(selectedFragment)}개</p></div>
                     </div>
@@ -890,7 +946,7 @@ export function Market() {
                   )}
 
                   <div className="grid grid-cols-2 gap-2 mb-4 text-[0.78rem]">
-                    <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>최저가</p><p className="font-semibold" style={{ color: priceGreen }}>{formatPrice(selectedFragment.floorPrice)}</p></div>
+                    <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>최저가</p><p className="font-semibold" style={{ color: priceGreen }}>{formatMarketPrice(selectedFragment.floorPrice)}</p></div>
                     <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>최근 체결</p><p className="font-semibold" style={{ color: neutralText }}>{formatPrice(selectedFragment.lastPrice)}</p></div>
                     <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>판매자 수</p><p className="font-semibold" style={{ color: neutralText }}>{selectedFragmentListings.length}명</p></div>
                     <div className="rounded-[12px] px-3 py-2.5" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>내 보유</p><p className="font-semibold" style={{ color: neutralText }}>{getOwnedCount(selectedFragment)}개 → {selectedListing ? getOwnedCount(selectedFragment) + 1 : getOwnedCount(selectedFragment)}개</p></div>
@@ -967,19 +1023,19 @@ export function Market() {
                       <button key={team} onClick={() => toggleTeam(team)} className="rounded-full px-2.5 py-1 text-[0.68rem] font-semibold" style={{ background: selectedTeams.includes(team) ? accentSurface : subtleSurface, border: selectedTeams.includes(team) ? `1px solid ${accentBorder}` : `1px solid ${lineColor}`, color: selectedTeams.includes(team) ? actionBlue : mutedText }}>{team}</button>
                     ))}
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 overflow-y-auto pr-1" style={{ maxHeight: "456px" }}>
                     {sellableFragments.length > 0 ? sellableFragments.map((fragment, index) => {
                       const selected = fragment.id === selectedId;
                       return (
                         <motion.button key={fragment.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.02 }}
-                          onClick={() => { setSelectedId(fragment.id); setSellPrice(fragment.floorPrice || fragment.lastPrice || 1000); setSellQuantity(1); setSubmitStatus("idle"); setSubmitError(null); }}
+                          onClick={() => { setSelectedId(fragment.id); setSellPrice(getSuggestedSellPrice(fragment)); setSellQuantity(1); setSubmitStatus("idle"); setSubmitError(null); }}
                           className="w-full rounded-[14px] px-3 py-3 text-left transition-all"
                           style={{ background: selected ? "#f8fbff" : subtleSurface, border: selected ? "1px solid #1e3a8a" : `1px solid ${lineColor}`, boxShadow: selected ? "0 0 0 2px #dbeafe" : "none" }}>
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="mb-2 flex items-center gap-2">
                                 <span className="rounded-full px-2 py-0.5 text-[0.64rem] font-bold" style={{ background: `${fragment.color}18`, color: fragment.color }}>{fragment.idol}</span>
-                                <span className="text-[0.7rem]" style={{ color: mutedText }}>최저가 {formatPrice(fragment.floorPrice)}</span>
+                                <span className="text-[0.7rem]" style={{ color: mutedText }}>최저가 {formatMarketPrice(fragment.floorPrice)}</span>
                               </div>
                               <p className="truncate text-[0.9rem] font-bold" style={{ color: neutralText }}>{fragment.fragmentName}</p>
                               <p className="mt-1 text-[0.74rem]" style={{ color: priceGreen }}>보유 {getOwnedCount(fragment)}개 · 판매가능</p>
@@ -1027,7 +1083,7 @@ export function Market() {
                           <p className="mt-2 text-[0.88rem]" style={{ color: mutedText }}>{selectedFragment.idol} · 보유 {selectedOwnedCount}개 · 판매 등록 가능</p>
                         </div>
                         <div className="grid min-w-[260px] grid-cols-2 gap-2 text-[0.8rem]">
-                          <div className="rounded-[13px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>시장 최저가</p><p className="mt-1 font-black" style={{ color: priceGreen }}>{formatPrice(selectedFragment.floorPrice)}</p></div>
+                          <div className="rounded-[13px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>시장 최저가</p><p className="mt-1 font-black" style={{ color: priceGreen }}>{formatMarketPrice(selectedFragment.floorPrice)}</p></div>
                           <div className="rounded-[13px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>최근 체결가</p><p className="mt-1 font-black" style={{ color: neutralText }}>{formatPrice(selectedFragment.lastPrice)}</p></div>
                           <div className="rounded-[13px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>판매자 수</p><p className="mt-1 font-black" style={{ color: neutralText }}>{selectedFragmentListings.length}명</p></div>
                           <div className="rounded-[13px] px-3 py-3" style={{ background: subtleSurface, border: `1px solid ${lineColor}` }}><p style={{ color: mutedText }}>내 보유</p><p className="mt-1 font-black" style={{ color: neutralText }}>{selectedOwnedCount}개</p></div>
@@ -1069,7 +1125,7 @@ export function Market() {
                           <div><p className="text-[0.72rem]" style={{ color: mutedText }}>판매 수수료</p><p className="mt-1 font-black" style={{ color: neutralText }}>{formatPrice(saleFee)}</p></div>
                           <div><p className="text-[0.72rem]" style={{ color: mutedText }}>예상 정산액</p><p className="mt-1 text-[1.15rem] font-black" style={{ color: priceGreen }}>{formatPrice(Math.max(expectedSettlement, 0))}</p></div>
                         </div>
-                        <p className="mt-4 text-[0.84rem] leading-6" style={{ color: mutedText }}>{selectedFragment.fragmentName}을 {formatPrice(sellPrice)}에 {sellQuantity}개 등록합니다. 최저가 대비 {sellPrice - selectedFragment.floorPrice === 0 ? "동일" : `${sellPrice > selectedFragment.floorPrice ? "+" : ""}${formatPrice(sellPrice - selectedFragment.floorPrice)}`}이고, 예상 정산액은 {formatPrice(Math.max(expectedSettlement, 0))}입니다.</p>
+                        <p className="mt-4 text-[0.84rem] leading-6" style={{ color: mutedText }}>{selectedFragment.fragmentName}을 단가 {formatPrice(sellPrice)}, 총 {sellQuantity}개({formatPrice(totalSaleAmount)})로 등록합니다. {marketCompareLabel(sellPrice, sellQuantity, selectedFragment)}이고, 예상 정산액은 {formatPrice(Math.max(expectedSettlement, 0))}입니다.</p>
                       </div>
                     </>
                   )}

@@ -30,7 +30,7 @@ const AUTH_CHANGED_EVENT = "base-chain-auth-changed";
 const WALLET_REFRESH_EVENT = "base-chain-wallet-refresh";
 const API_BASE = (
   (import.meta.env.VITE_API_URL as string | undefined) ??
-  (typeof window !== "undefined" ? window.location.origin : "http://localhost:4000")
+  (typeof window !== "undefined" ? window.location.origin : "")
 ).replace(/\/$/, "");
 
 const AppSettingsContext = createContext<AppSettingsContextValue | null>(null);

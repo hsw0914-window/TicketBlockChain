@@ -6,15 +6,163 @@ const { requireAuth } = require('../middleware/auth');
 const fabricService = require('../services/fabricBridge');
 const membershipService = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
+const { grantPresentationDemoAssetsIfEligible } = require('../services/presentationDemoService');
 
 const router = express.Router();
 let _pool;
+let loginTrackingReady = false;
 
 function setPool(pool) {
   _pool = pool;
 }
 
 const jwtSecret = () => process.env.JWT_SECRET;
+
+function getClientIp(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwarded || req.socket?.remoteAddress || null;
+}
+
+async function ensureLoginTrackingColumns() {
+  if (loginTrackingReady) return;
+  const [columns] = await _pool.query(`SHOW COLUMNS FROM users`);
+  const existing = new Set(columns.map((column) => column.Field));
+  const alters = [];
+  if (!existing.has('last_login_at')) {
+    alters.push(`ADD COLUMN last_login_at DATETIME DEFAULT NULL AFTER updated_at`);
+  }
+  if (!existing.has('last_login_ip')) {
+    alters.push(`ADD COLUMN last_login_ip VARCHAR(100) DEFAULT NULL AFTER last_login_at`);
+  }
+  if (!existing.has('last_login_user_agent')) {
+    alters.push(`ADD COLUMN last_login_user_agent VARCHAR(255) DEFAULT NULL AFTER last_login_ip`);
+  }
+  if (alters.length > 0) {
+    await _pool.query(`ALTER TABLE users ${alters.join(', ')}`);
+  }
+  loginTrackingReady = true;
+}
+
+async function recordLogin(req, userId) {
+  try {
+    await ensureLoginTrackingColumns();
+    await _pool.query(
+      `UPDATE users
+          SET last_login_at = NOW(),
+              last_login_ip = ?,
+              last_login_user_agent = ?
+        WHERE user_id = ?`,
+      [
+        getClientIp(req),
+        String(req.headers['user-agent'] || '').slice(0, 255) || null,
+        userId,
+      ],
+    );
+  } catch (err) {
+    console.error('[auth] 로그인 추적 저장 실패:', err.message);
+  }
+}
+
+function requireAdminUser(req, res) {
+  if (req.user?.role !== 'admin') {
+    res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+    return false;
+  }
+  return true;
+}
+
+function tierRewardRows(membership, claimedTiers = new Set()) {
+  const currentIdx = membership.joined ? membershipService.TIER_ORDER.indexOf(membership.tier) : -1;
+  return membershipService.TIER_ORDER
+    .filter((tier) => tier !== '베이직')
+    .map((tier) => {
+      const idx = membershipService.TIER_ORDER.indexOf(tier);
+      const reward = membershipService.TIER_REWARDS[tier] || { cards: 0, raffles: 0 };
+      return {
+        tier,
+        requiredCount: membershipService.TIER_REQUIREMENTS[tier] || 0,
+        rewardCards: reward.cards,
+        rewardRaffles: reward.raffles,
+        eligible: membership.joined && idx <= currentIdx,
+        claimed: claimedTiers.has(tier),
+      };
+    });
+}
+
+async function claimTierReward({ userId, walletAddress, tier }) {
+  const [[existingReward]] = await _pool.query(
+    `SELECT id FROM membership_tier_rewards WHERE user_id = ? AND tier = ?`,
+    [userId, tier],
+  );
+  if (existingReward) {
+    const err = new Error('이미 해당 티어 혜택을 수령했습니다.');
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const reward = membershipService.TIER_REWARDS[tier] || { cards: 0, raffles: 0 };
+  const awardedCards = await membershipService.issueRewardCards(_pool, userId, reward.cards, tier);
+  const issuedRaffleNftIds = await membershipService.issueRaffleNfts({
+    pool: _pool,
+    fabricService,
+    userId,
+    walletAddress,
+    count: reward.raffles,
+    source: 'TIER_REWARD',
+    expiresAt: membershipService.addDays(new Date(), 60),
+  });
+
+  await _pool.query(
+    `INSERT INTO membership_tier_rewards
+       (id, user_id, tier, reward_cards, reward_raffles, card_payload_json, raffle_nft_ids)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      crypto.randomUUID(),
+      userId,
+      tier,
+      reward.cards,
+      reward.raffles,
+      JSON.stringify(awardedCards),
+      JSON.stringify(issuedRaffleNftIds),
+    ],
+  );
+
+  const rewardMessage = [
+    reward.cards > 0 ? `실물 NFT ${reward.cards}장` : '',
+    reward.raffles > 0 ? `응모권 ${reward.raffles}장` : '',
+  ].filter(Boolean).join(', ');
+  await notificationService.recordNotification(_pool, {
+    userId,
+    category: 'MEMBERSHIP',
+    title: `${tier} 티어 혜택 수령 완료`,
+    message: rewardMessage ? `${tier} 최초 혜택으로 ${rewardMessage}이 지급되었습니다.` : '티어 혜택 수령이 완료되었습니다.',
+    metadata: { tier, rewardCards: reward.cards, rewardRaffles: reward.raffles, issuedRaffleNftIds },
+  });
+  if (issuedRaffleNftIds.length > 0) {
+    await notificationService.recordNotification(_pool, {
+      userId,
+      category: 'RAFFLE',
+      title: '응모권 획득',
+      message: `${tier} 최초 혜택으로 응모권 ${issuedRaffleNftIds.length}장이 지급되었습니다.`,
+      amount: issuedRaffleNftIds.length,
+      metadata: { source: 'TIER_REWARD', tier, raffleNftIds: issuedRaffleNftIds },
+    });
+  }
+
+  return { reward, awardedCards, issuedRaffleNftIds };
+}
+
+async function syncFabricMembershipTier({ walletAddress, tier }) {
+  const userDidHash = fabricService.hashDid(walletAddress);
+  const targetGrade = membershipService.toFabricTier(tier);
+  try {
+    await fabricService.tierUpMembership({ userDidHash, targetGrade });
+  } catch (err) {
+    if (err?.message !== 'MEMBERSHIP_REQUIRED') throw err;
+    await fabricService.joinMembership({ userDidHash });
+    await fabricService.tierUpMembership({ userDidHash, targetGrade });
+  }
+}
 
 // POST /api/auth/register — 회원가입
 router.post('/register', async (req, res) => {
@@ -42,6 +190,7 @@ router.post('/register', async (req, res) => {
     );
 
     const token = jwt.sign({ sub: user_id }, jwtSecret(), { expiresIn: '7d' });
+    await recordLogin(req, user_id);
     console.log(`[auth] 회원가입: ${email} | 닉네임: ${nickname} | ID: ${user_id}`);
     res.status(201).json({ token, user: { user_id, nickname, email, role: 'user' } });
   } catch (err) {
@@ -72,6 +221,7 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
+    await recordLogin(req, user.user_id);
     console.log(`[auth] 로그인: ${email} | ID: ${user.user_id}`);
     res.json({
       token,
@@ -132,6 +282,12 @@ router.post('/google', async (req, res) => {
     if (!user.is_active) return res.status(403).json({ error: '비활성화된 계정입니다.' });
 
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
+    await recordLogin(req, user.user_id);
+    try {
+      await grantPresentationDemoAssetsIfEligible(_pool, user.user_id, fabricService);
+    } catch (demoErr) {
+      console.error('[auth/google] 시연용 자동 지급 실패:', demoErr.message);
+    }
     console.log(`[auth] 구글 로그인: ${email} | ID: ${user.user_id}`);
     res.json({
       token,
@@ -201,6 +357,27 @@ router.get('/me', requireAuth, (req, res) => {
   res.json(req.user);
 });
 
+// GET /api/auth/admin/recent-logins — 관리자 최근 로그인 확인
+router.get('/admin/recent-logins', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdminUser(req, res)) return;
+    await ensureLoginTrackingColumns();
+    const [rows] = await _pool.query(
+      `SELECT user_id, nickname, email, login_type, role,
+              DATE_FORMAT(last_login_at, '%Y-%m-%dT%H:%i:%s+09:00') AS last_login_at,
+              last_login_ip
+         FROM users
+        WHERE last_login_at IS NOT NULL
+        ORDER BY last_login_at DESC
+        LIMIT 50`,
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[auth/admin/recent-logins]', err);
+    res.status(500).json({ error: '최근 로그인 조회 실패' });
+  }
+});
+
 // GET /api/auth/wallet — 내 등록 지갑 주소 조회 (JWT 필요)
 router.get('/wallet', requireAuth, async (req, res) => {
   try {
@@ -218,11 +395,88 @@ router.get('/wallet', requireAuth, async (req, res) => {
 // GET /api/auth/membership — 가입 상태, 티어, 혜택, 월 응모권 조회
 router.get('/membership', requireAuth, async (req, res) => {
   try {
-    const summary = await membershipService.getMembershipSummary(_pool, req.user.user_id);
+    let summary = await membershipService.getMembershipSummary(_pool, req.user.user_id);
+    const walletAddress = await membershipService.getVerifiedWallet(_pool, req.user.user_id);
+    if (walletAddress) {
+      await membershipService.syncFabricUserFromDb({
+        pool: _pool,
+        fabricService,
+        userId: req.user.user_id,
+        walletAddress,
+      });
+      const userDidHash = fabricService.hashDid(walletAddress);
+      const fabricMembership = await fabricService.getMembership({ userDidHash });
+      summary = membershipService.applyFabricMembershipToSummary(summary, fabricMembership);
+    }
     res.json(summary);
   } catch (err) {
     console.error('[auth/membership]', err);
     res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// GET /api/auth/tier-rewards — 현재 티어 기준 수령 가능한 최초 혜택 조회
+router.get('/tier-rewards', requireAuth, async (req, res) => {
+  try {
+    const membership = await membershipService.getUserMembership(_pool, req.user.user_id);
+    const [claimed] = await _pool.query(
+      `SELECT tier FROM membership_tier_rewards WHERE user_id = ?`,
+      [req.user.user_id],
+    );
+    res.json({
+      success: true,
+      currentTier: membership.tier,
+      joined: membership.joined,
+      rewards: tierRewardRows(membership, new Set(claimed.map((row) => row.tier))),
+    });
+  } catch (err) {
+    console.error('[auth/tier-rewards]', err);
+    res.status(500).json({ error: '티어 혜택 조회 실패' });
+  }
+});
+
+// POST /api/auth/claim-tier-reward — 이미 달성한 티어 최초 혜택 수령
+router.post('/claim-tier-reward', requireAuth, async (req, res) => {
+  try {
+    const tier = String(req.body.tier || '').trim();
+    if (!tier || !membershipService.TIER_REWARDS[tier]) {
+      return res.status(400).json({ error: '수령할 티어를 선택해주세요.' });
+    }
+
+    const membership = await membershipService.getUserMembership(_pool, req.user.user_id);
+    if (!membership.joined) return res.status(400).json({ error: '멤버십 가입 후 티어 혜택을 받을 수 있습니다.' });
+
+    const currentIdx = membershipService.TIER_ORDER.indexOf(membership.tier);
+    const targetIdx = membershipService.TIER_ORDER.indexOf(tier);
+    if (targetIdx < 0 || targetIdx > currentIdx) {
+      return res.status(400).json({ error: `${tier} 티어 달성 후 받을 수 있습니다.` });
+    }
+
+    const walletAddress = await membershipService.getVerifiedWallet(
+      _pool,
+      req.user.user_id,
+      String(req.body.walletAddress || '').trim(),
+    );
+    if (!walletAddress) return res.status(400).json({ error: '인증된 지갑 연결이 필요합니다.' });
+
+    const { reward, awardedCards, issuedRaffleNftIds } = await claimTierReward({
+      userId: req.user.user_id,
+      walletAddress,
+      tier,
+    });
+
+    res.json({
+      success: true,
+      message: `${tier} 티어 혜택을 수령했습니다.`,
+      tier,
+      rewardCards: reward.cards,
+      rewardRaffles: reward.raffles,
+      awardedCards,
+      issuedRaffleNftIds,
+    });
+  } catch (err) {
+    console.error('[auth/claim-tier-reward]', err);
+    res.status(err.statusCode || 500).json({ error: err.message || '티어 혜택 수령 실패' });
   }
 });
 
@@ -320,66 +574,34 @@ router.post('/tier-up', requireAuth, async (req, res) => {
     );
     if (!walletAddress) return res.status(400).json({ error: '인증된 지갑 연결이 필요합니다.' });
 
-    const userDidHash = fabricService.hashDid(walletAddress);
-    await fabricService.tierUpMembership({ userDidHash, targetGrade: membershipService.toFabricTier(nextTier) });
+    await syncFabricMembershipTier({ walletAddress, tier: nextTier });
 
     const [[existingReward]] = await _pool.query(
       `SELECT id FROM membership_tier_rewards WHERE user_id = ? AND tier = ?`,
       [req.user.user_id, nextTier],
     );
-    if (existingReward) return res.status(409).json({ error: '이미 해당 티어 최초 혜택을 수령했습니다.' });
-
-    const reward = membershipService.TIER_REWARDS[nextTier] || { cards: 0, raffles: 0 };
-    const awardedCards = await membershipService.issueRewardCards(_pool, req.user.user_id, reward.cards, nextTier);
-    const issuedRaffleNftIds = await membershipService.issueRaffleNfts({
-      pool: _pool,
-      fabricService,
-      userId: req.user.user_id,
-      walletAddress,
-      count: reward.raffles,
-      source: 'TIER_REWARD',
-      expiresAt: membershipService.addDays(new Date(), 60),
-    });
 
     await _pool.query(
       'UPDATE users SET membership_tier = ? WHERE user_id = ?',
       [nextTier, req.user.user_id],
     );
-    await _pool.query(
-      `INSERT INTO membership_tier_rewards
-         (id, user_id, tier, reward_cards, reward_raffles, card_payload_json, raffle_nft_ids)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        crypto.randomUUID(),
-        req.user.user_id,
-        nextTier,
-        reward.cards,
-        reward.raffles,
-        JSON.stringify(awardedCards),
-        JSON.stringify(issuedRaffleNftIds),
-      ],
-    );
-    const rewardMessage = [
-      reward.cards > 0 ? `실물 NFT ${reward.cards}장` : '',
-      reward.raffles > 0 ? `응모권 ${reward.raffles}장` : '',
-    ].filter(Boolean).join(', ');
-    await notificationService.recordNotification(_pool, {
-      userId: req.user.user_id,
-      category: 'MEMBERSHIP',
-      title: `${nextTier} 티어업 완료`,
-      message: rewardMessage ? `최초 달성 혜택으로 ${rewardMessage}이 지급되었습니다.` : '새 멤버십 등급이 적용되었습니다.',
-      metadata: { tier: nextTier, rewardCards: reward.cards, rewardRaffles: reward.raffles, issuedRaffleNftIds },
-    });
-    if (issuedRaffleNftIds.length > 0) {
-      await notificationService.recordNotification(_pool, {
-        userId: req.user.user_id,
-        category: 'RAFFLE',
-        title: '응모권 획득',
-        message: `${nextTier} 최초 혜택으로 응모권 ${issuedRaffleNftIds.length}장이 지급되었습니다.`,
-        amount: issuedRaffleNftIds.length,
-        metadata: { source: 'TIER_REWARD', tier: nextTier, raffleNftIds: issuedRaffleNftIds },
+    if (existingReward) {
+      return res.json({
+        success: true,
+        message: `${nextTier} 등급으로 티어업 완료! 해당 등급 혜택은 이미 수령했습니다.`,
+        newTier: nextTier,
+        rewardAlreadyClaimed: true,
+        raffleCount: 0,
+        issuedRaffleNftIds: [],
+        awardedCards: [],
       });
     }
+
+    const { reward, awardedCards, issuedRaffleNftIds } = await claimTierReward({
+      userId: req.user.user_id,
+      walletAddress,
+      tier: nextTier,
+    });
 
     res.json({
       success: true,
@@ -391,7 +613,7 @@ router.post('/tier-up', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[auth/tier-up]', err);
-    res.status(500).json({ error: err.message || '서버 오류' });
+    res.status(err.statusCode || 500).json({ error: err.message || '서버 오류' });
   }
 });
 

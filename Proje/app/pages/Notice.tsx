@@ -15,7 +15,7 @@ interface Notice {
   image_url?: string;
 }
 
-const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000").replace(/\/$/, "");
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 
 export function Notice() {
   const navigate = useNavigate();
