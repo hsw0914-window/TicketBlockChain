@@ -387,6 +387,10 @@ func (t *TicketChaincode) JoinMembership(
 	ctx contractapi.TransactionContextInterface,
 	userDidHash string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	if userDidHash == "" {
 		return "", fmt.Errorf("INVALID_PARAM: userDidHash는 필수입니다")
 	}
@@ -420,6 +424,10 @@ func (t *TicketChaincode) SeedUserForTest(
 	grade string,
 	joinedStr string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	pointBalance, err := strconv.ParseFloat(pointBalanceStr, 64)
 	if err != nil {
 		return "", fmt.Errorf("INVALID_POINT_BALANCE")
@@ -489,6 +497,10 @@ func (t *TicketChaincode) TierUpMembership(
 	ctx contractapi.TransactionContextInterface,
 	userDidHash, targetGrade string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	if userDidHash == "" || targetGrade == "" {
 		return "", fmt.Errorf("INVALID_PARAM: userDidHash, targetGrade는 필수입니다")
 	}
@@ -597,6 +609,10 @@ func (t *TicketChaincode) VerifyEntry(
 	ctx contractapi.TransactionContextInterface,
 	ticketId, gateId string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	ticket, err := getTicketRecord(ctx, ticketId)
 	if err != nil {
 		return "", err
@@ -662,6 +678,10 @@ func (t *TicketChaincode) UsePointForTicket(
 	userDidHash, ticketId string,
 	pointAmount float64,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	if pointAmount < 1000 {
 		return fmt.Errorf("MIN_POINT_1000: 최소 1,000P 이상 사용 가능")
 	}
@@ -707,6 +727,10 @@ func (t *TicketChaincode) ExchangePointItem(
 	ctx contractapi.TransactionContextInterface,
 	userDidHash, itemType string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	cost, err := exchangeCost(itemType)
 	if err != nil {
 		return "", err
@@ -785,6 +809,10 @@ func (t *TicketChaincode) CompletePointCardExchange(
 	ctx contractapi.TransactionContextInterface,
 	exchangeId, userDidHash, cardTypeId, nftId, mintTxHash string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	if exchangeId == "" {
 		return "", fmt.Errorf("EXCHANGE_ID_REQUIRED")
 	}
@@ -904,6 +932,10 @@ func (t *TicketChaincode) RequestRefund(
 	ctx contractapi.TransactionContextInterface,
 	ticketId, refundReason string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	ticket, err := getTicketRecord(ctx, ticketId)
 	if err != nil {
 		return "", err
@@ -1090,6 +1122,10 @@ func (t *TicketChaincode) EarnPointFromTrade(
 	userDidHash string,
 	amount, rate float64,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	membership, err := getOrCreateMembership(ctx, userDidHash)
 	if err != nil {
 		return "", err
@@ -1126,6 +1162,10 @@ func (t *TicketChaincode) TransferTicket(
 	ticketId, fromWalletAddress, toWalletAddress string,
 	transferPrice float64,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	if ticketId == "" || fromWalletAddress == "" || toWalletAddress == "" {
 		return "", fmt.Errorf("INVALID_PARAM: ticketId, fromWalletAddress, toWalletAddress는 필수입니다")
 	}
@@ -1269,6 +1309,10 @@ func (t *TicketChaincode) RegisterRaffleNFT(
 	ctx contractapi.TransactionContextInterface,
 	raffleNftId, userDidHash, gameId string,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	b, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
 	if err != nil {
 		return err
@@ -1306,6 +1350,10 @@ func (t *TicketChaincode) EnterDraw(
 	ctx contractapi.TransactionContextInterface,
 	raffleNftId, userDidHash, drawId string,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	rb, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
 	if err != nil {
 		return err
@@ -1364,6 +1412,10 @@ func (t *TicketChaincode) CreateDraw(
 	drawId, gameId string,
 	winnerCount int,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	rec := DrawRecord{
 		DrawId:      drawId,
 		GameId:      gameId,
@@ -1385,6 +1437,10 @@ func (t *TicketChaincode) ExecuteDraw(
 	drawId string,
 	entryIdsJSON string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	db, err := ctx.GetStub().GetState(keyPrefixDraw + drawId)
 	if err != nil {
 		return "", err
@@ -1480,6 +1536,10 @@ func (t *TicketChaincode) UseRaffleNFT(
 	ctx contractapi.TransactionContextInterface,
 	raffleNftId, userDidHash, ticketId string,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	rb, err := ctx.GetStub().GetState(keyPrefixRaffleNFT + raffleNftId)
 	if err != nil {
 		return err
@@ -1515,6 +1575,10 @@ func (t *TicketChaincode) CreateReservation(
 	reservationId, userDidHash, gameId, raffleNftId string,
 	isPriority bool,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	rec := ReservationRecord{
 		ReservationId: reservationId,
 		UserDidHash:   userDidHash,
@@ -1538,6 +1602,10 @@ func (t *TicketChaincode) ConfirmReservation(
 	ctx contractapi.TransactionContextInterface,
 	reservationId, ticketId string,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	rb, err := ctx.GetStub().GetState(keyPrefixReservation + reservationId)
 	if err != nil {
 		return err
@@ -1566,6 +1634,10 @@ func (t *TicketChaincode) CancelReservation(
 	ctx contractapi.TransactionContextInterface,
 	reservationId string,
 ) error {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return err
+	}
 	rb, err := ctx.GetStub().GetState(keyPrefixReservation + reservationId)
 	if err != nil {
 		return err
@@ -1795,6 +1867,10 @@ func (t *TicketChaincode) SubmitRaffleNFTs(
 	ctx contractapi.TransactionContextInterface,
 	matchId, userDidHash, raffleNftIdsJSON string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	var raffleNftIds []string
 	if err := json.Unmarshal([]byte(raffleNftIdsJSON), &raffleNftIds); err != nil {
 		return "", fmt.Errorf("INVALID_PARAM: raffleNftIdsJSON 파싱 실패: %s", err)
@@ -2121,6 +2197,10 @@ func (t *TicketChaincode) UsePreSaleRight(
 	ctx contractapi.TransactionContextInterface,
 	rightId, userDidHash, seatId string,
 ) (string, error) {
+	// 원장을 바꾸는 함수는 서버 조직(Org1)만 호출할 수 있다.
+	if err := requireMSP(ctx, "Org1MSP"); err != nil {
+		return "", err
+	}
 	rightB, err := ctx.GetStub().GetState(keyPrefixPreSaleRight + rightId)
 	if err != nil {
 		return "", err
