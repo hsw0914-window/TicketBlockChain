@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 import { Layout } from "./components/Layout";
+import { AdminOnly } from "./components/AdminOnly";
 import { Home } from "./pages/Home";
 import { NotFound } from "./pages/NotFound";
 import { Tickets } from "./pages/Tickets";
@@ -29,6 +30,22 @@ const Exchange       = lazy(() => import("./pages/Exchange").then((m) => ({ defa
 const PhysicalExchange = lazy(() => import("./pages/PhysicalExchange").then((m) => ({ default: m.PhysicalExchange })));
 const EntryScanner   = lazy(() => import("./pages/EntryScanner").then((m) => ({ default: m.EntryScanner })));
 const Raffle         = lazy(() => import("./pages/Raffle").then((m) => ({ default: m.Raffle })));
+
+/**
+ * 관리자 전용 화면을 감싼다.
+ * 실제 권한 판단은 서버(API 401/403)가 하고, 여기서는 안내만 앞당겨 보여준다.
+ */
+function withAdminSuspense(Component: React.ComponentType, title: string) {
+  return function AdminLazyRoute() {
+    return (
+      <Suspense fallback={<div className="page-shell" />}>
+        <AdminOnly title={title}>
+          <Component />
+        </AdminOnly>
+      </Suspense>
+    );
+  };
+}
 
 function withSuspense(Component: React.ComponentType) {
   return function LazyRoute() {
@@ -63,8 +80,8 @@ export const router = createBrowserRouter([
       { path: "market",                   Component: withSuspense(Market) },
       { path: "community",                Component: withSuspense(Community) },
       { path: "notice",                   Component: withSuspense(Notice) },
-      { path: "notice/write",             Component: withSuspense(NoticeWrite) },
-      { path: "notice/write/:id",         Component: withSuspense(NoticeWrite) },
+      { path: "notice/write",             Component: withAdminSuspense(NoticeWrite, "공지 작성은 관리자 전용입니다") },
+      { path: "notice/write/:id",         Component: withAdminSuspense(NoticeWrite, "공지 수정은 관리자 전용입니다") },
       { path: "mypage",                   Component: withSuspense(MyPage) },
       { path: "mypage/membership",        Component: withSuspense(Membership) },
       { path: "mypage/points",            Component: withSuspense(PointHistory) },
@@ -80,7 +97,7 @@ export const router = createBrowserRouter([
       { path: "detail/:id",               Component: withSuspense(Detail) },
       { path: "exchange",                  Component: withSuspense(Exchange) },
       { path: "physical-exchange",         Component: withSuspense(PhysicalExchange) },
-      { path: "entry-scanner",             Component: withSuspense(EntryScanner) },
+      { path: "entry-scanner",             Component: withAdminSuspense(EntryScanner, "QR 검표는 관리자 전용입니다") },
     ],
   },
   {
