@@ -10,6 +10,7 @@ for (const key of ['JWT_SECRET', 'QR_SECRET']) {
 
 const express = require("express");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const mysql = require("mysql2/promise");
 const { initDB, DB_NAME, DB_CONFIG } = require("./db/init");
 
@@ -35,35 +36,77 @@ const mockFabric        = require('./services/fabricBridge');
 const { ensureRuntimeSchema } = require('./services/schemaGuardService');
 
 const app = express();
+
+// 프록시(Caddy) 뒤에서 실제 클라이언트 IP를 얻기 위해 필요.
+// 레이트 리밋이 모든 요청을 프록시 IP 하나로 묶어버리는 것을 막는다.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
+
 const configuredFrontendOrigins = (process.env.FRONTEND_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+
+// 개발 편의를 위한 느슨한 허용(ngrok 와일드카드, 사설 IP 대역)은 기본적으로 꺼 둔다.
+// 누구나 등록할 수 있는 도메인을 credentials 허용 목록에 넣어두면 그 자체가 구멍이다.
+const allowDevOrigins = String(process.env.CORS_ALLOW_DEV_ORIGINS || '').toLowerCase() === 'true';
+
+const staticAllowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  ...configuredFrontendOrigins,
+]);
+
+function isOriginAllowed(origin) {
+  // 같은 출처 요청·서버 간 호출은 Origin 헤더가 없다.
+  if (!origin) return true;
+  if (staticAllowedOrigins.has(origin)) return true;
+  if (!allowDevOrigins) return false;
+  return (
+    origin.endsWith('.ngrok-free.app') ||
+    origin.endsWith('.ngrok-free.dev') ||
+    origin.endsWith('.ngrok.io') ||
+    /^https?:\/\/(192\.168\.|10\.|172\.)/.test(origin)
+  );
+}
+
 app.use(cors({
   origin: (origin, callback) => {
-    const allowed = [
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      ...configuredFrontendOrigins,
-    ];
-    // ngrok / 외부 접속 허용 (개발 환경)
-    if (!origin || allowed.includes(origin) ||
-        origin.endsWith('.ngrok-free.app') ||
-        origin.endsWith('.ngrok-free.dev') ||
-        origin.endsWith('.ngrok.io')) {
-      return callback(null, true);
-    }
-    // 로컬 네트워크 IP 허용 (192.168.x.x, 10.x.x.x, 172.x.x.x)
-    if (/^https?:\/\/(192\.168\.|10\.|172\.)/.test(origin)) {
-      return callback(null, true);
-    }
+    if (isOriginAllowed(origin)) return callback(null, true);
     callback(new Error('CORS 차단: ' + origin));
   },
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// ─── 레이트 리밋 ──────────────────────────────────────────
+// 로그인·비밀번호 재설정처럼 무차별 대입이 통하는 지점을 좁게 막는다.
+const authLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_AUTH_MAX ?? 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.' },
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_GENERAL_MAX ?? 300),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.' },
+});
+
+app.use('/api', generalLimiter);
+
+/**
+ * async 라우트 핸들러를 감싸 거부(rejection)를 Express 에러 처리로 넘긴다.
+ * Express 4는 async 함수의 거부를 스스로 잡지 못해서, 감싸지 않으면
+ * DB 오류 한 번에 unhandledRejection 으로 프로세스가 통째로 죽는다.
+ */
+const asyncHandler = (handler) => (req, res, next) =>
+  Promise.resolve(handler(req, res, next)).catch(next);
 
 let pool;
 
@@ -123,7 +166,7 @@ async function start() {
   notificationRoute.setPool(pool);
 
   // ─── 신규 라우트 ────────────────────────────────────────
-  app.use('/api/auth',       authRoute.router);
+  app.use('/api/auth',       authLimiter, authRoute.router);
   app.use('/api/wallet',     walletRoute.router);
   app.use('/api/did',        didRoute.router);
   app.use('/api/tickets',    ticketRoute.router);
@@ -146,23 +189,34 @@ async function start() {
 
   // ─── 기존 게시판 라우트 ─────────────────────────────────
 
-  app.get("/api/users", async (req, res) => {
+  app.get("/api/users", asyncHandler(async (req, res) => {
     const [rows] = await pool.query("SELECT user_id, nickname FROM users");
     res.json(rows);
-  });
+  }));
 
-  app.get("/api/posts", async (req, res) => {
-    const [rows] = await pool.query(`
-      SELECT p.*, u.nickname AS author_nickname
-      FROM posts p
-      JOIN users u ON p.user_id = u.user_id
-      WHERE p.deleted = FALSE
-      ORDER BY p.created_at DESC
-    `);
+  app.get("/api/posts", asyncHandler(async (req, res) => {
+    // 페이지네이션 없이 전체 글을 내려주면 글이 쌓일수록 응답이 무한정 커진다.
+    const limit  = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+    const [[{ total }]] = await pool.query(
+      "SELECT COUNT(*) AS total FROM posts WHERE deleted = FALSE"
+    );
+    const [rows] = await pool.query(
+      `SELECT p.*, u.nickname AS author_nickname
+       FROM posts p
+       JOIN users u ON p.user_id = u.user_id
+       WHERE p.deleted = FALSE
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    // 기존 프론트가 배열을 그대로 기대하므로 배열을 유지하고, 총 개수는 헤더로 알린다.
+    res.set('X-Total-Count', String(total));
     res.json(rows);
-  });
+  }));
 
-  app.get("/api/posts/:id", async (req, res) => {
+  app.get("/api/posts/:id", asyncHandler(async (req, res) => {
     await pool.query(
       "UPDATE posts SET view_count = view_count + 1 WHERE post_id = ?",
       [req.params.id]
@@ -175,9 +229,9 @@ async function start() {
     );
     if (!row) return res.status(404).json({ error: "게시글 없음" });
     res.json(row);
-  });
+  }));
 
-  app.post("/api/posts", authMiddleware.requireAuth, async (req, res) => {
+  app.post("/api/posts", authMiddleware.requireAuth, asyncHandler(async (req, res) => {
     const { title, excerpt, content, category } = req.body;
     if (!title || !content || !category)
       return res.status(400).json({ error: "필수 항목 누락" });
@@ -191,9 +245,9 @@ async function start() {
       [result.insertId]
     );
     res.status(201).json(newPost);
-  });
+  }));
 
-  app.put("/api/posts/:id", authMiddleware.requireAuth, async (req, res) => {
+  app.put("/api/posts/:id", authMiddleware.requireAuth, asyncHandler(async (req, res) => {
     const { title, excerpt, content, category } = req.body;
     const [[post]] = await pool.query(
       "SELECT user_id FROM posts WHERE post_id = ? AND deleted = FALSE",
@@ -213,9 +267,9 @@ async function start() {
       [req.params.id]
     );
     res.json(updated);
-  });
+  }));
 
-  app.delete("/api/posts/:id", authMiddleware.requireAuth, async (req, res) => {
+  app.delete("/api/posts/:id", authMiddleware.requireAuth, asyncHandler(async (req, res) => {
     const [[post]] = await pool.query(
       "SELECT user_id FROM posts WHERE post_id = ? AND deleted = FALSE",
       [req.params.id]
@@ -230,9 +284,9 @@ async function start() {
       [req.params.id]
     );
     res.json({ ok: true });
-  });
+  }));
 
-  app.post("/api/posts/:id/like", authMiddleware.requireAuth, async (req, res) => {
+  app.post("/api/posts/:id/like", authMiddleware.requireAuth, asyncHandler(async (req, res) => {
     const user_id = req.user.user_id;
     const postId = req.params.id;
 
@@ -250,9 +304,9 @@ async function start() {
       await pool.query("UPDATE posts SET like_count = like_count + 1 WHERE post_id=?", [postId]);
       res.json({ liked: true });
     }
-  });
+  }));
 
-  app.get("/api/posts/:id/comments", async (req, res) => {
+  app.get("/api/posts/:id/comments", asyncHandler(async (req, res) => {
     const [rows] = await pool.query(
       `SELECT c.*, u.nickname AS author_nickname
        FROM comments c JOIN users u ON c.user_id = u.user_id
@@ -261,9 +315,9 @@ async function start() {
       [req.params.id]
     );
     res.json(rows);
-  });
+  }));
 
-  app.post("/api/posts/:id/comments", authMiddleware.requireAuth, async (req, res) => {
+  app.post("/api/posts/:id/comments", authMiddleware.requireAuth, asyncHandler(async (req, res) => {
     const { content, parent_id } = req.body;
     if (!content)
       return res.status(400).json({ error: "필수 항목 누락" });
@@ -277,9 +331,9 @@ async function start() {
       [result.insertId]
     );
     res.status(201).json(newComment);
-  });
+  }));
 
-  app.delete("/api/comments/:id", authMiddleware.requireAuth, async (req, res) => {
+  app.delete("/api/comments/:id", authMiddleware.requireAuth, asyncHandler(async (req, res) => {
     const [[comment]] = await pool.query(
       "SELECT user_id FROM comments WHERE comment_id = ? AND deleted = FALSE",
       [req.params.id]
@@ -294,9 +348,9 @@ async function start() {
       [req.params.id]
     );
     res.json({ ok: true });
-  });
+  }));
 
-  app.get("/api/comments", async (req, res) => {
+  app.get("/api/comments", asyncHandler(async (req, res) => {
     const [rows] = await pool.query(
       `SELECT c.*, u.nickname AS author_nickname
        FROM comments c JOIN users u ON c.user_id = u.user_id
@@ -304,12 +358,52 @@ async function start() {
        ORDER BY c.created_at ASC`
     );
     res.json(rows);
+  }));
+
+  // ─── 헬스 체크 ──────────────────────────────────────────
+  app.get('/api/health', asyncHandler(async (req, res) => {
+    await pool.query('SELECT 1');
+    res.json({ ok: true, uptime: Math.round(process.uptime()), time: new Date().toISOString() });
+  }));
+
+  // ─── 404 ────────────────────────────────────────────────
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: '존재하지 않는 API 경로입니다.' });
+  });
+
+  // ─── 전역 에러 핸들러 ────────────────────────────────────
+  // 여기가 없으면 라우트에서 새어나온 오류가 그대로 프로세스를 죽인다.
+  // 마지막에 등록해야 앞선 모든 라우트의 오류를 받는다.
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+
+    const status = Number(err?.statusCode) || 500;
+    if (status >= 500) {
+      console.error(`[error] ${req.method} ${req.originalUrl}`, err);
+    } else {
+      console.warn(`[warn] ${req.method} ${req.originalUrl} — ${err?.message}`);
+    }
+
+    // 500대 오류의 내부 메시지는 클라이언트에 그대로 노출하지 않는다.
+    res.status(status).json({
+      error: status >= 500 ? '서버 오류가 발생했습니다.' : (err?.message || '잘못된 요청입니다.'),
+    });
   });
 
   app.listen(process.env.PORT || 4000, () => {
     console.log(`🚀 서버 실행 중: http://localhost:${process.env.PORT || 4000}`);
   });
 }
+
+// 어디서도 잡지 못한 오류를 마지막으로 기록한다.
+// 로그 한 줄 없이 프로세스가 사라지는 상황을 막기 위함이다.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] 처리되지 않은 Promise 거부:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] 처리되지 않은 예외:', err);
+  process.exit(1);
+});
 
 start().catch((err) => {
   console.error("❌ 서버 시작 실패:", err);
