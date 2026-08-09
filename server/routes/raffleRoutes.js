@@ -7,6 +7,16 @@ const membershipService = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
 
 const router = express.Router();
+
+// 추첨 생성·실행은 운영자만 할 수 있어야 한다.
+// 검사가 없으면 응모자가 자기 응모권만 들어간 시점에 직접 추첨을 실행해
+// 확정 당첨을 만들 수 있다.
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: '관리자만 추첨을 진행할 수 있습니다.' });
+  }
+  next();
+}
 let _pool;
 function setPool(pool) { _pool = pool; }
 
@@ -350,7 +360,7 @@ router.get('/draws/:gameId', async (req, res) => {
 // ─── POST /api/raffle/draw/create ─────────────────────────
 // (관리자용) 추첨 생성
 // Body: { gameId, winnerCount }
-router.post('/draw/create', requireAuth, async (req, res) => {
+router.post('/draw/create', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { gameId, winnerCount } = req.body;
     if (!gameId) return res.status(400).json({ error: 'gameId 필요' });
@@ -425,7 +435,7 @@ router.post('/enter', requireAuth, async (req, res) => {
 // ─── POST /api/raffle/draw/execute ────────────────────────
 // (관리자용) 추첨 실행
 // Body: { drawId }
-router.post('/draw/execute', requireAuth, async (req, res) => {
+router.post('/draw/execute', requireAuth, requireAdmin, async (req, res) => {
   const conn = await _pool.getConnection();
   try {
     const { drawId } = req.body;

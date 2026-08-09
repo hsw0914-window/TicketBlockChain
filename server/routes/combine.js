@@ -283,12 +283,19 @@ router.post('/box/open', requireAuth, async (req, res) => {
       [remaining, userId]
     );
 
+    // 가중치 뽑기는 POW(RAND(), 1/weight) 가 가장 큰 항목을 고른다 (Efraimidis-Spirakis).
+    // 이 식이라야 각 항목이 뽑힐 확률이 weight 에 정확히 비례한다.
+    //
+    // 이전에는 `RAND() * weight DESC` 를 썼는데, 이건 비례하지 않는다.
+    // 가중치 14 대 7(의도한 비율 2:1)을 20만 회 시뮬레이션하면 실제로는 3:1(75%:25%)로 나온다.
+    // 즉 설정한 확률표와 실제 뽑기 확률이 어긋나 희귀 보상이 의도보다 더 안 나왔다.
     const [[reward]] = await conn.query(
       `SELECT brp.*, ma.id AS fragmentMarketAssetId, ft.onchain_id
        FROM box_reward_pool brp
        LEFT JOIN market_assets ma ON ma.fragment_type_id = brp.fragment_type_id
        LEFT JOIN fragment_types ft ON ft.id = brp.fragment_type_id
-       ORDER BY RAND() * brp.weight DESC
+       WHERE brp.weight > 0
+       ORDER BY POW(RAND(), 1 / brp.weight) DESC
        LIMIT 1`
     );
 
