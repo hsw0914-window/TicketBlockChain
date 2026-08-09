@@ -1292,6 +1292,8 @@ const QUERY_INDEXES = [
   { table: 'tickets', name: 'idx_tickets_wallet', columns: '(wallet_address)' },
   // routes/ticket.js — 좌석 지도 (WHERE game_id = ? AND status NOT IN (...))
   { table: 'tickets', name: 'idx_tickets_game_status', columns: '(game_id, status)' },
+  // routes/ticket.js — 결제 멱등 확인 (WHERE payment_key = ? AND wallet_address = ?)
+  { table: 'tickets', name: 'idx_tickets_payment_key', columns: '(payment_key)' },
   // routes/raffleRoutes.js — 응모 가능한 응모권 (WHERE user_id = ? AND status = 'ISSUED')
   { table: 'raffle_nfts', name: 'idx_raffle_user_status', columns: '(user_id, status)' },
   // mock/fabric ExecuteDraw — 추첨 대상 (WHERE draw_id = ? AND status = 'ENTERED')

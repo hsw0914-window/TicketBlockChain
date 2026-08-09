@@ -603,6 +603,34 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
     [gameId]
   );
 
+  // 같은 결제로 이미 발권이 끝났으면 그 결과를 그대로 돌려준다.
+  // 결제 성공 페이지에서 새로고침하면 이 요청이 한 번 더 오는데,
+  // 멱등 처리가 없으면 좌석 확보 단계에서 "이미 예매된 좌석"으로 막혀
+  // 정상 결제한 사용자에게 실패 화면이 보인다.
+  // (market/toss-confirm, ticketResale/toss-confirm 과 같은 방식)
+  const [alreadyIssued] = await _pool.query(
+    `SELECT id, token_id, ticket_tx_hash
+       FROM tickets
+      WHERE payment_key = ? AND wallet_address = ?
+        AND status NOT IN ('refunded','cancelled')`,
+    [paymentKey, verifiedWalletAddress],
+  );
+  if (alreadyIssued.length > 0) {
+    console.log(`[toss] 이미 처리된 결제 재요청: paymentKey=${paymentKey}, 티켓 ${alreadyIssued.length}장`);
+    return res.json({
+      success: true,
+      alreadyProcessed: true,
+      data: {
+        tickets: alreadyIssued.map((ticket) => ({
+          ticketId: ticket.id,
+          tokenId:  ticket.token_id,
+          txHash:   ticket.ticket_tx_hash,
+        })),
+        paymentKey,
+      },
+    });
+  }
+
   // 1-c. 좌석을 먼저 확보한 뒤에 결제를 승인한다.
   // 순서를 뒤집은 이유: 결제부터 하면 "돈은 빠져나갔는데 좌석은 남이 가져간" 상태가 만들어진다.
   // 좌석 확보는 한 트랜잭션이라 일부만 잡히는 경우도 없다.
