@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PenLine, ImagePlus, Pin, ChevronLeft, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { authHeaders } from "../lib/authHeaders";
 
 type NoticeType = "공지" | "이벤트" | "업데이트";
 
@@ -61,7 +62,7 @@ export function NoticeWrite() {
         : `${API_BASE}/api/notices`;
       const method = isEdit ? "PUT" : "POST";
 
-      const res = await fetch(url, { method, body: formData });
+      const res = await fetch(url, { method, body: formData, headers: authHeaders() });
       if (res.ok) {
         alert(isEdit ? "수정되었습니다." : "공지가 등록되었습니다.");
         navigate("/notice");

@@ -90,27 +90,48 @@ async function insertTicketWithSeatLock(conn, {
   };
 }
 
+// 같은 좌석을 여러 트랜잭션이 동시에 노리면 InnoDB 가 갭 잠금 때문에 데드락을 잡아낸다.
+// 이건 오류가 아니라 DB 가 정상적으로 충돌을 정리한 것이므로, 진 쪽은 다시 시도하면 된다.
+// 재시도하면 좌석은 이미 팔린 뒤라 사용자에게는 "이미 예매된 좌석" 안내가 나간다.
+// 재시도가 없으면 예매 오픈 직후 몰리는 요청이 그대로 500 으로 떨어진다.
+const RETRYABLE_DB_ERRORS = new Set(['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT']);
+const MAX_PURCHASE_ATTEMPTS = 3;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * 좌석 여러 장을 한 트랜잭션 안에서 예매한다.
  * 한 좌석이라도 실패하면 앞서 넣은 좌석까지 전부 롤백된다 —
  * "3석 중 2석만 발권되고 결제는 취소되는" 상태를 원천적으로 막기 위함이다.
  */
 async function purchaseTickets(pool, { seats, ...common }) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const results = [];
-    for (const seat of seats) {
-      results.push(await insertTicketWithSeatLock(conn, { ...common, ...seat }));
+  let lastError;
+
+  for (let attempt = 1; attempt <= MAX_PURCHASE_ATTEMPTS; attempt++) {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const results = [];
+      for (const seat of seats) {
+        results.push(await insertTicketWithSeatLock(conn, { ...common, ...seat }));
+      }
+      await conn.commit();
+      return results;
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      lastError = err;
+
+      if (!RETRYABLE_DB_ERRORS.has(err?.code) || attempt === MAX_PURCHASE_ATTEMPTS) {
+        throw err;
+      }
+      // 같은 순간에 다시 부딪히지 않도록 짧게 흩뜨린 뒤 재시도한다.
+      await sleep(20 * attempt + Math.floor(Math.random() * 20));
+    } finally {
+      conn.release();
     }
-    await conn.commit();
-    return results;
-  } catch (err) {
-    await conn.rollback().catch(() => {});
-    throw err;
-  } finally {
-    conn.release();
   }
+
+  throw lastError;
 }
 
 /** 좌석 한 장짜리 예매(레거시 호출부 호환용). */

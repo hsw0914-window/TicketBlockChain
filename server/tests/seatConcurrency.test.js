@@ -109,6 +109,34 @@ test('같은 좌석에 동시에 10명이 몰려도 딱 한 장만 발권된다'
   assert.equal(rows[0].cnt, 1, 'DB에 남은 유효 티켓도 1장이어야 합니다');
 });
 
+test('예매 오픈 직후처럼 30명이 몰려도 DB 오류가 새어나가지 않는다', async (t) => {
+  if (!dbAvailable) return t.skip('DB 없음');
+  await clearSeat();
+
+  // 같은 좌석을 여러 트랜잭션이 동시에 잠그면 InnoDB 가 갭 잠금 때문에 데드락을 잡는다.
+  // 재시도가 없으면 그 데드락이 그대로 500 응답이 되어 사용자에게 나간다.
+  const attempts = Array.from({ length: 30 }, (_, i) =>
+    bookSeat(`0xrush${String(i).padStart(35, '0')}`),
+  );
+  const results = await Promise.allSettled(attempts);
+
+  const succeeded = results.filter((r) => r.status === 'fulfilled');
+  const unexpected = results.filter(
+    (r) => r.status === 'rejected' && !(r.reason instanceof SeatAlreadyTakenError),
+  );
+
+  if (unexpected.length > 0) {
+    console.error('예상 밖 오류:', unexpected.map((r) => r.reason?.code || r.reason?.message));
+  }
+
+  assert.equal(succeeded.length, 1, '성공은 1건이어야 합니다');
+  assert.equal(
+    unexpected.length,
+    0,
+    '데드락 등 DB 오류가 그대로 노출되면 안 됩니다 (재시도로 흡수돼야 함)',
+  );
+});
+
 test('순차로 같은 좌석을 사면 두 번째는 409로 막힌다', async (t) => {
   if (!dbAvailable) return t.skip('DB 없음');
   await clearSeat();

@@ -7,6 +7,7 @@ const nftBridge        = require('../services/nftBridgeAdapter');
 const { mintBoxOnChain, isOnChainMintingEnabled } = require('../services/nftService');
 const membershipService = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 let _pool;
@@ -48,9 +49,19 @@ function isValidQRToken(ticketId, token) {
          token === generateQRToken(ticketId, slot - 1);
 }
 
+// 검표는 현장 스태프(관리자)만 수행한다.
+// QR 토큰 자체는 HMAC 이라 위조가 어렵지만, 이 엔드포인트는 티켓을 '사용됨'으로 바꾸는
+// 상태 변경 지점이라 아무나 호출하게 두지 않는다.
+function requireEntryStaff(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ allowed: false, reason: 'NOT_ENTRY_STAFF' });
+  }
+  next();
+}
+
 // POST /api/entry/verify
 // Body: { ticketId, qrToken, gateId? }
-router.post('/verify', async (req, res) => {
+router.post('/verify', requireAuth, requireEntryStaff, async (req, res) => {
   try {
     const { ticketId, qrToken, gateId } = req.body;
 

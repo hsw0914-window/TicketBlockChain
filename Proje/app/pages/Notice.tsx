@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Bell, Pin, PenLine, Lock, Unlock, Trash2, X, Calendar, Megaphone } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
+import { authHeaders } from "../lib/authHeaders";
 
 interface Notice {
   id: number;
@@ -52,7 +53,10 @@ export function Notice() {
   const handleDelete = async (id: number) => {
     if (window.confirm("정말로 이 공지사항을 삭제하시겠습니까?")) {
       try {
-        const response = await fetch(`${API_BASE}/api/notices/${id}`, { method: "DELETE" });
+        const response = await fetch(`${API_BASE}/api/notices/${id}`, {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
         if (response.ok) {
           alert("삭제되었습니다!");
           setNotices(prev => prev.filter(n => n.id !== id));
@@ -65,7 +69,10 @@ export function Notice() {
   const handleDeleteAll = async () => {
     if (window.confirm("⚠️ 경고: 모든 공지사항이 영구적으로 삭제됩니다. 계속하시겠습니까?")) {
       try {
-        const response = await fetch(`${API_BASE}/api/notices`, { method: "DELETE" });
+        const response = await fetch(`${API_BASE}/api/notices`, {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
         if (response.ok) {
           alert("모든 공지가 삭제되었습니다!");
           setNotices([]);

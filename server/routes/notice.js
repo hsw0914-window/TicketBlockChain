@@ -3,9 +3,20 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { requireAuth } = require('../middleware/auth');
 
 let pool;
 function setPool(p) { pool = p; }
+
+// 공지 작성·수정·삭제는 관리자만 할 수 있다.
+// 이전에는 인증이 전혀 없어 누구나 공지를 지우거나 파일을 올릴 수 있었다.
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: '관리자만 공지를 관리할 수 있습니다.' });
+  }
+  next();
+}
 
 const uploadDir = path.join(__dirname, '../uploads/');
 if (!fs.existsSync(uploadDir)) {
@@ -22,19 +33,30 @@ function removeUploadedImage(imageUrl) {
   });
 }
 
+// 허용할 이미지 형식만 명시한다.
+// 확장자를 업로드 파일 이름에서 그대로 가져오면 evil.html 을 image/png 로 위장해 올린 뒤
+// /uploads/xxx.html 로 접근하는 저장형 XSS 가 가능해진다. 그래서 확장자는 서버가 정한다.
+const ALLOWED_IMAGE_TYPES = Object.freeze({
+  'image/jpeg': '.jpg',
+  'image/png':  '.png',
+  'image/gif':  '.gif',
+  'image/webp': '.webp',
+});
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    // 파일명도 예측 불가능하게 만든다 (Math.random 은 추측 가능).
+    const unique = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+    cb(null, unique + ALLOWED_IMAGE_TYPES[file.mimetype]);
   },
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 3 * 1024 * 1024 },
+  limits: { fileSize: 3 * 1024 * 1024, files: 1 },
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) {
-      return cb(new Error('이미지 파일만 업로드할 수 있습니다.'));
+    if (!ALLOWED_IMAGE_TYPES[file.mimetype]) {
+      return cb(new Error('jpg, png, gif, webp 이미지만 업로드할 수 있습니다.'));
     }
     cb(null, true);
   },
@@ -53,7 +75,7 @@ router.get('/', async (req, res) => {
 });
 
 // [DELETE] 전체 삭제 (/:id 보다 위에 위치해야 함)
-router.delete('/', async (req, res) => {
+router.delete('/', requireAuth, requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT image_url FROM notices WHERE image_url IS NOT NULL');
     await pool.query('DELETE FROM notices');
@@ -66,7 +88,7 @@ router.delete('/', async (req, res) => {
 });
 
 // [POST] 공지 등록
-router.post('/', upload.single('image'), async (req, res) => {
+router.post('/', requireAuth, requireAdmin, upload.single('image'), async (req, res) => {
   try {
     const { title, content, type, is_pinned } = req.body;
     const image_url = req.file ? `/uploads/${req.file.filename}` : null;
@@ -81,7 +103,7 @@ router.post('/', upload.single('image'), async (req, res) => {
 });
 
 // [PUT] 공지 수정
-router.put('/:id', upload.single('image'), async (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, upload.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
     const { title, content, type, is_pinned } = req.body;
@@ -102,7 +124,7 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 });
 
 // [DELETE] 낱개 삭제
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const [[existing]] = await pool.query('SELECT image_url FROM notices WHERE id = ?', [req.params.id]);
     await pool.query('DELETE FROM notices WHERE id = ?', [req.params.id]);
