@@ -48,8 +48,14 @@ function parseJsonArray(value) {
   }
 }
 
+// NFT 민팅을 mock 으로 할지 판단한다.
+// paymentKey 는 클라이언트가 보내는 값이므로, 실결제 모드에서는 그 값으로 우회되지 않게 한다.
+// (tossPayService.shouldUseMockPayment 와 같은 기준을 쓴다)
 function isMockTossPayment(paymentKey) {
-  return String(paymentKey || '').startsWith('tgen_') || (process.env.TOSS_MODE || '').trim().toLowerCase() === 'mock';
+  const mode = (process.env.TOSS_MODE || '').trim().toLowerCase();
+  if (mode === 'real') return false;
+  if (mode === 'mock') return true;
+  return String(paymentKey || '').startsWith('tgen_');
 }
 
 function createMockTicketMintResult(ticketId) {

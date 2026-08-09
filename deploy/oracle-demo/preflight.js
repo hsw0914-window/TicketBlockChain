@@ -121,6 +121,22 @@ if (!fs.existsSync(envPath)) {
     pushIf(Boolean(value) && value.length < 32, warnings, `${name} is shorter than 32 characters. Use a long random value.`);
   }
 
+  // ── 시간 조작 플래그 ─────────────────────────────────────
+  // 예매 마감·QR 활성화 시각이 전부 이 값만큼 밀린다. 운영에서 켜져 있으면 안 된다.
+  pushIf(
+    Number(env.DEBUG_TIME_OFFSET_HOURS || 0) !== 0,
+    errors,
+    `DEBUG_TIME_OFFSET_HOURS is ${env.DEBUG_TIME_OFFSET_HOURS}. This shifts every booking deadline and QR window.`,
+  );
+
+  // ── 시연용 자동 지급 ─────────────────────────────────────
+  // 켜져 있으면 허용 목록의 이메일로 로그인하는 것만으로 포인트·조각·응모권이 지급된다.
+  pushIf(
+    String(env.DEMO_PRESENTATION_AUTO_GRANT).toLowerCase() === 'true',
+    warnings,
+    'DEMO_PRESENTATION_AUTO_GRANT is true. Listed emails receive free demo assets on login.',
+  );
+
   // ── CORS ────────────────────────────────────────────────
   pushIf(
     String(env.CORS_ALLOW_DEV_ORIGINS).toLowerCase() === 'true',
