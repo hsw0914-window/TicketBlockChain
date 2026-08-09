@@ -79,7 +79,12 @@ function createWalletOwnerError() {
 
 async function getWalletForCurrentUser(req, walletAddress = '') {
   const requestedWallet = String(walletAddress || '').trim();
-  if (!req.user?.user_id) return requestedWallet || null;
+
+  // 로그인하지 않은 요청에는 어떤 지갑 정보도 돌려주지 않는다.
+  // 예전에는 요청에 실린 지갑 주소를 그대로 조회해서, 주소만 알면 누구나
+  // 그 사람의 포인트 잔액·등급·입장 횟수를 볼 수 있었다.
+  // 지갑 주소는 장터·재판매 목록에 노출되므로 사실상 공개 정보다.
+  if (!req.user?.user_id) return null;
 
   if (req.user.role === 'admin') {
     const [[wallet]] = await _pool.query(
@@ -164,14 +169,12 @@ router.get('/', optionalAuth, async (req, res) => {
       });
     }
 
-    const membership = req.user?.role === 'admin'
+    // 여기까지 왔다면 로그인 사용자의 지갑임이 확인된 상태다.
+    const userDidHash = fabricService.hashDid(walletAddress);
+    const membership = req.user.role === 'admin'
       ? { joined: true }
-      : req.user?.user_id
-        ? await fabricService.getMembership({ userDidHash: fabricService.hashDid(walletAddress) })
-        : { joined: true };
-    const point = req.user?.user_id
-      ? await fabricService.getPointBalance({ userDidHash: fabricService.hashDid(walletAddress) })
-      : await fabricService.getPointBalance({ userDidHash: fabricService.hashDid(walletAddress) });
+      : await fabricService.getMembership({ userDidHash });
+    const point = await fabricService.getPointBalance({ userDidHash });
     res.json({
       success: true,
       data: membership.joined ? point : noPointBalance(),
@@ -225,6 +228,13 @@ router.post('/use', requireAuth, async (req, res) => {
       return res.status(400).json({ error: '필수 항목 누락 (walletAddress, pointAmount)' });
     }
 
+    // "abc" 같은 값을 그대로 Number() 하면 NaN 이 되고, NaN 은 어떤 크기 비교도 통과해버려
+    // 잔액이 NaN 으로 망가진다. 라우터에서 먼저 걸러낸다.
+    const amount = Number(pointAmount);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return res.status(400).json({ error: '사용할 포인트는 양의 정수여야 합니다.' });
+    }
+
     const verifiedWallet = await membershipService.getVerifiedWallet(_pool, req.user.user_id, walletAddress);
     if (!verifiedWallet) throw createWalletOwnerError();
 
@@ -232,7 +242,7 @@ router.post('/use', requireAuth, async (req, res) => {
     const result = await fabricService.usePointForTicket({
       userDidHash,
       ticketId: ticketId || null,
-      pointAmount: Number(pointAmount),
+      pointAmount: amount,
     });
 
     await membershipService.recordPointEvent(_pool, {
@@ -240,7 +250,7 @@ router.post('/use', requireAuth, async (req, res) => {
       walletAddress: verifiedWallet,
       eventType: 'POINT_USE_TICKET',
       reason: '티켓 예매 포인트 사용',
-      amount: -Math.abs(Number(pointAmount)),
+      amount: -amount,
       metadata: { ticketId: ticketId || null },
     });
 

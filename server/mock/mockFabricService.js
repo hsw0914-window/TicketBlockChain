@@ -239,6 +239,12 @@ async function usePointForTicket({ userDidHash, ticketId, pointAmount }) {
   if (!membership.joined) throw new Error('MEMBERSHIP_REQUIRED');
   const point = _getOrCreatePoint(userDidHash);
 
+  // 숫자가 아닌 값이 들어오면 비교가 전부 false 가 되어 검사를 그냥 통과한다.
+  // (NaN < 1000 도 false, balance < NaN 도 false → balance -= NaN 으로 잔액이 NaN 이 된다)
+  // 그래서 크기 비교보다 "정수인가"를 먼저 확인한다.
+  if (!Number.isInteger(pointAmount) || pointAmount <= 0) {
+    throw new Error('INVALID_POINT_AMOUNT: 사용 포인트는 양의 정수여야 합니다');
+  }
   if (pointAmount < 1000) {
     throw new Error('MIN_POINT_1000: 최소 1,000P 이상 사용 가능');
   }
