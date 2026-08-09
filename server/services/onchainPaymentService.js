@@ -16,7 +16,10 @@
 
 const { ethers } = require('ethers');
 
-const RPC_URL = process.env.MARKET_RPC_URL || process.env.RPC_URL || '';
+// services/nftService.js 가 쓰는 것과 같은 기본 네트워크(Hoodi 테스트넷)를 쓴다.
+// 두 파일이 서로 다른 체인을 보면 결제는 A 체인에서 확인하고 민팅은 B 체인에서 하게 된다.
+const DEFAULT_RPC_URL = 'https://ethereum-hoodi-rpc.publicnode.com';
+const RPC_URL = process.env.MARKET_RPC_URL || process.env.RPC_URL || DEFAULT_RPC_URL;
 const MIN_CONFIRMATIONS = Number(process.env.MARKET_MIN_CONFIRMATIONS ?? 1);
 
 let _provider = null;

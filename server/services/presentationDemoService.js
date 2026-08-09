@@ -238,7 +238,6 @@ async function grantPresentationDemoAssetsIfEligible(pool, userId, fabricService
 
 module.exports = {
   DEMO_GAME_ID,
-  DEFAULT_DEMO_EMAILS,
   TARGET_POINTS,
   TARGET_FRAGMENT_COUNT,
   TARGET_BOXES,

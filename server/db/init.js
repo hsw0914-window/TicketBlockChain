@@ -1281,6 +1281,54 @@ async function ensureRuntimeMigrations(conn) {
 
   await ensureTicketSeatUniqueness(conn);
   await conn.query(PASSWORD_RESET_TABLE_SQL);
+  await ensureQueryIndexes(conn);
+}
+
+// 실제로 자주 도는 쿼리에 맞춘 인덱스.
+// 없으면 데이터가 쌓일수록 전체 스캔이 되는 조회들이다.
+// 각 항목의 주석은 이 인덱스를 쓰는 쿼리 위치를 가리킨다.
+const QUERY_INDEXES = [
+  // routes/myTicket.js — 내 입장권 목록 (WHERE t.wallet_address = ?)
+  { table: 'tickets', name: 'idx_tickets_wallet', columns: '(wallet_address)' },
+  // routes/ticket.js — 좌석 지도 (WHERE game_id = ? AND status NOT IN (...))
+  { table: 'tickets', name: 'idx_tickets_game_status', columns: '(game_id, status)' },
+  // routes/raffleRoutes.js — 응모 가능한 응모권 (WHERE user_id = ? AND status = 'ISSUED')
+  { table: 'raffle_nfts', name: 'idx_raffle_user_status', columns: '(user_id, status)' },
+  // mock/fabric ExecuteDraw — 추첨 대상 (WHERE draw_id = ? AND status = 'ENTERED')
+  { table: 'raffle_nfts', name: 'idx_raffle_draw_status', columns: '(draw_id, status)' },
+  // index.js — 게시글 목록 (WHERE deleted = FALSE ORDER BY created_at DESC)
+  { table: 'posts', name: 'idx_posts_deleted_created', columns: '(deleted, created_at)' },
+  // routes/notificationRoutes.js — 안 읽은 알림 (WHERE user_id = ? AND read_at IS NULL)
+  { table: 'notification_events', name: 'idx_notification_user_read', columns: '(user_id, read_at)' },
+  // routes/pointRoutes.js — 월별 포인트 내역 (WHERE user_id = ? ... ORDER BY created_at DESC)
+  { table: 'point_events', name: 'idx_point_user_created', columns: '(user_id, created_at)' },
+  // routes/ticketResale.js — 판매 중인 매물 (WHERE status = 'active')
+  { table: 'ticket_listings', name: 'idx_listing_status', columns: '(status)' },
+];
+
+async function ensureQueryIndexes(conn) {
+  const added = [];
+  for (const { table, name, columns } of QUERY_INDEXES) {
+    const [[exists]] = await conn.query(
+      `SELECT 1 AS ok
+         FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?
+        LIMIT 1`,
+      [DB_NAME, table, name],
+    );
+    if (exists) continue;
+
+    try {
+      await conn.query(`ALTER TABLE \`${table}\` ADD INDEX \`${name}\` ${columns}`);
+      added.push(`${table}.${name}`);
+    } catch (err) {
+      // 테이블이 아직 없거나(신규 배포 순서 차이) 권한이 없어도 서버는 계속 떠야 한다.
+      console.warn(`[migration] 인덱스 추가 건너뜀 ${table}.${name}: ${err.message}`);
+    }
+  }
+  if (added.length > 0) {
+    console.log(`[migration] 조회 인덱스 추가: ${added.join(', ')}`);
+  }
 }
 
 // 이미 운영 중인 DB에 좌석 중복 방지 장치를 뒤늦게 넣기 위한 마이그레이션.
