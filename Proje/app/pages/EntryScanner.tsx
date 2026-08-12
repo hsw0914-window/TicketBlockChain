@@ -3,6 +3,7 @@ import { CheckCircle, XCircle, ScanLine, RotateCcw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { QRScanner } from "../components/QRScanner";
 import { Button } from "../components/ui/button";
+import { authHeaders } from "../lib/authHeaders";
 
 // ─── 타입 ─────────────────────────────────────────────────
 type ScanState = "idle" | "scanning" | "loading" | "success" | "fail";
@@ -60,7 +61,7 @@ export function EntryScanner() {
         `${import.meta.env.VITE_API_URL}/api/entry/verify`,
         {
           method:  "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders() },
           body:    JSON.stringify({ ticketId, qrToken, gateId }),
         }
       );

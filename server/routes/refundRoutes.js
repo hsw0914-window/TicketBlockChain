@@ -10,6 +10,33 @@ const router = express.Router();
 let _pool;
 function setPool(pool) { _pool = pool; }
 
+// 경기 취소·일괄 환불은 운영자만 할 수 있어야 한다.
+// 주석에는 "관리자용"이라고 적혀 있었지만 실제 검사가 없어서,
+// 로그인한 아무나 경기 하나를 통째로 취소하고 전 좌석을 환불시킬 수 있었다.
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: '관리자만 경기 취소를 처리할 수 있습니다.' });
+  }
+  next();
+}
+
+/**
+ * 요청자가 실제로 그 지갑의 주인인지 확인하고, 확인된 주소를 돌려준다.
+ *
+ * 이전에는 요청 본문의 walletAddress 를 그대로 조회 조건에 썼다.
+ * 그러면 남의 티켓 id 와 지갑 주소만 알면 그 사람의 티켓을 환불시킬 수 있다
+ * (환불 대금은 원결제자에게 가지만, 피해자는 좌석을 잃는다).
+ */
+async function resolveOwnedWallet(userId, requestedWallet) {
+  const [[wallet]] = await _pool.query(
+    `SELECT wallet_address
+       FROM user_wallets
+      WHERE user_id = ? AND LOWER(wallet_address) = LOWER(?)`,
+    [userId, String(requestedWallet || '').trim()],
+  );
+  return wallet?.wallet_address || null;
+}
+
 // ─── 환불율 계산 (서버 측) ────────────────────────────────
 // TRANSFERRED: 항상 0%
 // PRIMARY: 7일 이상=100%, 3일 이상=90%, 1일 이상=80%, 당일/이후=0%
@@ -34,9 +61,15 @@ function calcRefundRate(gameDateStr, purchaseType) {
 router.post('/', requireAuth, async (req, res) => {
   const conn = await _pool.getConnection();
   try {
-    const { ticketId, walletAddress, reason } = req.body;
-    if (!ticketId || !walletAddress) {
+    const { ticketId, walletAddress: requestedWallet, reason } = req.body;
+    if (!ticketId || !requestedWallet) {
       return res.status(400).json({ error: '필수 항목 누락 (ticketId, walletAddress)' });
+    }
+
+    // 요청한 지갑이 로그인한 사용자의 것인지 먼저 확인한다.
+    const walletAddress = await resolveOwnedWallet(req.user.user_id, requestedWallet);
+    if (!walletAddress) {
+      return res.status(403).json({ error: '본인 계정에 연결된 지갑의 티켓만 환불할 수 있습니다.' });
     }
 
     // 티켓 조회 (본인 소유 + game_date 포함)
@@ -159,9 +192,15 @@ router.post('/', requireAuth, async (req, res) => {
 // 환불 전 예상 금액 조회
 router.get('/preview', requireAuth, async (req, res) => {
   try {
-    const { ticketId, walletAddress } = req.query;
-    if (!ticketId || !walletAddress) {
+    const { ticketId, walletAddress: requestedWallet } = req.query;
+    if (!ticketId || !requestedWallet) {
       return res.status(400).json({ error: '필수 파라미터 누락' });
+    }
+
+    // 조회 역시 본인 지갑으로 제한한다 — 남의 티켓 가격·환불액이 새어나가지 않도록.
+    const walletAddress = await resolveOwnedWallet(req.user.user_id, requestedWallet);
+    if (!walletAddress) {
+      return res.status(403).json({ error: '본인 계정에 연결된 지갑의 티켓만 조회할 수 있습니다.' });
     }
 
     const [[ticket]] = await _pool.query(
@@ -197,7 +236,7 @@ router.get('/preview', requireAuth, async (req, res) => {
 
 // POST /api/refunds/cancel-game  (관리자용: 경기 취소 → 전체 100% 환불)
 // Body: { gameId }
-router.post('/cancel-game', requireAuth, async (req, res) => {
+router.post('/cancel-game', requireAuth, requireAdmin, async (req, res) => {
   const conn = await _pool.getConnection();
   try {
     const { gameId } = req.body;

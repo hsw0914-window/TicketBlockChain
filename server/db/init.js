@@ -102,24 +102,71 @@ const SEED_COMMENTS = [
 const TEST_USER = {
   user_id:       'test_user',
   nickname:      '테스트유저',
-  email:         'test@basechain.dev',
-  password:      'test1234',
-  wallet_address: '0x15f7cc396e4C66296cE92225830e24f491941Fc2',
+  email:         process.env.TEST_USER_EMAIL || 'test@basechain.dev',
+  password:      process.env.TEST_USER_PASSWORD || 'test1234',
+  wallet_address: process.env.TEST_USER_WALLET || '0x15f7cc396e4C66296cE92225830e24f491941Fc2',
 };
 
+// 관리자 계정은 소스에 비밀번호를 박아두지 않는다.
+// 이 저장소는 공개되기 때문에, 하드코딩된 비밀번호는 곧 운영 서버 관리자 권한을 공개하는 것과 같다.
+// 비밀번호 환경변수가 없으면 계정을 아예 만들지 않는다 (알려진 비밀번호로 만드느니 없는 편이 낫다).
 const DEMO_ADMIN_USER = {
   user_id:  'admin_user',
   nickname: '시연 관리자',
-  email:    'admin@basechain.dev',
-  password: 'admin1234',
+  email:    process.env.DEMO_ADMIN_EMAIL || 'admin@basechain.dev',
+  password: process.env.DEMO_ADMIN_PASSWORD || null,
 };
 
 const ROOT_ADMIN_USER = {
   user_id:  'root_user',
   nickname: '입장관리자',
-  email:    'root@gmail.com',
-  password: 'root1234',
+  email:    process.env.ROOT_ADMIN_EMAIL || 'root@basechain.dev',
+  password: process.env.ROOT_ADMIN_PASSWORD || null,
 };
+
+/**
+ * 관리자 계정을 시드한다. 비밀번호가 설정돼 있지 않으면 건너뛴다.
+ * @returns {Promise<boolean>} 실제로 시드했는지 여부
+ */
+async function seedAdminUser(conn, admin) {
+  if (!admin.password) {
+    console.warn(
+      `[seed] ${admin.user_id} 관리자 비밀번호 환경변수가 없어 계정 생성을 건너뜁니다. ` +
+      `필요하면 server/.env 에 ${admin.user_id === 'admin_user' ? 'DEMO_ADMIN_PASSWORD' : 'ROOT_ADMIN_PASSWORD'} 를 설정하세요.`
+    );
+    return false;
+  }
+  const passwordHash = await bcrypt.hash(admin.password, 10);
+  await conn.query(
+    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role, is_active)
+     VALUES (?, ?, ?, ?, 'local', 'admin', 1)
+     ON DUPLICATE KEY UPDATE
+       nickname = VALUES(nickname),
+       password_hash = VALUES(password_hash),
+       login_type = 'local',
+       role = 'admin',
+       is_active = 1`,
+    [admin.user_id, admin.nickname, admin.email, passwordHash]
+  );
+  // 비밀번호는 로그에 남기지 않는다.
+  console.log(`✅ 관리자 계정 준비 완료: ${admin.email}`);
+  return true;
+}
+
+// 비밀번호 재설정 토큰. 토큰 원문은 저장하지 않고 SHA-256 해시만 보관한다.
+// DB가 통째로 유출돼도 저장된 값으로는 남의 비밀번호를 바꿀 수 없게 하기 위함이다.
+const PASSWORD_RESET_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id         CHAR(36)     PRIMARY KEY,
+    user_id    VARCHAR(50)  NOT NULL,
+    token_hash CHAR(64)     NOT NULL,
+    expires_at DATETIME     NOT NULL,
+    used_at    DATETIME     DEFAULT NULL,
+    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_password_reset_token (token_hash),
+    KEY idx_password_reset_user (user_id)
+  )
+`;
 
 const PRACTICE_ADMIN_USER_ID = 'practice_admin';
 const ADMIN_USER_IDS = [DEMO_ADMIN_USER.user_id, ROOT_ADMIN_USER.user_id, PRACTICE_ADMIN_USER_ID];
@@ -339,6 +386,8 @@ async function initDB() {
     )
   `);
 
+  await conn.query(PASSWORD_RESET_TABLE_SQL);
+
   await conn.query(`
     CREATE TABLE posts (
       post_id    INT          PRIMARY KEY AUTO_INCREMENT,
@@ -471,8 +520,19 @@ async function initDB() {
       payment_key    VARCHAR(200)  DEFAULT NULL,
       point_discount INT           NOT NULL DEFAULT 0,
       purchase_type  ENUM('PRIMARY','TRANSFERRED') NOT NULL DEFAULT 'PRIMARY',
-      status         ENUM('confirmed','used','listed','sold','refund_processing','refund_rejected','refunded') NOT NULL DEFAULT 'confirmed',
+      status         ENUM('confirmed','used','listed','sold','refund_processing','refund_rejected','refunded','cancelled') NOT NULL DEFAULT 'confirmed',
       booked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      -- 좌석 점유 잠금 키.
+      -- 유효한 티켓일 때만 값이 생기고, 환불·취소되면 NULL이 되어 좌석이 다시 풀린다.
+      -- UNIQUE 인덱스는 NULL을 중복으로 보지 않으므로 "살아있는 티켓만 1좌석 1장"이 DB에서 강제된다.
+      seat_lock      VARCHAR(180) GENERATED ALWAYS AS (
+        CASE
+          WHEN status IN ('refunded','cancelled') THEN NULL
+          WHEN block IS NULL OR row_num IS NULL OR seat_number IS NULL THEN NULL
+          ELSE CONCAT(game_id, '|', block, '|', row_num, '|', seat_number)
+        END
+      ) STORED,
+      UNIQUE KEY uq_ticket_active_seat (seat_lock),
       FOREIGN KEY (game_id) REFERENCES games(id)
     )
   `);
@@ -1181,23 +1241,10 @@ async function initDB() {
     `INSERT INTO user_boxes (user_id, season_count) VALUES (?, 0)`,
     [TEST_USER.user_id]
   );
-  console.log(`✅ 테스트 계정 생성: ${TEST_USER.email} / ${TEST_USER.password}`);
+  console.log(`✅ 테스트 계정 생성: ${TEST_USER.email}`); // 비밀번호는 로그에 남기지 않는다
 
-  const adminPasswordHash = await bcrypt.hash(DEMO_ADMIN_USER.password, 10);
-  await conn.query(
-    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role)
-     VALUES (?, ?, ?, ?, 'local', 'admin')`,
-    [DEMO_ADMIN_USER.user_id, DEMO_ADMIN_USER.nickname, DEMO_ADMIN_USER.email, adminPasswordHash]
-  );
-  console.log(`✅ QR 입장 관리자 계정 생성: ${DEMO_ADMIN_USER.email} / ${DEMO_ADMIN_USER.password}`);
-
-  const rootAdminPasswordHash = await bcrypt.hash(ROOT_ADMIN_USER.password, 10);
-  await conn.query(
-    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role)
-     VALUES (?, ?, ?, ?, 'local', 'admin')`,
-    [ROOT_ADMIN_USER.user_id, ROOT_ADMIN_USER.nickname, ROOT_ADMIN_USER.email, rootAdminPasswordHash]
-  );
-  console.log(`✅ QR 입장 관리자 계정 생성: ${ROOT_ADMIN_USER.email} / ${ROOT_ADMIN_USER.password}`);
+  await seedAdminUser(conn, DEMO_ADMIN_USER);
+  await seedAdminUser(conn, ROOT_ADMIN_USER);
 
   console.log("✅ DB 초기화 및 시드 데이터 삽입 완료");
   } finally {
@@ -1222,31 +1269,8 @@ async function ensureRuntimeMigrations(conn) {
     );
   }
 
-  const adminPasswordHash = await bcrypt.hash(DEMO_ADMIN_USER.password, 10);
-  await conn.query(
-    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role, is_active)
-     VALUES (?, ?, ?, ?, 'local', 'admin', 1)
-     ON DUPLICATE KEY UPDATE
-       nickname = VALUES(nickname),
-       password_hash = VALUES(password_hash),
-       login_type = 'local',
-       role = 'admin',
-       is_active = 1`,
-    [DEMO_ADMIN_USER.user_id, DEMO_ADMIN_USER.nickname, DEMO_ADMIN_USER.email, adminPasswordHash]
-  );
-
-  const rootAdminPasswordHash = await bcrypt.hash(ROOT_ADMIN_USER.password, 10);
-  await conn.query(
-    `INSERT INTO users (user_id, nickname, email, password_hash, login_type, role, is_active)
-     VALUES (?, ?, ?, ?, 'local', 'admin', 1)
-     ON DUPLICATE KEY UPDATE
-       nickname = VALUES(nickname),
-       password_hash = VALUES(password_hash),
-       login_type = 'local',
-       role = 'admin',
-       is_active = 1`,
-    [ROOT_ADMIN_USER.user_id, ROOT_ADMIN_USER.nickname, ROOT_ADMIN_USER.email, rootAdminPasswordHash]
-  );
+  await seedAdminUser(conn, DEMO_ADMIN_USER);
+  await seedAdminUser(conn, ROOT_ADMIN_USER);
 
   await conn.query(
     `UPDATE users
@@ -1254,6 +1278,121 @@ async function ensureRuntimeMigrations(conn) {
       WHERE role = 'admin' AND user_id NOT IN (?)`,
     [ADMIN_USER_IDS]
   );
+
+  await ensureTicketSeatUniqueness(conn);
+  await conn.query(PASSWORD_RESET_TABLE_SQL);
+  await ensureQueryIndexes(conn);
+}
+
+// 실제로 자주 도는 쿼리에 맞춘 인덱스.
+// 없으면 데이터가 쌓일수록 전체 스캔이 되는 조회들이다.
+// 각 항목의 주석은 이 인덱스를 쓰는 쿼리 위치를 가리킨다.
+const QUERY_INDEXES = [
+  // routes/myTicket.js — 내 입장권 목록 (WHERE t.wallet_address = ?)
+  { table: 'tickets', name: 'idx_tickets_wallet', columns: '(wallet_address)' },
+  // routes/ticket.js — 좌석 지도 (WHERE game_id = ? AND status NOT IN (...))
+  { table: 'tickets', name: 'idx_tickets_game_status', columns: '(game_id, status)' },
+  // routes/ticket.js — 결제 멱등 확인 (WHERE payment_key = ? AND wallet_address = ?)
+  { table: 'tickets', name: 'idx_tickets_payment_key', columns: '(payment_key)' },
+  // routes/raffleRoutes.js — 응모 가능한 응모권 (WHERE user_id = ? AND status = 'ISSUED')
+  { table: 'raffle_nfts', name: 'idx_raffle_user_status', columns: '(user_id, status)' },
+  // mock/fabric ExecuteDraw — 추첨 대상 (WHERE draw_id = ? AND status = 'ENTERED')
+  { table: 'raffle_nfts', name: 'idx_raffle_draw_status', columns: '(draw_id, status)' },
+  // index.js — 게시글 목록 (WHERE deleted = FALSE ORDER BY created_at DESC)
+  { table: 'posts', name: 'idx_posts_deleted_created', columns: '(deleted, created_at)' },
+  // routes/notificationRoutes.js — 안 읽은 알림 (WHERE user_id = ? AND read_at IS NULL)
+  { table: 'notification_events', name: 'idx_notification_user_read', columns: '(user_id, read_at)' },
+  // routes/pointRoutes.js — 월별 포인트 내역 (WHERE user_id = ? ... ORDER BY created_at DESC)
+  { table: 'point_events', name: 'idx_point_user_created', columns: '(user_id, created_at)' },
+  // routes/ticketResale.js — 판매 중인 매물 (WHERE status = 'active')
+  { table: 'ticket_listings', name: 'idx_listing_status', columns: '(status)' },
+];
+
+async function ensureQueryIndexes(conn) {
+  const added = [];
+  for (const { table, name, columns } of QUERY_INDEXES) {
+    const [[exists]] = await conn.query(
+      `SELECT 1 AS ok
+         FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?
+        LIMIT 1`,
+      [DB_NAME, table, name],
+    );
+    if (exists) continue;
+
+    try {
+      await conn.query(`ALTER TABLE \`${table}\` ADD INDEX \`${name}\` ${columns}`);
+      added.push(`${table}.${name}`);
+    } catch (err) {
+      // 테이블이 아직 없거나(신규 배포 순서 차이) 권한이 없어도 서버는 계속 떠야 한다.
+      console.warn(`[migration] 인덱스 추가 건너뜀 ${table}.${name}: ${err.message}`);
+    }
+  }
+  if (added.length > 0) {
+    console.log(`[migration] 조회 인덱스 추가: ${added.join(', ')}`);
+  }
+}
+
+// 이미 운영 중인 DB에 좌석 중복 방지 장치를 뒤늦게 넣기 위한 마이그레이션.
+// 신규 생성 DB는 CREATE TABLE tickets 쪽에 같은 정의가 이미 들어 있다.
+async function ensureTicketSeatUniqueness(conn) {
+  const [[statusColumn]] = await conn.query(
+    `SELECT COLUMN_TYPE AS type
+       FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tickets' AND COLUMN_NAME = 'status'`,
+    [DB_NAME]
+  );
+  if (statusColumn && !String(statusColumn.type).includes("'cancelled'")) {
+    await conn.query(
+      `ALTER TABLE tickets
+         MODIFY COLUMN status
+         ENUM('confirmed','used','listed','sold','refund_processing','refund_rejected','refunded','cancelled')
+         NOT NULL DEFAULT 'confirmed'`
+    );
+    console.log('[migration] tickets.status ENUM에 cancelled 추가');
+  }
+
+  const [[seatLockColumn]] = await conn.query(
+    `SELECT COLUMN_NAME
+       FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tickets' AND COLUMN_NAME = 'seat_lock'`,
+    [DB_NAME]
+  );
+  if (seatLockColumn) return;
+
+  // 제약을 걸기 전에 이미 들어가 있는 중복 좌석을 먼저 확인한다.
+  // 중복이 있으면 ALTER가 실패하므로, 서버를 죽이지 않고 무엇을 손봐야 하는지 로그로 남긴다.
+  const [duplicates] = await conn.query(
+    `SELECT game_id, block, row_num, seat_number, COUNT(*) AS cnt
+       FROM tickets
+      WHERE status NOT IN ('refunded','cancelled')
+        AND block IS NOT NULL AND row_num IS NOT NULL AND seat_number IS NOT NULL
+      GROUP BY game_id, block, row_num, seat_number
+     HAVING COUNT(*) > 1`
+  );
+  if (duplicates.length > 0) {
+    console.error(
+      `[migration] ⚠️ 좌석 중복 ${duplicates.length}건이 이미 존재해 UNIQUE 제약을 걸 수 없습니다. ` +
+      '아래 좌석을 정리한 뒤 서버를 다시 시작하세요:'
+    );
+    for (const row of duplicates) {
+      console.error(`  - game=${row.game_id} ${row.block}블록 ${row.row_num}열 ${row.seat_number}번 (${row.cnt}장)`);
+    }
+    return;
+  }
+
+  await conn.query(
+    `ALTER TABLE tickets
+       ADD COLUMN seat_lock VARCHAR(180) GENERATED ALWAYS AS (
+         CASE
+           WHEN status IN ('refunded','cancelled') THEN NULL
+           WHEN block IS NULL OR row_num IS NULL OR seat_number IS NULL THEN NULL
+           ELSE CONCAT(game_id, '|', block, '|', row_num, '|', seat_number)
+         END
+       ) STORED,
+       ADD UNIQUE KEY uq_ticket_active_seat (seat_lock)`
+  );
+  console.log('[migration] tickets 좌석 중복 방지 제약(uq_ticket_active_seat) 추가 완료');
 }
 
 module.exports = { initDB, DB_NAME, DB_CONFIG };

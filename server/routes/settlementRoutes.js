@@ -8,9 +8,18 @@ const router = express.Router();
 let _pool;
 function setPool(pool) { _pool = pool; }
 
+// 정산 생성은 매출·수수료·구단 배분을 확정하는 절차라 운영자만 할 수 있어야 한다.
+// 주석에는 "관리자용"이라고 적혀 있었지만 실제 검사가 없었다.
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: '관리자만 정산을 처리할 수 있습니다.' });
+  }
+  next();
+}
+
 // POST /api/settlements  (관리자용: 경기 정산 생성)
 // Body: { gameId }
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { gameId } = req.body;
     if (!gameId) return res.status(400).json({ error: 'gameId 필요' });
@@ -56,7 +65,8 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/settlements/:gameId  — fabric_events 로그에서 마지막 정산 조회
-router.get('/:gameId', async (req, res) => {
+// 정산 결과에는 총매출·플랫폼 수수료·구단 수익이 들어 있어 공개하지 않는다.
+router.get('/:gameId', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { gameId } = req.params;
 

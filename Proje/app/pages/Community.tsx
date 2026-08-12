@@ -193,6 +193,8 @@ const emptyDraft: EditorDraft = {
 
 const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 const API = `${API_BASE}/api`;
+// 서버가 허용하는 한 번 조회 최대치(GET /api/posts 의 limit 상한)와 맞춘다.
+const POSTS_FETCH_LIMIT = 100;
 
 function emptyState(): CommunityState {
   return {
@@ -282,7 +284,10 @@ export function Community() {
   useEffect(() => {
     Promise.all([
       fetch(`${API}/users`).then((r) => r.json()),
-      fetch(`${API}/posts`).then((r) => r.json()),
+      // 이 화면은 받아온 글 전체를 클라이언트에서 필터·정렬·페이징한다.
+      // 서버 기본값(20건)만 받으면 목록이 잘리므로 한도를 명시한다.
+      // 글이 이보다 많아지면 서버 페이지네이션으로 옮겨야 한다.
+      fetch(`${API}/posts?limit=${POSTS_FETCH_LIMIT}`).then((r) => r.json()),
       fetch(`${API}/comments`).then((r) => r.json()),
     ])
       .then(([usersRaw, postsRaw, commentsRaw]) => {

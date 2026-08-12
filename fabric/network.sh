@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# 실패 시 즉시 중단하고, 정의되지 않은 변수 사용도 오류로 잡는다.
+set -euo pipefail
 # TicketBlockChain Fabric 네트워크 관리 스크립트
 #
 # 전제: VM에서 $GOPATH/src/TicketBlockChain/ 에 프로젝트가 있어야 합니다.

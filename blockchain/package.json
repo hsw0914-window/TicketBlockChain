@@ -2,6 +2,8 @@
   "name": "ticketblockchain-contracts",
   "version": "1.0.0",
   "scripts": {
+    "test": "npx hardhat test",
+    "compile": "npx hardhat compile",
     "deploy:fragment": "npx hardhat run scripts/deployFragment.ts --network hoodi"
   },
   "devDependencies": {

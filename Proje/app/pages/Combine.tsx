@@ -274,7 +274,10 @@ export function Combine() {
 
   // ─── 파편 완성 API 호출 ────────────────────────────────────────
   const handleCombine = async () => {
-    if (!canCombine) return;
+    // 진행 중 여부까지 확인한다 (같은 파일의 handleOpenBox 와 같은 기준).
+    // 버튼에 disabled 가 걸려 있어도 React 상태 반영은 비동기라,
+    // 빠른 연속 클릭이 두 번 들어오면 요청이 두 번 나갈 수 있다.
+    if (!canCombine || combining) return;
     setCombining(true);
     try {
       // 애니메이션(1.6s)과 API 호출을 병렬 실행 → 둘 다 끝나면 결과 표시

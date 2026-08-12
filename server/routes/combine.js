@@ -124,11 +124,10 @@ router.post('/combine', requireAuth, async (req, res) => {
     }
 
     const [[frag]] = await conn.query(
-      `SELECT ft.*, ft.onchain_id, COALESCE(uf.count, 0) AS count
+      `SELECT ft.*, ft.onchain_id
        FROM fragment_types ft
-       LEFT JOIN user_fragments uf ON uf.fragment_type_id = ft.id AND uf.user_id = ?
        WHERE ft.id = ?`,
-      [userId, id1]
+      [id1]
     );
 
     if (!frag) {
@@ -136,7 +135,15 @@ router.post('/combine', requireAuth, async (req, res) => {
       return res.status(400).json({ error: '파편을 찾을 수 없습니다' });
     }
 
-    if (Number(frag.count) < 2) {
+    // 보유 수량은 잠근 상태로 읽는다.
+    // 잠금 없이 읽고 차감하면, 파편 2개로 동시에 두 번 요청을 보내 카드 2장을 만들 수 있다
+    // (count 가 signed INT 라 -2 까지 내려간다).
+    const [[owned]] = await conn.query(
+      'SELECT count FROM user_fragments WHERE user_id = ? AND fragment_type_id = ? FOR UPDATE',
+      [userId, id1]
+    );
+
+    if (!owned || Number(owned.count) < 2) {
       await conn.rollback();
       return res.status(400).json({ error: '파편 수량이 부족합니다 (2개 필요)' });
     }
@@ -154,10 +161,16 @@ router.post('/combine', requireAuth, async (req, res) => {
       return res.status(400).json({ error: '이 파편은 아직 완성 카드 조합이 지원되지 않습니다' });
     }
 
-    await conn.query(
-      'UPDATE user_fragments SET count = count - 2 WHERE user_id = ? AND fragment_type_id = ?',
+    // 조건부 차감으로 한 번 더 막는다. 잠금이 어떤 이유로 통하지 않아도
+    // count 가 2 미만이면 0행이 갱신되어 아래에서 걸린다.
+    const [decremented] = await conn.query(
+      'UPDATE user_fragments SET count = count - 2 WHERE user_id = ? AND fragment_type_id = ? AND count >= 2',
       [userId, id1]
     );
+    if (decremented.affectedRows === 0) {
+      await conn.rollback();
+      return res.status(409).json({ error: '파편 수량이 부족합니다 (2개 필요)' });
+    }
 
     const nftId = createNftId();
 
@@ -283,12 +296,19 @@ router.post('/box/open', requireAuth, async (req, res) => {
       [remaining, userId]
     );
 
+    // 가중치 뽑기는 POW(RAND(), 1/weight) 가 가장 큰 항목을 고른다 (Efraimidis-Spirakis).
+    // 이 식이라야 각 항목이 뽑힐 확률이 weight 에 정확히 비례한다.
+    //
+    // 이전에는 `RAND() * weight DESC` 를 썼는데, 이건 비례하지 않는다.
+    // 가중치 14 대 7(의도한 비율 2:1)을 20만 회 시뮬레이션하면 실제로는 3:1(75%:25%)로 나온다.
+    // 즉 설정한 확률표와 실제 뽑기 확률이 어긋나 희귀 보상이 의도보다 더 안 나왔다.
     const [[reward]] = await conn.query(
       `SELECT brp.*, ma.id AS fragmentMarketAssetId, ft.onchain_id
        FROM box_reward_pool brp
        LEFT JOIN market_assets ma ON ma.fragment_type_id = brp.fragment_type_id
        LEFT JOIN fragment_types ft ON ft.id = brp.fragment_type_id
-       ORDER BY RAND() * brp.weight DESC
+       WHERE brp.weight > 0
+       ORDER BY POW(RAND(), 1 / brp.weight) DESC
        LIMIT 1`
     );
 

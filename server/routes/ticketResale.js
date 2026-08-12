@@ -441,6 +441,14 @@ router.post('/listings', requireAuth, async (req, res) => {
   if (!ticketId || !listedPrice)
     return res.status(400).json({ error: 'ticketId와 listedPrice가 필요합니다' });
 
+  // "abc" 같은 값은 Number() 하면 NaN 이 되는데, NaN 은 크기 비교를 모두 통과한다
+  // (NaN > 상한도 false, NaN < 하한도 false). 그대로 두면 아래 가격 검증이 무력화되고
+  // DB INSERT 단계에서야 오류가 나 400 이어야 할 요청이 500 으로 떨어진다.
+  const price = Number(listedPrice);
+  if (!Number.isInteger(price) || price <= 0) {
+    return res.status(400).json({ error: '거래 가격은 양의 정수여야 합니다' });
+  }
+
   const conn = await _pool.getConnection();
   try {
     await ensureListingSignatureColumns(conn);
@@ -470,11 +478,11 @@ router.post('/listings', requireAuth, async (req, res) => {
     }
 
     const maxPrice = Math.floor(Number(ticket.originalPrice) * MAX_PRICE_RATIO);
-    if (Number(listedPrice) > maxPrice) {
+    if (price > maxPrice) {
       await conn.rollback();
       return res.status(400).json({ error: `원가의 110% (${maxPrice.toLocaleString()}원)를 초과할 수 없습니다` });
     }
-    if (Number(listedPrice) < 1000) {
+    if (price < 1000) {
       await conn.rollback();
       return res.status(400).json({ error: '거래 가격은 1,000원 이상이어야 합니다' });
     }
@@ -523,13 +531,13 @@ router.post('/listings', requireAuth, async (req, res) => {
         nftTokenId ?? null, priceWei ?? null, listTxHash ?? null,
         listingMessage, listingSignature,
         ticket.gameDate, ticket.homeTeam, ticket.awayTeam,
-        ticket.seatSection, ticket.originalPrice, Number(listedPrice),
+        ticket.seatSection, ticket.originalPrice, price,
       ],
     );
 
     await conn.query(`UPDATE tickets SET status = 'listed' WHERE id = ?`, [ticketId]);
     await conn.commit();
-    console.log(`[ticketResale] 매물 등록: ${ticket.homeTeam} vs ${ticket.awayTeam} | ${ticket.seatSection} | ${listedPrice}원 | 판매자: ${userId}`);
+    console.log(`[ticketResale] 매물 등록: ${ticket.homeTeam} vs ${ticket.awayTeam} | ${ticket.seatSection} | ${price}원 | 판매자: ${userId}`);
     res.json({ listingId });
   } catch (err) {
     await conn.rollback();

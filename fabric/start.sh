@@ -2,7 +2,9 @@
 # TicketBlockChain — VM 재부팅 후 Fabric 네트워크 재시작 스크립트
 # 사용법: bash fabric/start.sh
 
-set -e
+# 실패 시 즉시 중단하고, 정의되지 않은 변수 사용도 오류로 잡는다.
+# rm -rf 가 변수 경로를 쓰기 때문에 set -u 가 특히 중요하다.
+set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKER_DIR="$PROJECT_ROOT/fabric/basic-network/docker"

@@ -7,10 +7,27 @@ const mysql = require('mysql2/promise');
 const { DB_CONFIG, DB_NAME } = require('../db/init');
 const fabricService = require('../services/fabricBridge');
 
+// 이 스크립트는 관리자 권한 계정을 만든다.
+// 비밀번호를 소스에 박아두면 공개 저장소에 운영 서버 관리자 자격증명을 함께 공개하는 것과 같다.
+// PRACTICE_ADMIN_PASSWORD 환경변수로만 받고, 없으면 실행을 거부한다.
+const PRACTICE_ADMIN_PASSWORD = process.env.PRACTICE_ADMIN_PASSWORD || '';
+if (!PRACTICE_ADMIN_PASSWORD) {
+  console.error(
+    '[seed:practice-admin] PRACTICE_ADMIN_PASSWORD 가 설정되지 않아 중단합니다.\n' +
+    '  이 스크립트는 관리자 권한 계정을 생성하므로 비밀번호를 직접 지정해야 합니다.\n' +
+    '  예: PRACTICE_ADMIN_PASSWORD="$(node -e \"console.log(require(\'crypto\').randomBytes(16).toString(\'hex\'))\")" npm run seed:practice-admin',
+  );
+  process.exit(1);
+}
+if (PRACTICE_ADMIN_PASSWORD.length < 12) {
+  console.error('[seed:practice-admin] PRACTICE_ADMIN_PASSWORD 는 12자 이상이어야 합니다.');
+  process.exit(1);
+}
+
 const PRACTICE = {
   userId: 'practice_admin',
-  email: 'practice@basechain.dev',
-  password: 'practice1234',
+  email: process.env.PRACTICE_ADMIN_EMAIL || 'practice@basechain.dev',
+  password: PRACTICE_ADMIN_PASSWORD,
   nickname: '시연 관리자',
   walletAddress: '0x9999999999999999999999999999999999999999',
   didValue: 'did:basechain:practice-admin',

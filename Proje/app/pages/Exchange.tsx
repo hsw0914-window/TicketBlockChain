@@ -147,7 +147,10 @@ export function Exchange() {
 
       const [, , pointData, raffleData] = await Promise.all(tasks);
       if (pointData && typeof pointData === "object" && "success" in pointData && pointData.success) {
-        setPoints(Number(pointData.data?.balance ?? pointData.data ?? 0));
+        // 포인트 응답은 { data: { balance } } 형태와 { data: number } 형태가 모두 올 수 있다.
+        const payload = (pointData as { data?: { balance?: number } | number }).data;
+        const balance = typeof payload === "object" && payload !== null ? payload.balance : payload;
+        setPoints(Number(balance ?? 0));
       }
       if (raffleData && typeof raffleData === "object" && "data" in raffleData && Array.isArray(raffleData.data)) {
         setRaffleCount(raffleData.data.filter((r: { status?: string }) => r.status === "ISSUED").length);

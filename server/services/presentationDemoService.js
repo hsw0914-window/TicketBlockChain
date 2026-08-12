@@ -3,7 +3,9 @@
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
-const DEFAULT_DEMO_EMAILS = ['20214197@bu.ac.kr', 'juwwkd89@gmail.com', 'juwwkd89@bu.ac.kr'];
+// 시연용 자산을 자동 지급받을 이메일은 소스에 두지 않고 환경변수로만 받는다.
+// 이 저장소는 공개되므로 팀원의 학교/개인 메일을 코드에 남기지 않는다.
+// 값을 설정하지 않으면 아무도 대상이 되지 않는다.
 const TARGET_POINTS = 100000;
 const TARGET_FRAGMENT_COUNT = 99;
 const TARGET_BOXES = 99;
@@ -16,11 +18,12 @@ function isAutoGrantEnabled() {
 }
 
 function getDemoEmails() {
-  const fromEnv = String(process.env.DEMO_PRESENTATION_EMAILS || '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  return new Set([...DEFAULT_DEMO_EMAILS, ...fromEnv].map((email) => email.toLowerCase()));
+  return new Set(
+    String(process.env.DEMO_PRESENTATION_EMAILS || '')
+      .split(',')
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
 }
 
 function isPresentationDemoEmail(email) {
@@ -235,7 +238,6 @@ async function grantPresentationDemoAssetsIfEligible(pool, userId, fabricService
 
 module.exports = {
   DEMO_GAME_ID,
-  DEFAULT_DEMO_EMAILS,
   TARGET_POINTS,
   TARGET_FRAGMENT_COUNT,
   TARGET_BOXES,

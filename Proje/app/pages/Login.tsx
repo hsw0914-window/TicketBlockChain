@@ -133,9 +133,10 @@ export function Login() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: findPwEmail }),
       });
-      const data = await readLoginJson<{ tempPassword?: string; error?: string }>(res, "비밀번호 찾기 요청에 실패했습니다.");
+      const data = await readLoginJson<{ message?: string; error?: string }>(res, "비밀번호 찾기 요청에 실패했습니다.");
       if (!res.ok) { setFindPwError(getErrorMessage(data, "비밀번호 찾기 요청에 실패했습니다.")); return; }
-      setFindPwResult(data.tempPassword);
+      // 서버는 계정 존재 여부와 무관하게 같은 안내를 준다 (가입 여부가 새어나가지 않도록).
+      setFindPwResult(data.message ?? "비밀번호 재설정 안내를 처리했습니다.");
     } catch (err) {
       setFindPwError(err instanceof Error ? err.message : "서버 오류가 발생했습니다.");
     } finally {
@@ -381,9 +382,11 @@ export function Login() {
                 {findPwResult && (
                   <div className="rounded-[14px] border px-5 py-4 space-y-1"
                     style={{ background: "#edf7f1", borderColor: "#c7dfd0" }}>
-                    <p className="text-[0.82rem] font-semibold" style={{ color: "#28764d" }}>임시 비밀번호</p>
-                    <p className="text-[1.3rem] font-bold tracking-widest font-mono" style={{ color: "#1f4a30" }}>{findPwResult}</p>
-                    <p className="text-[0.78rem] mt-1" style={{ color: "#5a8c6e" }}>이 비밀번호로 로그인 후 변경해주세요.</p>
+                    <p className="text-[0.82rem] font-semibold" style={{ color: "#28764d" }}>재설정 안내</p>
+                    <p className="text-[0.86rem] leading-relaxed" style={{ color: "#1f4a30" }}>{findPwResult}</p>
+                    <p className="text-[0.78rem] mt-1" style={{ color: "#5a8c6e" }}>
+                      링크는 30분 동안만 유효합니다. 메일이 오지 않으면 입력한 주소를 다시 확인해주세요.
+                    </p>
                   </div>
                 )}
 

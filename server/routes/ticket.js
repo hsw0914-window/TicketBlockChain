@@ -1,6 +1,17 @@
 const express = require("express");
 const crypto  = require("crypto");
-const { purchaseTicket } = require("../services/ticketService");
+const {
+  purchaseTicket,
+  purchaseTickets,
+  SeatAlreadyTakenError,
+  RELEASED_TICKET_STATUSES,
+} = require("../services/ticketService");
+const {
+  computeOrderAmount,
+  assertAmountMatches,
+  validateSeatPrices,
+  PriceValidationError,
+} = require("../config/seatPricing");
 const { mintTicketOnChain, isOnChainMintingEnabled } = require("../services/nftService");
 const fabricService = require("../services/fabricBridge");
 const { confirmPayment, cancelPayment } = require("../services/tossPayService");
@@ -37,8 +48,14 @@ function parseJsonArray(value) {
   }
 }
 
+// NFT 민팅을 mock 으로 할지 판단한다.
+// paymentKey 는 클라이언트가 보내는 값이므로, 실결제 모드에서는 그 값으로 우회되지 않게 한다.
+// (tossPayService.shouldUseMockPayment 와 같은 기준을 쓴다)
 function isMockTossPayment(paymentKey) {
-  return String(paymentKey || '').startsWith('tgen_') || (process.env.TOSS_MODE || '').trim().toLowerCase() === 'mock';
+  const mode = (process.env.TOSS_MODE || '').trim().toLowerCase();
+  if (mode === 'real') return false;
+  if (mode === 'mock') return true;
+  return String(paymentKey || '').startsWith('tgen_');
 }
 
 function createMockTicketMintResult(ticketId) {
@@ -267,9 +284,13 @@ router.get("/games/:id", async (req, res) => {
 router.get("/seats/:gameId", async (req, res) => {
   try {
     const { gameId } = req.params;
+    // 예매 시 중복 검사와 같은 기준을 쓴다 — 환불·취소된 좌석만 빈자리로 본다.
+    const releasedPlaceholders = RELEASED_TICKET_STATUSES.map(() => '?').join(',');
     const [rows] = await _pool.query(
-      "SELECT block, row_num, seat_number FROM tickets WHERE game_id = ? AND status IN ('confirmed', 'listed')",
-      [gameId],
+      `SELECT block, row_num, seat_number
+         FROM tickets
+        WHERE game_id = ? AND status NOT IN (${releasedPlaceholders})`,
+      [gameId, ...RELEASED_TICKET_STATUSES],
     );
     const bookedSeats = rows.map((t) => `${t.block}:${t.row_num}-${t.seat_number}`);
     res.json({ success: true, data: bookedSeats });
@@ -287,6 +308,16 @@ router.post("/purchase", requireAuth, requireVerifiedDidForWallet, async (req, r
 
     if (!walletAddress || !gameId || !grade || !block || !row || !seatNumber) {
       return res.status(400).json({ success: false, message: "필수 정보가 누락되었습니다" });
+    }
+
+    // 가격은 이 경로에서도 서버 가격표로 검증한다 (Toss 흐름만 막으면 우회로가 남는다).
+    try {
+      validateSeatPrices(grade, [{ price }]);
+    } catch (priceErr) {
+      if (priceErr instanceof PriceValidationError) {
+        return res.status(400).json({ success: false, message: priceErr.message });
+      }
+      throw priceErr;
     }
 
     const result = await purchaseTicket(_pool, {
@@ -342,6 +373,9 @@ router.post("/purchase", requireAuth, requireVerifiedDidForWallet, async (req, r
       data: { ...result, ticketTokenId, ticketTxHash },
     });
   } catch (err) {
+    if (err instanceof SeatAlreadyTakenError) {
+      return res.status(409).json({ success: false, message: err.message });
+    }
     console.error(err);
     res.status(500).json({ success: false, message: err.message || "티켓 구매 실패" });
   }
@@ -528,16 +562,26 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
   if (pd < 0) {
     return res.status(400).json({ success: false, message: '포인트 할인 금액은 0 이상이어야 합니다' });
   }
+
+  // 결제 금액은 항상 서버 가격표로 다시 계산한다.
+  // 예전에는 pd > 0 일 때만 검사했고 기준값마저 클라이언트가 보낸 price 였다 —
+  // 즉 요청 본문만 고쳐도 좌석을 원하는 가격에 살 수 있었다.
+  let expectedAmount;
+  try {
+    expectedAmount = computeOrderAmount({ gradeName: grade, seats, pointDiscount: pd });
+    assertAmountMatches(amount, expectedAmount);
+  } catch (priceErr) {
+    if (priceErr instanceof PriceValidationError) {
+      console.warn(`[toss] 금액 검증 실패: user=${req.user.user_id} ${priceErr.message}`);
+      return res.status(400).json({ success: false, message: priceErr.message });
+    }
+    throw priceErr;
+  }
+
   if (pd > 0) {
     const memberJoined = await membershipService.isMembershipActive(_pool, req.user.user_id);
     if (!memberJoined) {
       return res.status(400).json({ success: false, message: '멤버십 가입 후 포인트를 사용할 수 있습니다' });
-    }
-    // 좌석 총액과 결제 금액이 맞는지 확인 (서비스 수수료 3% 포함)
-    const totalSeatPrice = seats.reduce((sum, s) => sum + Number(s.price), 0);
-    const serviceFee = Math.round(totalSeatPrice * 0.03);
-    if (Number(amount) !== totalSeatPrice + serviceFee - pd) {
-      return res.status(400).json({ success: false, message: '결제 금액이 올바르지 않습니다' });
     }
     // Fabric에서 실제 보유 포인트 잔액 조회
     const userDidHash = fabricService.hashDid(verifiedWalletAddress);
@@ -554,33 +598,105 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
     }
   }
 
-  // 1-b. 토스페이 결제 승인
-  const tossResult = await confirmPayment({ paymentKey, orderId, amount });
-  if (!tossResult.success) {
-    return res.status(400).json({ success: false, message: `결제 승인 실패: ${tossResult.message}` });
-  }
-
   const [[gameRow]] = await _pool.query(
     `SELECT DATE_FORMAT(game_date, '%Y-%m-%d') AS game_date, home_team, away_team FROM games WHERE id = ?`,
     [gameId]
   );
 
+  // 같은 결제로 이미 발권이 끝났으면 그 결과를 그대로 돌려준다.
+  // 결제 성공 페이지에서 새로고침하면 이 요청이 한 번 더 오는데,
+  // 멱등 처리가 없으면 좌석 확보 단계에서 "이미 예매된 좌석"으로 막혀
+  // 정상 결제한 사용자에게 실패 화면이 보인다.
+  // (market/toss-confirm, ticketResale/toss-confirm 과 같은 방식)
+  const [alreadyIssued] = await _pool.query(
+    `SELECT id, token_id, ticket_tx_hash
+       FROM tickets
+      WHERE payment_key = ? AND wallet_address = ?
+        AND status NOT IN ('refunded','cancelled')`,
+    [paymentKey, verifiedWalletAddress],
+  );
+  if (alreadyIssued.length > 0) {
+    console.log(`[toss] 이미 처리된 결제 재요청: paymentKey=${paymentKey}, 티켓 ${alreadyIssued.length}장`);
+    return res.json({
+      success: true,
+      alreadyProcessed: true,
+      data: {
+        tickets: alreadyIssued.map((ticket) => ({
+          ticketId: ticket.id,
+          tokenId:  ticket.token_id,
+          txHash:   ticket.ticket_tx_hash,
+        })),
+        paymentKey,
+      },
+    });
+  }
+
+  // 1-c. 좌석을 먼저 확보한 뒤에 결제를 승인한다.
+  // 순서를 뒤집은 이유: 결제부터 하면 "돈은 빠져나갔는데 좌석은 남이 가져간" 상태가 만들어진다.
+  // 좌석 확보는 한 트랜잭션이라 일부만 잡히는 경우도 없다.
+  let ticketRows;
+  try {
+    const reserved = await purchaseTickets(_pool, {
+      walletAddress: verifiedWalletAddress,
+      gameId, stadium, grade, block,
+      seats: seats.map((seat) => ({
+        row: seat.row, seatNumber: seat.seatNumber, price: seat.price,
+      })),
+    });
+    ticketRows = reserved.map((ticket, index) => ({
+      ticketId:   ticket.id,
+      row:        ticket.row,
+      seatNumber: ticket.seatNumber,
+      price:      ticket.price,
+      isFirst:    index === 0,
+    }));
+  } catch (seatErr) {
+    if (seatErr instanceof SeatAlreadyTakenError) {
+      return res.status(409).json({ success: false, message: seatErr.message });
+    }
+    console.error('[toss/confirm] 좌석 확보 실패:', seatErr);
+    return res.status(500).json({ success: false, message: '좌석 확보에 실패했습니다' });
+  }
+
+  // 좌석을 잡은 뒤 실패하는 모든 경로에서 좌석을 반드시 되돌려 놓는다.
+  const releaseSeats = async (reason) => {
+    const ids = ticketRows.map((t) => t.ticketId);
+    if (ids.length === 0) return;
+    try {
+      await _pool.query(
+        `UPDATE tickets SET status = 'cancelled' WHERE id IN (${ids.map(() => '?').join(',')})`,
+        ids,
+      );
+      console.log(`[toss] 좌석 반환 완료 (${reason}): ${ids.join(', ')}`);
+    } catch (releaseErr) {
+      // 여기서 조용히 삼키면 "결제는 취소됐는데 좌석은 잠긴 채" 남는다. 반드시 남긴다.
+      console.error(`[toss] ⚠️ 좌석 반환 실패 (${reason}) — 수동 확인 필요: ${ids.join(', ')}`, releaseErr);
+    }
+  };
+
+  // 1-d. 토스페이 결제 승인 (좌석 확보 성공 이후)
+  let tossResult;
+  try {
+    tossResult = await confirmPayment({ paymentKey, orderId, amount: expectedAmount.payable });
+  } catch (payErr) {
+    await releaseSeats('결제 승인 오류');
+    console.error('[toss/confirm] 결제 승인 중 오류:', payErr);
+    return res.status(502).json({ success: false, message: '결제 승인 중 오류가 발생했습니다' });
+  }
+  if (!tossResult.success) {
+    await releaseSeats('결제 승인 실패');
+    return res.status(400).json({ success: false, message: `결제 승인 실패: ${tossResult.message}` });
+  }
+
   const ticketResults = [];
 
   try {
-    // Phase 1: 모든 좌석 DB 저장 (순서대로, 빠름)
-    const ticketRows = [];
-    for (const seat of seats) {
-      const { row, seatNumber, price } = seat;
-      const ticketResult = await purchaseTicket(_pool, {
-        walletAddress: verifiedWalletAddress,
-        gameId, stadium, grade, block, row, seatNumber, price,
-      });
+    // Phase 1: 확보한 좌석에 결제 정보 기록
+    for (const ticket of ticketRows) {
       await _pool.query(
         "UPDATE tickets SET payment_key = ?, point_discount = ? WHERE id = ?",
-        [paymentKey, ticketRows.length === 0 ? pd : 0, ticketResult.id]
+        [paymentKey, ticket.isFirst ? pd : 0, ticket.ticketId]
       );
-      ticketRows.push({ ticketId: ticketResult.id, row, seatNumber, price });
     }
 
     // Phase 2: NFT 발급 처리
@@ -612,12 +728,14 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
       }
     } catch (mintErr) {
       console.error('[toss] NFT 민팅 실패:', mintErr.message);
-      await cancelPayment({ paymentKey, cancelReason: 'NFT 발급 실패로 인한 자동 환불', cancelAmount: amount }).catch(() => {});
-      const placeholders = ticketRows.map(() => '?').join(',');
-      await _pool.query(
-        `UPDATE tickets SET status = 'cancelled' WHERE id IN (${placeholders})`,
-        ticketRows.map(r => r.ticketId)
-      ).catch(() => {});
+      await cancelPayment({
+        paymentKey,
+        cancelReason: 'NFT 발급 실패로 인한 자동 환불',
+        cancelAmount: expectedAmount.payable,
+      }).catch((cancelErr) => {
+        console.error('[toss] ⚠️ 자동 환불 실패 — 수동 환불 필요:', paymentKey, cancelErr?.message);
+      });
+      await releaseSeats('NFT 발급 실패');
       return res.status(500).json({ success: false, message: 'NFT 발급 실패로 자동 환불되었습니다' });
     }
 
@@ -730,8 +848,16 @@ router.post("/toss/confirm", requireAuth, requireVerifiedDidForWallet, async (re
 
   } catch (err) {
     console.error('[toss/confirm]', err);
+    // 티켓 발급이 끝나지 않은 채 떨어졌으면 결제와 좌석을 모두 되돌린다.
     if (ticketResults.length === 0) {
-      await cancelPayment({ paymentKey, cancelReason: '티켓 저장 실패로 인한 자동 환불', cancelAmount: amount }).catch(() => {});
+      await cancelPayment({
+        paymentKey,
+        cancelReason: '티켓 저장 실패로 인한 자동 환불',
+        cancelAmount: expectedAmount.payable,
+      }).catch((cancelErr) => {
+        console.error('[toss] ⚠️ 자동 환불 실패 — 수동 환불 필요:', paymentKey, cancelErr?.message);
+      });
+      await releaseSeats('티켓 저장 실패');
     }
     res.status(500).json({ success: false, message: err.message || '티켓 발급 실패' });
   }

@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "vite build",
-    "build:oracle": "VITE_API_URL=https://juyoung-basechain.duckdns.org VITE_DEMO_ALLOW_MOCK_SIGNATURE=true vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "build:oracle": "VITE_API_URL=https://juyoung-basechain.duckdns.org vite build",
     "preview": "vite preview"
   },
   "dependencies": {

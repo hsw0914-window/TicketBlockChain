@@ -31,6 +31,19 @@ function now() {
   return new Date().toISOString();
 }
 
+/**
+ * 암호학적 난수를 쓰는 Fisher-Yates 셔플.
+ * crypto.randomInt 는 모듈로 편향 없이 [0, max) 정수를 준다.
+ */
+function cryptoShuffle(items) {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 function hashDid(walletAddress) {
   return crypto.createHash('sha256').update(DID_PEPPER + walletAddress.toLowerCase()).digest('hex');
 }
@@ -226,6 +239,12 @@ async function usePointForTicket({ userDidHash, ticketId, pointAmount }) {
   if (!membership.joined) throw new Error('MEMBERSHIP_REQUIRED');
   const point = _getOrCreatePoint(userDidHash);
 
+  // 숫자가 아닌 값이 들어오면 비교가 전부 false 가 되어 검사를 그냥 통과한다.
+  // (NaN < 1000 도 false, balance < NaN 도 false → balance -= NaN 으로 잔액이 NaN 이 된다)
+  // 그래서 크기 비교보다 "정수인가"를 먼저 확인한다.
+  if (!Number.isInteger(pointAmount) || pointAmount <= 0) {
+    throw new Error('INVALID_POINT_AMOUNT: 사용 포인트는 양의 정수여야 합니다');
+  }
   if (pointAmount < 1000) {
     throw new Error('MIN_POINT_1000: 최소 1,000P 이상 사용 가능');
   }
@@ -615,8 +634,12 @@ async function executeDraw({ drawId }) {
   );
 
   const winnerCount = Math.min(draw.winnerCount, entries.length);
-  // 단순 슈도랜덤: 현재 시각 기반 셔플
-  const shuffled = [...entries].sort(() => Math.random() - 0.5);
+  // 추첨은 우선 예매권을 나눠주는 절차라 공정성이 결과의 신뢰를 좌우한다.
+  // 이전 구현인 sort(() => Math.random() - 0.5) 는 두 가지 문제가 있었다.
+  //   1) 비교 함수가 일관되지 않아 각 자리가 균등하게 섞이지 않는다(편향된 셔플).
+  //   2) Math.random 은 예측 가능한 의사난수라 결과를 추측할 여지가 있다.
+  // 그래서 암호학적 난수를 쓰는 Fisher-Yates 로 교체했다.
+  const shuffled = cryptoShuffle(entries);
   const winners  = shuffled.slice(0, winnerCount).map(r => r.raffleNftId);
 
   for (const entry of entries) {

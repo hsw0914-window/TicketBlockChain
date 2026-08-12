@@ -220,6 +220,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' });
     }
 
+    // 비활성화된 계정은 로그인시키지 않는다.
+    // 구글 로그인에는 이 검사가 있었는데 로컬 로그인에는 빠져 있었다.
+    // 그래서 운영자가 계정을 비활성화해도 이메일·비밀번호로는 그대로 들어올 수 있었다.
+    if (!user.is_active) {
+      return res.status(403).json({ error: '비활성화된 계정입니다.' });
+    }
+
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
     await recordLogin(req, user.user_id);
     console.log(`[auth] 로그인: ${email} | ID: ${user.user_id}`);
@@ -327,27 +334,95 @@ router.post('/find-id', async (req, res) => {
   }
 });
 
-// POST /api/auth/find-password — 이메일로 임시 비밀번호 발급
+// POST /api/auth/find-password — 비밀번호 재설정 요청
+//
+// 예전 구현은 이메일 주소만 받으면 그 자리에서 비밀번호를 바꾸고 새 비밀번호를 응답에 실어 보냈다.
+// 남의 이메일만 알면 계정을 통째로 가져갈 수 있는 구조였다.
+// 지금은 (1) 요청만으로는 아무것도 바꾸지 않고, (2) 1회용 토큰을 만들어 두고,
+// (3) 계정 존재 여부가 응답으로 드러나지 않도록 언제나 같은 답을 돌려준다.
+const RESET_TOKEN_TTL_MINUTES = 30;
+const GENERIC_RESET_MESSAGE =
+  '비밀번호 재설정 안내를 처리했습니다. 등록된 계정이라면 재설정 링크를 받게 됩니다.';
+
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+async function issuePasswordResetToken(userId) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+
+  // 이전에 발급했던 미사용 토큰은 무효화한다 (동시에 여러 개가 살아있지 않도록).
+  await _pool.query(
+    `UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL`,
+    [userId],
+  );
+  await _pool.query(
+    `INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
+     VALUES (?, ?, ?, ?)`,
+    [crypto.randomUUID(), userId, hashResetToken(token), expiresAt],
+  );
+  return { token, expiresAt };
+}
+
 router.post('/find-password', async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = String(req.body?.email || '').trim();
     if (!email) return res.status(400).json({ error: '이메일을 입력해주세요.' });
 
     const [[user]] = await _pool.query(
       "SELECT user_id FROM users WHERE email = ? AND login_type = 'local'",
       [email]
     );
-    if (!user) return res.status(404).json({ error: '해당 이메일로 등록된 계정이 없습니다.' });
 
-    // 임시 비밀번호 생성 (영문+숫자 8자리)
-    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    const tempPassword = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    // 계정이 없어도 성공과 똑같은 응답을 준다 — 응답 차이로 가입 여부를 캐낼 수 없게.
+    if (user) {
+      const { token, expiresAt } = await issuePasswordResetToken(user.user_id);
+      // TODO(메일 연동): 지금은 메일 발송 경로가 없어 서버 로그로만 토큰을 남긴다.
+      // 운영에 올릴 때는 이 로그를 지우고 메일/SMS 발송으로 대체해야 한다.
+      console.log(
+        `[auth] 비밀번호 재설정 토큰 발급: user=${user.user_id} 만료=${expiresAt.toISOString()} token=${token}`
+      );
+    }
 
-    const password_hash = await bcrypt.hash(tempPassword, 10);
-    await _pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [password_hash, user.user_id]);
-    res.json({ tempPassword });
+    res.json({ message: GENERIC_RESET_MESSAGE });
   } catch (err) {
     console.error('[find-password]', err);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/auth/reset-password — 발급받은 토큰으로 새 비밀번호 설정
+router.post('/reset-password', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    const newPassword = String(req.body?.newPassword || '');
+
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: '토큰과 새 비밀번호를 모두 입력해주세요.' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: '비밀번호는 8자 이상이어야 합니다.' });
+    }
+
+    const [[row]] = await _pool.query(
+      `SELECT id, user_id
+         FROM password_reset_tokens
+        WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW()`,
+      [hashResetToken(token)],
+    );
+    if (!row) {
+      return res.status(400).json({ error: '유효하지 않거나 만료된 토큰입니다.' });
+    }
+
+    const password_hash = await bcrypt.hash(newPassword, 10);
+    await _pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [password_hash, row.user_id]);
+    await _pool.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?', [row.id]);
+
+    console.log(`[auth] 비밀번호 재설정 완료: user=${row.user_id}`);
+    res.json({ message: '비밀번호가 변경되었습니다. 새 비밀번호로 로그인해주세요.' });
+  } catch (err) {
+    console.error('[reset-password]', err);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });

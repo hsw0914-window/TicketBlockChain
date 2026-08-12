@@ -20,10 +20,16 @@ async function requireAuth(req, res, next) {
   }
 
   const [[user]] = await _pool.query(
-    'SELECT user_id, nickname, email, login_type, role FROM users WHERE user_id = ?',
+    'SELECT user_id, nickname, email, login_type, role, is_active FROM users WHERE user_id = ?',
     [payload.sub]
   );
   if (!user) return res.status(401).json({ error: '사용자를 찾을 수 없습니다.' });
+
+  // 비활성화된 계정은 이미 발급된 토큰으로도 들어올 수 없어야 한다.
+  // 이 검사가 없으면 계정을 비활성화해도 만료 전(7일) 토큰이 계속 통한다.
+  if (!user.is_active) {
+    return res.status(403).json({ error: '비활성화된 계정입니다.' });
+  }
 
   req.user = user;
   next();
@@ -36,10 +42,10 @@ async function optionalAuth(req, res, next) {
   try {
     const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
     const [[user]] = await _pool.query(
-      'SELECT user_id, nickname, email, login_type, role FROM users WHERE user_id = ?',
+      'SELECT user_id, nickname, email, login_type, role, is_active FROM users WHERE user_id = ?',
       [payload.sub]
     );
-    if (user) req.user = user;
+    if (user && user.is_active) req.user = user;
   } catch {
     // 토큰 이상해도 그냥 통과
   }

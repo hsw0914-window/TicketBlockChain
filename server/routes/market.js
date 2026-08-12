@@ -6,6 +6,10 @@ const fabricService = require('../services/fabricBridge');
 const { confirmPayment, cancelPayment } = require('../services/tossPayService');
 const membershipService = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
+const {
+  verifyNativePayment,
+  PaymentVerificationError,
+} = require('../services/onchainPaymentService');
 
 const router = express.Router();
 let _pool;
@@ -371,6 +375,34 @@ router.post('/buy', requireAuth, async (req, res) => {
       [listing.seller_id]
     );
     const sellerWalletAddress = sellerWalletRow?.wallet_address ?? listing.seller_wallet_address ?? `0x${'0'.repeat(40)}`;
+
+    // 같은 트랜잭션 해시를 두 번 쓰는 것을 막는다 (한 번의 결제로 여러 매물 획득 방지).
+    const [[usedTx]] = await conn.query(
+      'SELECT token_id FROM nft_tokens WHERE last_tx_hash = ? LIMIT 1',
+      [txHash],
+    );
+    if (usedTx) {
+      await conn.rollback();
+      return res.status(409).json({ error: '이미 사용된 결제 트랜잭션입니다.' });
+    }
+
+    // 클라이언트가 보낸 txHash 를 그대로 믿으면 결제 없이 조각을 가져갈 수 있다.
+    // 체인에서 직접 조회해 수신자·금액·성공 여부를 확인하고, 확인할 수 없으면 거부한다.
+    try {
+      await verifyNativePayment({
+        txHash,
+        expectedTo: sellerWalletAddress,
+        expectedWei: formatNativeAmount(listing.price).wei,
+      });
+    } catch (payErr) {
+      await conn.rollback();
+      if (payErr instanceof PaymentVerificationError) {
+        console.warn(`[market/buy] 결제 검증 실패: user=${userId} listing=${listingId} — ${payErr.message}`);
+        return res.status(payErr.statusCode).json({ error: payErr.message });
+      }
+      throw payErr;
+    }
+
     const platformFee      = Math.floor(listing.price * PLATFORM_FEE_RATE);
     const settlementAmount = listing.price - platformFee;
 

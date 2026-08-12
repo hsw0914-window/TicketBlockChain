@@ -7,6 +7,16 @@ const membershipService = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
 
 const router = express.Router();
+
+// 추첨 생성·실행은 운영자만 할 수 있어야 한다.
+// 검사가 없으면 응모자가 자기 응모권만 들어간 시점에 직접 추첨을 실행해
+// 확정 당첨을 만들 수 있다.
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: '관리자만 추첨을 진행할 수 있습니다.' });
+  }
+  next();
+}
 let _pool;
 function setPool(pool) { _pool = pool; }
 
@@ -350,7 +360,7 @@ router.get('/draws/:gameId', async (req, res) => {
 // ─── POST /api/raffle/draw/create ─────────────────────────
 // (관리자용) 추첨 생성
 // Body: { gameId, winnerCount }
-router.post('/draw/create', requireAuth, async (req, res) => {
+router.post('/draw/create', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { gameId, winnerCount } = req.body;
     if (!gameId) return res.status(400).json({ error: 'gameId 필요' });
@@ -425,7 +435,7 @@ router.post('/enter', requireAuth, async (req, res) => {
 // ─── POST /api/raffle/draw/execute ────────────────────────
 // (관리자용) 추첨 실행
 // Body: { drawId }
-router.post('/draw/execute', requireAuth, async (req, res) => {
+router.post('/draw/execute', requireAuth, requireAdmin, async (req, res) => {
   const conn = await _pool.getConnection();
   try {
     const { drawId } = req.body;
@@ -500,8 +510,12 @@ router.post('/draw/execute', requireAuth, async (req, res) => {
 // 특정 경기 당첨자 목록 조회
 router.get('/winners/:gameId', async (req, res) => {
   try {
+    // 당첨자 명단은 공개하되, 필요한 항목만 내보낸다.
+    // 예전에는 r.* 를 그대로 돌려줘서 user_id·wallet_address·user_did_hash 까지 노출됐다.
+    // 닉네임과 지갑 주소가 함께 공개되면 신원 연결이 가능하고,
+    // 응모권 id + 지갑 주소 조합은 아래 /use 를 노리는 데 그대로 쓰인다.
     const [rows] = await _pool.query(
-      `SELECT r.*, u.nickname
+      `SELECT u.nickname, r.status, r.updated_at
        FROM raffle_nfts r
        JOIN users u ON r.user_id = u.user_id
        JOIN draws d ON r.draw_id = d.id
@@ -526,11 +540,17 @@ router.post('/use', requireAuth, async (req, res) => {
       return res.status(400).json({ error: '필수 항목 누락' });
     }
 
+    // 소유권은 로그인 사용자 기준으로 확인한다.
+    // 요청 본문의 walletAddress 만 믿으면, 당첨자 명단에서 얻은 지갑 주소와 응모권 id 로
+    // 남의 당첨 응모권을 사용 처리(소각)할 수 있다.
     const [[nft]] = await _pool.query(
-      'SELECT * FROM raffle_nfts WHERE id = ? AND wallet_address = ?',
-      [raffleNftId, walletAddress]
+      'SELECT * FROM raffle_nfts WHERE id = ? AND user_id = ?',
+      [raffleNftId, req.user.user_id]
     );
     if (!nft) return res.status(404).json({ error: '응모권 NFT 없음' });
+    if (String(nft.wallet_address || '').toLowerCase() !== String(walletAddress).toLowerCase()) {
+      return res.status(403).json({ error: '응모권에 연결된 지갑이 아닙니다.' });
+    }
     if (nft.status !== 'WINNER') return res.status(400).json({ error: `당첨 상태가 아님: ${nft.status}` });
 
     const userDidHash = fabricService.hashDid(walletAddress);
@@ -635,8 +655,8 @@ router.post('/apply', requireAuth, async (req, res) => {
         WHERE user_id = ? AND status = 'ISSUED'
           AND (expires_at IS NULL OR expires_at > NOW())
         ORDER BY issued_at ASC
-        LIMIT ${ticketsUsed} FOR UPDATE`,
-      [userId],
+        LIMIT ? FOR UPDATE`,
+      [userId, ticketsUsed],
     );
     if (nfts.length < ticketsUsed) {
       await conn.rollback();
@@ -705,6 +725,11 @@ router.post('/apply', requireAuth, async (req, res) => {
     res.json({ success: true, message: '응모 완료', raffle_close_at: raffleResultAt(appliedAt)?.toISOString() ?? null });
   } catch (err) {
     await conn.rollback();
+    // 같은 사용자가 동시에 두 번 응모하면 uq_game_raffle_user 제약에 걸린다.
+    // 이건 정상적으로 막힌 것이므로 500 이 아니라 안내로 돌려준다.
+    if (err?.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: '이미 응모한 경기입니다.' });
+    }
     console.error('[raffle/apply]', err);
     res.status(500).json({ error: err.message || '응모 처리 중 오류가 발생했습니다.' });
   } finally {
