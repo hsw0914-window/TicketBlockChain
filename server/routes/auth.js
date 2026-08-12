@@ -220,6 +220,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' });
     }
 
+    // 비활성화된 계정은 로그인시키지 않는다.
+    // 구글 로그인에는 이 검사가 있었는데 로컬 로그인에는 빠져 있었다.
+    // 그래서 운영자가 계정을 비활성화해도 이메일·비밀번호로는 그대로 들어올 수 있었다.
+    if (!user.is_active) {
+      return res.status(403).json({ error: '비활성화된 계정입니다.' });
+    }
+
     const token = jwt.sign({ sub: user.user_id }, jwtSecret(), { expiresIn: '7d' });
     await recordLogin(req, user.user_id);
     console.log(`[auth] 로그인: ${email} | ID: ${user.user_id}`);
